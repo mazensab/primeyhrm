@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Root Variables (ShadCN Style) */
+:root {
+  --radius: 12px;
+  --border: hsl(214, 32%, 91%);
+}
+
+/* Body Global */
+body {
+  background: #f8fafc;
+  font-family: 'Tajawal', sans-serif;
+}
+
+/* Fix RTL Support */
+html[dir="rtl"] * {
+  direction: rtl !important;
+  text-align: right !important;
+}

@@ -1,0 +1,155 @@
+/* ================================================================
+   🖨️ عقود الموظفين — Print Stylesheet Ultra Pro
+   يظهر شعار الشركة + QR أعلى كل صفحة (Page-break)
+   مع Page Number: "الصفحة X من Y"
+   ================================================================ */
+
+.no-screen {
+    display: none;
+}
+
+@media print {
+
+    /* ------------------------------------------------------------
+       🖨️ عناصر تظهر فقط عند الطباعة
+    ------------------------------------------------------------ */
+    .no-screen {
+        display: block !important;
+    }
+
+    .contract-header-logo {
+        width: 170px;
+        margin-bottom: 25px;
+        display: block;
+    }
+
+    /* ------------------------------------------------------------
+       🖨️ تكرار الشعار + QR أعلى كل صفحة
+    ------------------------------------------------------------ */
+    .page-section {
+        page-break-after: always;
+        position: relative;
+    }
+
+    /* شعار الشركة */
+    .page-section:before {
+        content: "";
+        background-image: var(--company-logo);
+        background-repeat: no-repeat;
+        background-size: 160px;
+        position: absolute;
+        top: -85px;
+        right: 0;
+        width: 200px;
+        height: 130px;
+    }
+
+    /* QR الصغير أعلى يمين الصفحة */
+    .page-section:after {
+        content: "";
+        background-image: url("https://api.qrserver.com/v1/create-qr-code/?size=90x90&data={{ request.build_absolute_uri }}");
+        background-repeat: no-repeat;
+        background-size: 80px 80px;
+        position: absolute;
+        top: -75px;
+        right: 170px;   /* بجانب الشعار مباشرة */
+        width: 90px;
+        height: 90px;
+        opacity: 0.92;
+    }
+
+    /* ------------------------------------------------------------
+       إعدادات الصفحة
+    ------------------------------------------------------------ */
+    body {
+        background: #fff !important;
+        color: #000 !important;
+        direction: rtl;
+        font-family: "Tajawal", sans-serif !important;
+        font-size: 15px;
+        margin: 0;
+        padding: 0;
+        counter-reset: page;
+    }
+
+    /* إخفاء عناصر الواجهة */
+    nav, header, footer,
+    .btn, .navbar, .sidebar,
+    .topbar, .glass-actions,
+    .content-header, .search-box,
+    .actions, .no-print {
+        display: none !important;
+    }
+
+    /* إزالة تأثير الزجاج في الطباعة */
+    .glass-card {
+        background: #fff !important;
+        border: 1px solid #ddd !important;
+        box-shadow: none !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        padding: 20px !important;
+        page-break-inside: avoid;
+        margin-bottom: 25px !important;
+    }
+
+    /* تنسيق الجداول */
+    table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        margin-bottom: 18px !important;
+    }
+
+    table th,
+    table td {
+        border: 1px solid #888 !important;
+        padding: 8px !important;
+        text-align: center !important;
+        font-size: 14px !important;
+    }
+
+    table th {
+        background: #f2f2f2 !important;
+        font-weight: bold !important;
+    }
+
+    /* تنسيقات النصوص */
+    h2, h3, h4, h5 {
+        color: #000 !important;
+        margin-top: 0 !important;
+        margin-bottom: 12px !important;
+        font-weight: 700 !important;
+    }
+
+    /* حقول النموذج */
+    input, select, textarea {
+        border: none !important;
+        background: none !important;
+        padding: 0 !important;
+        font-size: 14px !important;
+    }
+
+    /* ============================================================
+       📝 Footer رسمي للعقد — يظهر فقط عند الطباعة
+       ============================================================ */
+    .print-footer {
+        position: fixed;
+        bottom: 25px;
+        right: 0;
+        left: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 13px;
+        color: #555;
+        border-top: 1px solid #ccc;
+        padding-top: 8px;
+    }
+
+    /* ------------------------------------------------------------
+       🔢 Page Number — الصفحة X من Y
+    ------------------------------------------------------------ */
+    .page-number:after {
+        counter-increment: page;
+        content: "الصفحة " counter(page) " من " counter(pages);
+    }
+}

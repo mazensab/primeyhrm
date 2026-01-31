@@ -1,0 +1,100 @@
+/* ================================================================
+   🖨️ Print Stylesheet — Primey HR Cloud Ultra Pro
+   ينطبق فقط على وضع الطباعة - دون التأثير على العرض العادي
+   ================================================================ */
+
+@media print {
+
+    /* ------------------------------------------------------------
+       🔤 الخط والتنسيق الأساسي
+       ------------------------------------------------------------ */
+    body {
+        background: #fff !important;
+        color: #000 !important;
+        margin: 0;
+        padding: 0;
+        font-size: 14px;
+        direction: rtl !important;
+        font-family: "Tajawal", sans-serif !important;
+    }
+
+    /* ------------------------------------------------------------
+       ❌ إخفاء العناصر غير المناسبة للطباعة
+       ------------------------------------------------------------ */
+    nav,
+    header,
+    footer,
+    .btn,
+    .navbar,
+    .sidebar,
+    .topbar,
+    .no-print,
+    .actions,
+    .glass-actions {
+        display: none !important;
+    }
+
+    /* ------------------------------------------------------------
+       🧊 إزالة تأثير Glass UI أثناء الطباعة
+       ------------------------------------------------------------ */
+    .glass-card,
+    .glass-row,
+    .glass-item {
+        background: #fff !important;
+        box-shadow: none !important;
+        border: 1px solid #ddd !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+
+    /* ------------------------------------------------------------
+       📄 الجداول — وضع الطباعة النظيفة
+       ------------------------------------------------------------ */
+    table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        margin-bottom: 20px;
+        font-size: 14px;
+    }
+
+    table th,
+    table td {
+        border: 1px solid #888 !important;
+        padding: 8px !important;
+        text-align: center !important;
+    }
+
+    table thead th {
+        background: #f0f0f0 !important;
+        font-weight: bold !important;
+        color: #000 !important;
+    }
+
+    /* ------------------------------------------------------------
+       📝 العناوين
+       ------------------------------------------------------------ */
+    h1, h2, h3, h4, h5 {
+        color: #000 !important;
+        margin-top: 0 !important;
+        margin-bottom: 10px !important;
+    }
+
+    /* ------------------------------------------------------------
+       🔄 صفحات الطباعة — Page Breaks
+       ------------------------------------------------------------ */
+    .page-break {
+        page-break-before: always !important;
+    }
+
+    /* ------------------------------------------------------------
+       🎯 عناصر التقييم (Performance Center)
+       ------------------------------------------------------------ */
+    .score-badge,
+    .badge {
+        border: 1px solid #888 !important;
+        background: #fff !important;
+        color: #000 !important;
+        padding: 4px 8px !important;
+    }
+
+}
