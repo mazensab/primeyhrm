@@ -1,36 +1,39 @@
 # ============================================================
 # 🖨️ BasePrintEngine — Primey HR Cloud V5 Ultra Pro
-# ✔ مبني على xhtml2pdf (متوافق 100% مع Windows)
-# ✔ يدعم الخطوط العربية Tajawal (Regular / Medium / Bold)
-# ✔ يدعم QR Base64
-# ✔ يحمّل CSS موحد للطباعة print_style.css
+# ✔ دعم Browser PDF (بدون كسر التشغيل)
+# ✔ دعم الخطوط العربية Tajawal
+# ✔ QR Base64
 # ============================================================
 
 import os
 import base64
+from io import BytesIO
+
 from django.conf import settings
 from django.template.loader import render_to_string
+import qrcode
+
+# ------------------------------------------------------------
+# 🟡 xhtml2pdf (اختياري — لا يكسر النظام)
+# ------------------------------------------------------------
 try:
     from xhtml2pdf import pisa
 except ImportError:
     pisa = None
 
-from io import BytesIO
-import qrcode
-
 
 class BasePrintEngine:
     """
-    🧠 محرك الطباعة الأساسي لجميع الوحدات (عقود، رواتب، بطاقات، خطابات…)
+    🧠 محرك الطباعة الأساسي
     """
 
-    def __init__(self, template_path, context={}):
+    def __init__(self, template_path, context=None):
         self.template_path = template_path
-        self.context = context
+        self.context = context or {}
         self.context["static_css"] = "/static/css/print_style.css"
 
     # ----------------------------------------------------------
-    # 🔵 1) توليد QR Base64
+    # 🔵 1) QR Base64
     # ----------------------------------------------------------
     @staticmethod
     def generate_qr(text):
@@ -42,15 +45,16 @@ class BasePrintEngine:
 
         buffer = BytesIO()
         img.save(buffer, format="PNG")
-        img_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-        return img_str
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     # ----------------------------------------------------------
-    # 🔵 2) تسجيل الخطوط
+    # 🔵 2) تسجيل الخطوط (PDF فقط)
     # ----------------------------------------------------------
     @staticmethod
     def register_fonts():
+        if not pisa:
+            return
+
         from xhtml2pdf.default import DEFAULT_FONT
         from xhtml2pdf.files import pisaFileObject
 
@@ -63,9 +67,12 @@ class BasePrintEngine:
         }
 
     # ----------------------------------------------------------
-    # 🔵 3) توليد PDF
+    # 🔵 3) PDF (اختياري)
     # ----------------------------------------------------------
     def render_pdf(self):
+        if not pisa:
+            raise RuntimeError("xhtml2pdf غير مثبت — PDF Engine معطل")
+
         BasePrintEngine.register_fonts()
 
         html = render_to_string(self.template_path, self.context)
