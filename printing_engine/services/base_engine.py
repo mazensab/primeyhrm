@@ -10,7 +10,11 @@ import os
 import base64
 from django.conf import settings
 from django.template.loader import render_to_string
-from xhtml2pdf import pisa
+try:
+    from xhtml2pdf import pisa
+except ImportError:
+    pisa = None
+
 from io import BytesIO
 import qrcode
 
