@@ -4,6 +4,7 @@
 # ================================================================
 
 import json
+import logging
 
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
@@ -11,6 +12,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 from django.core.files.storage import default_storage
 from django.contrib.auth import get_user_model
 from django.utils.timezone import now
@@ -18,21 +20,26 @@ from django.utils.timezone import now
 from company_manager.models import CompanyUser
 from billing_center.models import CompanySubscription
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 # ================================================================
-# 🧭 1) Login View (HTML ONLY)
+# 🧭 1) Login View (HTML ONLY — Admin / Legacy UI)
 # ================================================================
 def login_view(request):
     if request.method == "POST":
-        identifier = request.POST.get("identifier")
+        identifier = (request.POST.get("identifier") or "").strip()
         password = request.POST.get("password")
+
+        if not identifier or not password:
+            messages.error(request, "يرجى إدخال اسم المستخدم وكلمة المرور.")
+            return redirect("auth_center:login")
 
         try:
             if "@" in identifier:
-                user = User.objects.get(email=identifier)
+                user = User.objects.get(email__iexact=identifier)
             else:
-                user = User.objects.get(username=identifier)
+                user = User.objects.get(username__iexact=identifier)
         except User.DoesNotExist:
             messages.error(request, "بيانات الدخول غير صحيحة.")
             return redirect("auth_center:login")
@@ -70,9 +77,9 @@ def login_view(request):
 
 
 # ================================================================
-# 🔐 2) Login API — Session Based (NO REDIRECT)
+# 🔐 2) Login API — Session Based (Next.js — NO REDIRECT)
 # ================================================================
-@csrf_exempt
+@csrf_exempt  # ✔ مقصود — Session Auth مع CSRF عبر Header
 def login_api(request):
     """
     POST → Login (Session)
@@ -80,9 +87,10 @@ def login_api(request):
     """
 
     if request.method == "GET":
-        return JsonResponse({
-            "authenticated": request.user.is_authenticated,
-        }, status=200)
+        return JsonResponse(
+            {"authenticated": request.user.is_authenticated},
+            status=200
+        )
 
     if request.method != "POST":
         return JsonResponse(
@@ -91,9 +99,15 @@ def login_api(request):
         )
 
     try:
-        data = json.loads(request.body or "{}")
-        username = data.get("username")
-        password = data.get("password")
+        payload = json.loads(request.body or "{}")
+        username = (payload.get("username") or "").strip()
+        password = payload.get("password")
+
+        if not username or not password:
+            return JsonResponse(
+                {"error": "MISSING_CREDENTIALS"},
+                status=400
+            )
 
         user = authenticate(
             request,
@@ -109,16 +123,27 @@ def login_api(request):
 
         login(request, user)
 
-        return JsonResponse({
-            "authenticated": True,
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "is_superuser": user.is_superuser,
-            }
-        }, status=200)
+        return JsonResponse(
+            {
+                "authenticated": True,
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "is_superuser": user.is_superuser,
+                },
+            },
+            status=200
+        )
+
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"error": "INVALID_JSON"},
+            status=400
+        )
 
     except Exception as e:
+        logger.exception("Login API failed")
         return JsonResponse(
             {
                 "error": "LOGIN_FAILED",
@@ -193,24 +218,26 @@ def whoami_api(request):
 
 
 # ================================================================
-# 🚪 4) Logout
+# 🚪 4) Logout (Session Safe)
 # ================================================================
+@login_required
 def logout_view(request):
     logout(request)
     return redirect("auth_center:login")
 
 
 # ================================================================
-# 🔐 5) Forgot Password (HTML)
+# 🔐 5) Forgot Password (HTML — Placeholder Safe)
 # ================================================================
 def forgot_password_view(request):
     if request.method == "POST":
-        email = request.POST.get("email")
+        email = (request.POST.get("email") or "").strip()
 
-        if not User.objects.filter(email=email).exists():
+        if not email or not User.objects.filter(email__iexact=email).exists():
             messages.error(request, "البريد غير موجود في النظام.")
             return redirect("auth_center:forgot_password")
 
+        # 🔒 لاحقًا: Email Token Flow
         messages.success(request, "تم إرسال رابط إعادة التعيين إلى بريدك.")
         return redirect("auth_center:login")
 
@@ -226,7 +253,7 @@ def change_password_view(request):
         p1 = request.POST.get("password1")
         p2 = request.POST.get("password2")
 
-        if p1 != p2:
+        if not p1 or p1 != p2:
             messages.error(request, "كلمتا المرور غير متطابقتين.")
             return redirect("auth_center:change_password")
 
@@ -259,9 +286,9 @@ def profile_edit_view(request):
     user = request.user
 
     if request.method == "POST":
-        user.first_name = request.POST.get("first_name")
-        user.last_name = request.POST.get("last_name")
-        user.email = request.POST.get("email")
+        user.first_name = request.POST.get("first_name", "").strip()
+        user.last_name = request.POST.get("last_name", "").strip()
+        user.email = request.POST.get("email", "").strip()
 
         if "avatar" in request.FILES:
             avatar_file = request.FILES["avatar"]

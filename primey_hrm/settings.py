@@ -14,9 +14,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ============================================================
 
 SECRET_KEY = "django-insecure-w$^!m!d12n$mg0cy9drt($p#6rxj(8u8*n7y36xi*7=!=9ko1^"
-DEBUG = True
+DEBUG = True  # ⚠️ اجعلها False في Production النهائي مع HTTPS
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "160.153.175.81",          # IP السيرفر
+    ".primeyhr.com",           # عند إضافة الدومين لاحقًا
+]
+
+# ============================================================
+# 🌐 FRONTEND (Next.js)
+# ============================================================
+
+FRONTEND_BASE_URL = "http://160.153.175.81:3000"  # عدّل البورت إذا لزم
+FRONTEND_LOGIN_URL = f"{FRONTEND_BASE_URL}/login"
+FRONTEND_HOME_URL = f"{FRONTEND_BASE_URL}/"
 
 # ============================================================
 # 🌐 ROOT URLS
@@ -25,7 +38,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 ROOT_URLCONF = "primey_hrm.urls"
 
 # ============================================================
-# 🔐 AUTH CONFIG
+# 🔐 AUTH CONFIG (Admin ONLY)
 # ============================================================
 
 LOGIN_URL = "/admin/login/"
@@ -140,10 +153,12 @@ CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://160.153.175.81:3000",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
+    "http://160.153.175.81:3000",
 ]
 
 CSRF_HEADER_NAME = "HTTP_X_CSRFTOKEN"
@@ -168,19 +183,19 @@ CORS_ALLOW_METHODS = [
 ]
 
 # ============================================================
-# 🍪 COOKIES & SESSIONS — LOCALHOST (STABLE)
+# 🍪 COOKIES & SESSIONS — Next.js Compatible
 # ============================================================
 
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
 SESSION_COOKIE_NAME = "sessionid"
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = False
+SESSION_COOKIE_SECURE = False   # 🔒 True مع HTTPS
 SESSION_COOKIE_SAMESITE = "Lax"
 
 CSRF_COOKIE_NAME = "csrftoken"
 CSRF_COOKIE_HTTPONLY = False
-CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False      # 🔒 True مع HTTPS
 CSRF_COOKIE_SAMESITE = "Lax"
 
 CSRF_USE_SESSIONS = False
@@ -218,7 +233,7 @@ DATABASES = {
 }
 
 # ============================================================
-# 🎨 TEMPLATES
+# 🎨 TEMPLATES (Admin ONLY — No Frontend)
 # ============================================================
 
 TEMPLATES = [

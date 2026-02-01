@@ -1,15 +1,19 @@
-# 📂 الملف: analytics_engine/apps.py
-# ⚙️ تهيئة APScheduler بعد اكتمال تحميل Django بالكامل
-# 🚀 يدير الجدولة الذكية لتقارير الأداء والفحص الذاتي للنظام
-# 🔒 لا يعمل إلا عند تفعيل ENABLE_ANALYTICS_SCHEDULER=1
-# ✅ متوافق مع Windows و Linux
-# ✅ آمن مع manage.py check / migrate / shell / gunicorn
+# ============================================================
+# 📊 Analytics Engine — APScheduler Bootstrap (SAFE MODE)
+# Primey HR Cloud
+# ------------------------------------------------------------
+# ✔ لا يعمل أثناء: check / migrate / shell
+# ✔ يعمل فقط عند تشغيل السيرفر فعليًا
+# ✔ مفعل عبر ENV: ENABLE_ANALYTICS_SCHEDULER=1
+# ✔ متوافق Windows / Linux
+# ============================================================
 
 from django.apps import AppConfig
+import os
+import sys
 import threading
 import time
 import logging
-import os
 
 
 class AnalyticsEngineConfig(AppConfig):
@@ -19,97 +23,97 @@ class AnalyticsEngineConfig(AppConfig):
 
     def ready(self):
         """
-        🚀 تشغيل الجدولة الذكية بعد اكتمال تحميل جميع التطبيقات
-        🔒 محمي بمتغير بيئة لتفادي التشغيل غير المقصود
+        🚦 تشغيل APScheduler فقط عند:
+        - تشغيل السيرفر (runserver / gunicorn)
+        - تفعيل المتغير البيئي ENABLE_ANALYTICS_SCHEDULER
         """
 
-        # ============================================================
-        # 🔒 Guard: لا تشغّل Scheduler إلا إذا تم تفعيله صراحة
-        # ============================================================
-        if os.environ.get("ENABLE_ANALYTICS_SCHEDULER") != "1":
+        # --------------------------------------------------
+        # 🛑 1) لا تشغل Scheduler أثناء أوامر Django الإدارية
+        # --------------------------------------------------
+        blocked_commands = {
+            "check",
+            "makemigrations",
+            "migrate",
+            "shell",
+            "createsuperuser",
+            "collectstatic",
+        }
+
+        if any(cmd in sys.argv for cmd in blocked_commands):
             return
 
-        from django.conf import settings
+        # --------------------------------------------------
+        # 🔐 2) تحكم صريح عبر Environment Variable
+        # --------------------------------------------------
+        if os.getenv("ENABLE_ANALYTICS_SCHEDULER") != "1":
+            return
 
+        # --------------------------------------------------
+        # 🧵 3) تشغيل مؤجل داخل Thread آمن
+        # --------------------------------------------------
         def start_scheduler_delayed():
-            """
-            ⏳ تأخير بسيط لتفادي AppRegistryNotReady
-            🧵 يعمل في Thread مستقل وآمن
-            """
-            time.sleep(3)
-
-            logger = logging.getLogger(__name__)
+            time.sleep(3)  # انتظار استقرار Django
 
             try:
+                from django.conf import settings
                 from apscheduler.schedulers.background import BackgroundScheduler
-                from django_apscheduler.jobstores import DjangoJobStore
-                from django_apscheduler.jobstores import register_events
+                from django_apscheduler.jobstores import DjangoJobStore, register_events
                 from analytics_engine import tasks
 
-                # 🕒 إنشاء المجدول
+                logger = logging.getLogger(__name__)
+
                 scheduler = BackgroundScheduler(
                     timezone=settings.TIME_ZONE
                 )
 
-                # 🗄️ Job Store (Django)
-                scheduler.add_jobstore(
-                    DjangoJobStore(),
-                    "default"
-                )
+                # 🗄️ JobStore (Django ORM)
+                scheduler.add_jobstore(DjangoJobStore(), "default")
 
-                # =======================================================
-                # 🧠 المهمة 1️⃣ - التقرير الذكي اليومي
-                # =======================================================
+                # --------------------------------------------------
+                # 📈 تقرير الأداء اليومي
+                # --------------------------------------------------
                 scheduler.add_job(
                     tasks.generate_daily_smart_report,
                     trigger="cron",
                     hour=0,
                     minute=0,
-                    id="daily_smart_report",
+                    id="analytics_daily_report",
                     replace_existing=True,
                 )
 
-                # =======================================================
-                # 🩺 المهمة 2️⃣ - الفحص الذكي للنظام
-                # =======================================================
+                # --------------------------------------------------
+                # 🩺 فحص صحة النظام
+                # --------------------------------------------------
                 scheduler.add_job(
                     tasks.run_health_check,
                     trigger="cron",
                     hour=1,
                     minute=0,
-                    id="daily_health_check",
+                    id="analytics_health_check",
                     replace_existing=True,
                 )
 
-                # =======================================================
-                # 🧹 المهمة 3️⃣ - تنظيف السجلات أسبوعيًا
-                # =======================================================
+                # --------------------------------------------------
+                # 🧹 تنظيف أسبوعي
+                # --------------------------------------------------
                 scheduler.add_job(
                     tasks.cleanup_old_jobs,
                     trigger="interval",
                     days=7,
-                    id="cleanup_old_jobs",
+                    id="analytics_cleanup",
                     replace_existing=True,
                 )
 
-                # 🧾 تسجيل أحداث APScheduler
                 register_events(scheduler)
-
-                # ▶️ بدء التشغيل
                 scheduler.start()
 
-                logger.info(
-                    "✅ APScheduler بدأ بنجاح (Analytics Engine) — ENV Guard Enabled"
-                )
-                print(
-                    "✅ APScheduler يعمل الآن لتقارير الأداء والفحص الذكي (Analytics Engine)."
-                )
+                logger.info("✅ APScheduler (Analytics Engine) started successfully.")
+                print("✅ APScheduler يعمل الآن (Analytics Engine).")
 
             except Exception as e:
-                logger.exception("❌ فشل تشغيل APScheduler (Analytics Engine)")
-                print(f"❌ فشل تشغيل APScheduler (Analytics Engine): {e}")
+                print(f"❌ فشل تشغيل APScheduler (Analytics): {e}")
 
-        # 🧵 تشغيل المجدول في Thread مستقل
         threading.Thread(
             target=start_scheduler_delayed,
             daemon=True
