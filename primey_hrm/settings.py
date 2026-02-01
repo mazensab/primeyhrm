@@ -31,12 +31,12 @@ FRONTEND_BASE_URL = "http://160.153.175.81:3000"  # عدّل البورت إذا
 FRONTEND_LOGIN_URL = f"{FRONTEND_BASE_URL}/login"
 FRONTEND_HOME_URL = f"{FRONTEND_BASE_URL}/"
 
+
 # ============================================================
 # 🌐 ROOT URLS
 # ============================================================
 
 ROOT_URLCONF = "primey_hrm.urls"
-
 # ============================================================
 # 🔐 AUTH CONFIG (Admin ONLY)
 # ============================================================
@@ -222,15 +222,15 @@ CHANNEL_LAYERS = {
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": "primey_hrm",
-        "USER": "root",
-        "PASSWORD": "1234",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "primey_hr",
+        "USER": "primey_user",
+        "PASSWORD": "Mhamcloudhrm@1980ا",
         "HOST": "127.0.0.1",
-        "PORT": "3306",
-        "OPTIONS": {"charset": "utf8mb4"},
+        "PORT": "5432",
     }
 }
+
 
 # ============================================================
 # 🎨 TEMPLATES (Admin ONLY — No Frontend)
