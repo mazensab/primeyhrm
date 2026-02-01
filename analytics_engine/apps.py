@@ -1,12 +1,15 @@
 # 📂 الملف: analytics_engine/apps.py
 # ⚙️ تهيئة APScheduler بعد اكتمال تحميل Django بالكامل
 # 🚀 يدير الجدولة الذكية لتقارير الأداء والفحص الذاتي للنظام
-# ✅ متوافق مع Windows وLinux بدون أي أخطاء AppRegistryNotReady
+# 🔒 لا يعمل إلا عند تفعيل ENABLE_ANALYTICS_SCHEDULER=1
+# ✅ متوافق مع Windows و Linux
+# ✅ آمن مع manage.py check / migrate / shell / gunicorn
 
 from django.apps import AppConfig
 import threading
 import time
 import logging
+import os
 
 
 class AnalyticsEngineConfig(AppConfig):
@@ -15,28 +18,47 @@ class AnalyticsEngineConfig(AppConfig):
     verbose_name = "📊 محرك التحليلات الذكية"
 
     def ready(self):
-        """🚀 تشغيل الجدولة الذكية بعد اكتمال تحميل جميع التطبيقات"""
+        """
+        🚀 تشغيل الجدولة الذكية بعد اكتمال تحميل جميع التطبيقات
+        🔒 محمي بمتغير بيئة لتفادي التشغيل غير المقصود
+        """
+
+        # ============================================================
+        # 🔒 Guard: لا تشغّل Scheduler إلا إذا تم تفعيله صراحة
+        # ============================================================
+        if os.environ.get("ENABLE_ANALYTICS_SCHEDULER") != "1":
+            return
+
         from django.conf import settings
 
         def start_scheduler_delayed():
-            """⏳ تأخير بسيط لتفادي خطأ AppRegistryNotReady"""
-            time.sleep(3)  # الانتظار حتى اكتمال تحميل كل التطبيقات
+            """
+            ⏳ تأخير بسيط لتفادي AppRegistryNotReady
+            🧵 يعمل في Thread مستقل وآمن
+            """
+            time.sleep(3)
+
+            logger = logging.getLogger(__name__)
+
             try:
                 from apscheduler.schedulers.background import BackgroundScheduler
                 from django_apscheduler.jobstores import DjangoJobStore
                 from django_apscheduler.jobstores import register_events
                 from analytics_engine import tasks
 
-                logger = logging.getLogger(__name__)
+                # 🕒 إنشاء المجدول
+                scheduler = BackgroundScheduler(
+                    timezone=settings.TIME_ZONE
+                )
 
-                # 🕒 إنشاء مجدول في الخلفية
-                scheduler = BackgroundScheduler(timezone=settings.TIME_ZONE)
-
-                # 🗄️ إضافة مخزن وظائف Django
-                scheduler.add_jobstore(DjangoJobStore(), "default")
+                # 🗄️ Job Store (Django)
+                scheduler.add_jobstore(
+                    DjangoJobStore(),
+                    "default"
+                )
 
                 # =======================================================
-                # 🧠 المهمة 1️⃣ - توليد التقرير الذكي اليومي
+                # 🧠 المهمة 1️⃣ - التقرير الذكي اليومي
                 # =======================================================
                 scheduler.add_job(
                     tasks.generate_daily_smart_report,
@@ -48,7 +70,7 @@ class AnalyticsEngineConfig(AppConfig):
                 )
 
                 # =======================================================
-                # 🩺 المهمة 2️⃣ - فحص النظام الذكي (HealthCheck)
+                # 🩺 المهمة 2️⃣ - الفحص الذكي للنظام
                 # =======================================================
                 scheduler.add_job(
                     tasks.run_health_check,
@@ -60,7 +82,7 @@ class AnalyticsEngineConfig(AppConfig):
                 )
 
                 # =======================================================
-                # 🧹 المهمة 3️⃣ - تنظيف الوظائف القديمة أسبوعيًا
+                # 🧹 المهمة 3️⃣ - تنظيف السجلات أسبوعيًا
                 # =======================================================
                 scheduler.add_job(
                     tasks.cleanup_old_jobs,
@@ -70,17 +92,25 @@ class AnalyticsEngineConfig(AppConfig):
                     replace_existing=True,
                 )
 
-                # تسجيل الأحداث
+                # 🧾 تسجيل أحداث APScheduler
                 register_events(scheduler)
 
-                # 🟢 بدء المجدول
+                # ▶️ بدء التشغيل
                 scheduler.start()
 
-                logger.info("✅ APScheduler بدأ بنجاح مع مهام التقارير والفحص والتنظيف.")
-                print("✅ APScheduler يعمل الآن لتوليد التقارير والفحص الذكي يوميًا تلقائيًا.")
+                logger.info(
+                    "✅ APScheduler بدأ بنجاح (Analytics Engine) — ENV Guard Enabled"
+                )
+                print(
+                    "✅ APScheduler يعمل الآن لتقارير الأداء والفحص الذكي (Analytics Engine)."
+                )
 
             except Exception as e:
-                print(f"❌ فشل تشغيل APScheduler: {e}")
+                logger.exception("❌ فشل تشغيل APScheduler (Analytics Engine)")
+                print(f"❌ فشل تشغيل APScheduler (Analytics Engine): {e}")
 
-        # 🧵 تشغيل المجدول في خيط مستقل لتجنب مشاكل التحميل المبكر
-        threading.Thread(target=start_scheduler_delayed, daemon=True).start()
+        # 🧵 تشغيل المجدول في Thread مستقل
+        threading.Thread(
+            target=start_scheduler_delayed,
+            daemon=True
+        ).start()
