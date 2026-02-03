@@ -1,12 +1,12 @@
 # ======================================================
 # 🧩 Job Title API — Company Scope
 # Primey HR Cloud
-# Version: JT1.4 FINAL (CSRF SAFE FIX ✅)
+# Version: JT1.5 FINAL (UPSERT PATCH ✅)
 # ======================================================
-# ✔ CSRF exempt for internal POST APIs (Next.js Proxy)
+# ✔ Update = Update OR Create (Upsert)
+# ✔ CSRF exempt for internal POST APIs
 # ✔ Session Auth preserved
-# ✔ Company Resolver untouched
-# ✔ No behavioral regression
+# ✔ No Biotime sync here (by design)
 # ======================================================
 
 import json
@@ -30,11 +30,6 @@ def _parse_body(request):
 
 
 def _resolve_company(request):
-    """
-    Resolve company from:
-    1) Middleware (request.company)
-    2) Active CompanyUser fallback
-    """
     if hasattr(request, "company") and request.company:
         return request.company
 
@@ -67,7 +62,7 @@ def _require_company(request):
 
 
 # ======================================================
-# 📄 List Job Titles (READ)
+# 📄 List Job Titles
 # ======================================================
 
 @require_GET
@@ -77,11 +72,7 @@ def job_titles_list(request):
     if error:
         return error
 
-    qs = (
-        JobTitle.objects
-        .filter(company=company)
-        .order_by("id")
-    )
+    qs = JobTitle.objects.filter(company=company).order_by("id")
 
     data = [
         {
@@ -99,7 +90,7 @@ def job_titles_list(request):
 # ➕ Create Job Title
 # ======================================================
 
-@csrf_exempt   # 🔓 Internal API (Session Protected)
+@csrf_exempt
 @require_POST
 @login_required
 def job_title_create(request):
@@ -108,8 +99,8 @@ def job_title_create(request):
         return error
 
     payload = _parse_body(request)
+    name = (payload.get("name") or "").strip()
 
-    name = payload.get("name")
     if not name:
         return HttpResponseBadRequest("Job title name is required")
 
@@ -122,14 +113,15 @@ def job_title_create(request):
     return JsonResponse({
         "status": "success",
         "id": jt.id,
+        "created": True,
     })
 
 
 # ======================================================
-# ✏️ Update / Toggle Job Title
+# ✏️ Update OR Create Job Title (UPSERT)
 # ======================================================
 
-@csrf_exempt   # 🔓 Internal API (Session Protected)
+@csrf_exempt
 @require_POST
 @login_required
 def job_title_update(request, job_title_id):
@@ -138,24 +130,52 @@ def job_title_update(request, job_title_id):
         return error
 
     payload = _parse_body(request)
+    name = payload.get("name")
+    is_active = payload.get("is_active")
 
-    try:
-        jt = JobTitle.objects.get(
-            id=job_title_id,
-            company=company
+    jt = JobTitle.objects.filter(
+        id=job_title_id,
+        company=company,
+    ).first()
+
+    # --------------------------------------------------
+    # 🆕 Create if not exists
+    # --------------------------------------------------
+    if not jt:
+        if not name:
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "message": "Job title not found and name is required to create",
+                },
+                status=400,
+            )
+
+        jt = JobTitle.objects.create(
+            company=company,
+            name=name,
+            is_active=True if is_active is None else bool(is_active),
         )
-    except JobTitle.DoesNotExist:
-        return JsonResponse(
-            {"status": "error", "message": "Job title not found"},
-            status=404,
-        )
 
-    if "name" in payload:
-        jt.name = payload["name"]
+        return JsonResponse({
+            "status": "success",
+            "id": jt.id,
+            "created": True,
+        })
 
-    if "is_active" in payload:
-        jt.is_active = bool(payload["is_active"])
+    # --------------------------------------------------
+    # ✏️ Update existing
+    # --------------------------------------------------
+    if name is not None:
+        jt.name = name
+
+    if isinstance(is_active, bool):
+        jt.is_active = is_active
 
     jt.save()
 
-    return JsonResponse({"status": "success"})
+    return JsonResponse({
+        "status": "success",
+        "id": jt.id,
+        "created": False,
+    })

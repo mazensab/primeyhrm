@@ -1411,3 +1411,130 @@ def push_employee_to_biotime(
         result["department_patched"] = False
 
     return result
+# ============================================================
+# 🟦 Phase E.x — Explicit Company Master Data Sync (SAFE)
+# ============================================================
+
+def sync_company_branches(company):
+    """
+    🔄 Sync ALL CompanyBranch → Biotime Areas
+    - Create / Update only
+    - Idempotent
+    - NO delete
+    """
+    synced = skipped = 0
+
+    branches = CompanyBranch.objects.filter(
+        company=company,
+        is_active=True,
+    )
+
+    for branch in branches:
+        try:
+            result = create_or_sync_branch(branch)
+            if result:
+                synced += 1
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
+            logger.exception(
+                "❌ Branch Sync Failed | branch_id=%s",
+                branch.id,
+            )
+
+    logger.info(
+        "✅ Company Branches Sync Completed | company=%s | synced=%s | skipped=%s",
+        company.id,
+        synced,
+        skipped,
+    )
+
+    return {
+        "synced": synced,
+        "skipped": skipped,
+        "total": synced + skipped,
+    }
+
+
+def sync_company_departments(company):
+    """
+    🔄 Sync ALL CompanyDepartment → Biotime Departments
+    - Create / Update only
+    - Idempotent
+    - NO area creation here
+    """
+    synced = skipped = 0
+
+    departments = CompanyDepartment.objects.filter(
+        company=company,
+        is_active=True,
+    )
+
+    for dept in departments:
+        try:
+            result = create_or_sync_department(dept)
+            if result:
+                synced += 1
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
+            logger.exception(
+                "❌ Department Sync Failed | dept_id=%s",
+                dept.id,
+            )
+
+    logger.info(
+        "✅ Company Departments Sync Completed | company=%s | synced=%s | skipped=%s",
+        company.id,
+        synced,
+        skipped,
+    )
+
+    return {
+        "synced": synced,
+        "skipped": skipped,
+        "total": synced + skipped,
+    }
+
+
+def sync_company_job_titles(company):
+    """
+    🔄 Sync ALL JobTitle → Biotime Positions
+    - Create / Update only
+    - Idempotent
+    """
+    synced = skipped = 0
+
+    job_titles = JobTitle.objects.filter(
+        company=company,
+        is_active=True,
+    )
+
+    for job in job_titles:
+        try:
+            result = create_or_sync_jobtitle(job)
+            if result:
+                synced += 1
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
+            logger.exception(
+                "❌ JobTitle Sync Failed | job_id=%s",
+                job.id,
+            )
+
+    logger.info(
+        "✅ Company JobTitles Sync Completed | company=%s | synced=%s | skipped=%s",
+        company.id,
+        synced,
+        skipped,
+    )
+
+    return {
+        "synced": synced,
+        "skipped": skipped,
+        "total": synced + skipped,
+    }

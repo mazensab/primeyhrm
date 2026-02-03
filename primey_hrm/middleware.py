@@ -236,3 +236,29 @@ class PermissionContextMiddleware(MiddlewareMixin):
         response.context_data = response.context_data or {}
         response.context_data["permissions"] = merged_permissions
         return response
+# ============================================================
+# 🔓 Disable CSRF for INTERNAL SYSTEM ENDPOINTS ONLY
+# (Patch-Safe — Added without touching existing logic)
+# ============================================================
+
+class DisableCSRFMiddleware:
+    """
+    تعطيل CSRF لمسارات System الداخلية الحساسة فقط
+    (Session-based, Super Admin actions)
+    """
+
+    SAFE_PATH_PREFIXES = (
+        "/api/system/payments/confirm-cash/",
+        "/api/system/impersonation/start/",
+        "/api/system/impersonation/stop/",
+    )
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        for path in self.SAFE_PATH_PREFIXES:
+            if request.path.startswith(path):
+                request._dont_enforce_csrf_checks = True
+                break
+        return self.get_response(request)

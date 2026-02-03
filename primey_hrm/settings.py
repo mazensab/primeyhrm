@@ -1,7 +1,7 @@
 """
 ====================================================================
 📦 Primey HR Cloud — Global Settings
-🛠️ Version: V15.8 Ultra Stable — API + Admin ONLY (FINAL)
+🛠️ Version: V15.9 Ultra Stable — API + Admin ONLY (PRODUCTION FIX)
 ====================================================================
 """
 
@@ -14,31 +14,32 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ============================================================
 
 SECRET_KEY = "django-insecure-w$^!m!d12n$mg0cy9drt($p#6rxj(8u8*n7y36xi*7=!=9ko1^"
-DEBUG = True  # ⚠️ اجعلها False في Production النهائي مع HTTPS
+DEBUG = False  # ✅ MUST be False with HTTPS
 
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "160.153.175.81",          # IP السيرفر
-    ".primeyhr.com",           # عند إضافة الدومين لاحقًا
+    "160.153.175.81",
+    "primeyride.com",
+    ".primeyride.com",
 ]
 
 # ============================================================
 # 🌐 FRONTEND (Next.js)
 # ============================================================
 
-FRONTEND_BASE_URL = "http://160.153.175.81:3000"  # عدّل البورت إذا لزم
+FRONTEND_BASE_URL = "https://primeyride.com"
 FRONTEND_LOGIN_URL = f"{FRONTEND_BASE_URL}/login"
 FRONTEND_HOME_URL = f"{FRONTEND_BASE_URL}/"
-
 
 # ============================================================
 # 🌐 ROOT URLS
 # ============================================================
 
 ROOT_URLCONF = "primey_hrm.urls"
+
 # ============================================================
-# 🔐 AUTH CONFIG (Admin ONLY)
+# 🔐 AUTH CONFIG
 # ============================================================
 
 LOGIN_URL = "/admin/login/"
@@ -60,7 +61,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_extensions",
+
+    "corsheaders",
+    "channels",
+    "django_apscheduler",
 
     # Project Apps
     "control_center",
@@ -79,23 +83,13 @@ INSTALLED_APPS = [
     "printing_engine",
     "system_log",
     "api",
-
-    # External
-    "django_apscheduler",
-    "corsheaders",
-    "channels",
 ]
 
 # ============================================================
-# 🔓 CSRF BYPASS — SYSTEM INTERNAL ONLY (HARD GUARANTEE)
+# 🔓 CSRF BYPASS (SYSTEM ONLY)
 # ============================================================
 
 class DisableCSRFMiddleware:
-    """
-    تعطيل CSRF لمسارات System الداخلية الحساسة فقط
-    (Session-based, Super Admin actions)
-    """
-
     SAFE_PATH_PREFIXES = (
         "/api/system/payments/confirm-cash/",
         "/api/system/impersonation/start/",
@@ -106,35 +100,26 @@ class DisableCSRFMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        for path in self.SAFE_PATH_PREFIXES:
-            if request.path.startswith(path):
-                request._dont_enforce_csrf_checks = True
-                break
+        if request.path.startswith(self.SAFE_PATH_PREFIXES):
+            request._dont_enforce_csrf_checks = True
         return self.get_response(request)
 
 # ============================================================
-# 🌐 MIDDLEWARE (ORDER IS CRITICAL — DO NOT TOUCH)
+# 🌐 MIDDLEWARE (ORDER MATTERS)
 # ============================================================
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
-
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
 
-    # 🔐 Company Impersonation Context
     "api.middleware.company_impersonation.CompanyImpersonationMiddleware",
-
-    # 🔓 Explicit CSRF bypass (internal system only)
     "primey_hrm.settings.DisableCSRFMiddleware",
 
-    # 🛡️ Global CSRF protection
     "django.middleware.csrf.CsrfViewMiddleware",
-
     "django.contrib.auth.middleware.AuthenticationMiddleware",
 
-    # App-level guards
     "control_center.middleware.app_access.AppAccessMiddleware",
     "billing_center.middleware.subscription_enforcement.SubscriptionEnforcementMiddleware",
 
@@ -145,20 +130,18 @@ MIDDLEWARE = [
 ]
 
 # ============================================================
-# 🔧 CORS & CSRF — Next.js + Session Auth (FINAL)
+# 🔧 CORS & CSRF — FIXED FOR HTTPS + NEXT.JS
 # ============================================================
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://160.153.175.81:3000",
+    "https://primeyride.com",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "http://160.153.175.81:3000",
+    "https://primeyride.com",
 ]
 
 CSRF_HEADER_NAME = "HTTP_X_CSRFTOKEN"
@@ -183,20 +166,20 @@ CORS_ALLOW_METHODS = [
 ]
 
 # ============================================================
-# 🍪 COOKIES & SESSIONS — Next.js Compatible
+# 🍪 COOKIES — CRITICAL FIX
 # ============================================================
 
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
 SESSION_COOKIE_NAME = "sessionid"
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = False   # 🔒 True مع HTTPS
-SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_SAMESITE = "None"
 
 CSRF_COOKIE_NAME = "csrftoken"
 CSRF_COOKIE_HTTPONLY = False
-CSRF_COOKIE_SECURE = False      # 🔒 True مع HTTPS
-CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = "None"
 
 CSRF_USE_SESSIONS = False
 
@@ -231,9 +214,8 @@ DATABASES = {
     }
 }
 
-
 # ============================================================
-# 🎨 TEMPLATES (Admin ONLY — No Frontend)
+# 🎨 TEMPLATES
 # ============================================================
 
 TEMPLATES = [
@@ -260,26 +242,6 @@ LANGUAGE_CODE = "ar"
 TIME_ZONE = "Asia/Riyadh"
 USE_I18N = True
 USE_TZ = True
-
-# ============================================================
-# ⏱️ APScheduler — Feature Flags
-# ============================================================
-
-SCHEDULER_AUTOSTART = True
-
-# ============================================================
-# 🔁 Billing
-# ============================================================
-
-BILLING_RENEW_WINDOW_DAYS = 5
-
-# ============================================================
-# 🇸🇦 National Address (Saudi Post / SPL)
-# ============================================================
-
-NATIONAL_ADDRESS_API_KEY = "b9eb3a2f08e74c4ba81b32f6bf4f3d99"
-NATIONAL_ADDRESS_BASE_URL = "https://api.address.gov.sa"
-NATIONAL_ADDRESS_TIMEOUT = 8  # seconds
 
 # ============================================================
 # 📂 Static Files

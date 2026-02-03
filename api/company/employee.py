@@ -242,8 +242,14 @@ def employee_detail(request, employee_id):
             "end_date": emp.end_date,
         },
 
-        "department": emp.department.name if emp.department else None,
-        "job_title": emp.job_title.name if emp.job_title else None,
+          # ============================
+          # 🎯 Adapter Fields (Frontend)
+          # ============================
+          "department_id": emp.department.id if emp.department else None,
+          "job_title_id": emp.job_title.id if emp.job_title else None,
+          "branch_ids": [b.id for b in emp.branches.all()],
+          "default_work_schedule_id": emp.default_work_schedule_id,
+
 
         # ✅ NEW — Branches
         "branches": [
@@ -254,7 +260,6 @@ def employee_detail(request, employee_id):
             }
             for b in emp.branches.all()
         ],
-
         "user": {
             "id": emp.user.id,
             "username": emp.user.username,
@@ -1003,3 +1008,92 @@ def employee_assign_work_schedule(request, employee_id):
             "is_active": schedule.is_active,
         },
     })
+# ======================================================
+# 🔗 Adapter — Update Job Info (Frontend Compatible)
+# ======================================================
+
+@csrf_exempt
+@require_POST
+@login_required
+@transaction.atomic
+def employee_update_job_info(request, employee_id):
+    """
+    🧩 Adapter Endpoint
+    -------------------
+    يستخدمه Frontend لحفظ البيانات الوظيفية دفعة واحدة:
+    - القسم
+    - المسمى الوظيفي
+    - الفروع
+    - جدول الدوام
+
+    Internally:
+    - يستدعي employee_update
+    - ثم employee_assign_work_schedule (عند الحاجة)
+    """
+
+    company = _resolve_company(request)
+    if not company:
+        return JsonResponse(
+            {"status": "error", "message": "Company context missing"},
+            status=403,
+        )
+
+    payload = _parse_body(request)
+
+    # --------------------------------------------------
+    # 1️⃣ Update Core Job Fields
+    # --------------------------------------------------
+    try:
+        response = employee_update(request, employee_id)
+
+        if response.status_code != 200:
+            return response
+
+    except Exception as exc:
+        logger.exception(
+            "Adapter failed at employee_update | employee=%s",
+            employee_id,
+        )
+        return JsonResponse(
+            {
+                "status": "error",
+                "message": "Failed updating job core data",
+            },
+            status=500,
+        )
+
+    # --------------------------------------------------
+    # 2️⃣ Assign Work Schedule (Optional)
+    # --------------------------------------------------
+    schedule_id = payload.get("work_schedule_id")
+
+    if schedule_id:
+        try:
+            schedule_payload = json.dumps(
+                {"schedule_id": schedule_id}
+            ).encode("utf-8")
+
+            # 🔁 Fake request object (SAFE)
+            request._body = schedule_payload
+
+            schedule_response = employee_assign_work_schedule(
+                request, employee_id
+            )
+
+            if schedule_response.status_code not in (200, 201):
+                return schedule_response
+
+        except Exception:
+            logger.exception(
+                "Adapter failed at assign_work_schedule | employee=%s",
+                employee_id,
+            )
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "message": "Failed assigning work schedule",
+                },
+                status=500,
+            )
+
+    return JsonResponse({"status": "success"})

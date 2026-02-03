@@ -2,7 +2,12 @@
 # 📂 api/company/branches.py
 # 🏢 Company Branch API
 # Primey HR Cloud
-# Version: V1.2 — MODEL ALIGNED + UI SAFE + BIOTIME READY 🔒
+# Version: V1.3 — BIOTIME UPDATE PATCH (SAFE) ✅
+# ================================================================
+# ✔ Create / Update Branch
+# ✔ Auto Sync with Biotime on Update
+# ✔ No behavior regression
+# ✔ Session Auth preserved
 # ================================================================
 
 import json
@@ -16,6 +21,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 
 from company_manager.models import CompanyBranch, CompanyUser
+from biotime_center.sync_service import create_or_sync_branch  # ✅ PATCH
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +111,6 @@ def branches_list(request):
 def branch_create(request):
     """
     إنشاء فرع جديد داخل الشركة.
-    متوافق مع Dialog (name فقط مطلوب).
     """
 
     company_user = resolve_company_user(request)
@@ -114,28 +119,17 @@ def branch_create(request):
 
     try:
         payload = json.loads(request.body.decode() or "{}")
-
         name = (payload.get("name") or "").strip()
 
-        # -----------------------------
-        # ✅ Validation
-        # -----------------------------
         if not name:
             return api_error("اسم الفرع مطلوب.", status=400)
 
-        # منع تكرار الاسم داخل نفس الشركة
         if CompanyBranch.objects.filter(
             company=company_user.company,
             name=name,
         ).exists():
-            return api_error(
-                "اسم الفرع مستخدم مسبقًا.",
-                status=409,
-            )
+            return api_error("اسم الفرع مستخدم مسبقًا.", status=409)
 
-        # -----------------------------
-        # 💾 Create
-        # -----------------------------
         with transaction.atomic():
             branch = CompanyBranch.objects.create(
                 company=company_user.company,
@@ -161,14 +155,14 @@ def branch_create(request):
 
 
 # ================================================================
-# ✏️ API — Update Branch
+# ✏️ API — Update Branch (WITH BIOTIME SYNC)
 # ================================================================
 @csrf_exempt
 @login_required
 @require_POST
 def branch_update(request, branch_id: int):
     """
-    تحديث بيانات الفرع.
+    تحديث بيانات الفرع + مزامنة تلقائية مع Biotime.
     """
 
     company_user = resolve_company_user(request)
@@ -187,9 +181,6 @@ def branch_update(request, branch_id: int):
         name = (payload.get("name") or "").strip()
         is_active = payload.get("is_active")
 
-        # -----------------------------
-        # ✅ Validation
-        # -----------------------------
         if name and name != branch.name:
             exists = CompanyBranch.objects.filter(
                 company=company_user.company,
@@ -197,10 +188,7 @@ def branch_update(request, branch_id: int):
             ).exclude(id=branch.id).exists()
 
             if exists:
-                return api_error(
-                    "اسم الفرع مستخدم مسبقًا.",
-                    status=409,
-                )
+                return api_error("اسم الفرع مستخدم مسبقًا.", status=409)
 
             branch.name = name
 
@@ -209,12 +197,17 @@ def branch_update(request, branch_id: int):
 
         branch.save()
 
+        # ====================================================
+        # 🔁 BIOTIME SYNC PATCH (CREATE OR UPDATE)
+        # ====================================================
+        create_or_sync_branch(branch)
+
         return api_success(
             id=branch.id,
             name=branch.name,
             is_active=branch.is_active,
             biotime_code=branch.biotime_code,
-            message="✔ تم تحديث الفرع بنجاح.",
+            message="✔ تم تحديث الفرع ومزامنته مع Biotime.",
         )
 
     except Exception:
@@ -224,3 +217,4 @@ def branch_update(request, branch_id: int):
             "❌ حدث خطأ أثناء تحديث الفرع.",
             status=500,
         )
+

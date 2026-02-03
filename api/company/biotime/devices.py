@@ -17,9 +17,7 @@ from biotime_center.biotime_api_client import BiotimeAPIClient
 from company_manager.models import CompanyUser
 
 # 🌍 Geo Resolver Service (Pure Additive)
-from api.company.biotime.biotime import build_location_text_from_ip
 
-logger = logging.getLogger(__name__)
 
 
 # ================================================================
