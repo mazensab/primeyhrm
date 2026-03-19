@@ -41,10 +41,12 @@ JOB_LOCK_TTL = 60 * 30   # 30 minutes safety lock
 # ================================================================
 def run_biotime_attendance_pipeline():
     """
-    🔄 Main pipeline:
-        1) Sync Biotime Logs
-        2) Link Logs → Attendance
-        3) Store unified result
+    🔄 Main pipeline (Multi-Tenant Safe):
+
+        1) Loop active companies
+        2) Sync Biotime Logs per company
+        3) Link Logs → Attendance per company
+        4) Persist per-company summary
     """
 
     # ------------------------------------------------------------
@@ -60,36 +62,75 @@ def run_biotime_attendance_pipeline():
     try:
         logger.info("🚀 Biotime Attendance Pipeline started")
 
-        # ---------------------------
-        # 1️⃣ Sync Logs
-        # ---------------------------
-        logs_result = sync_logs()
+        from company_manager.models import Company
 
-        if logs_result.get("status") != "success":
-            raise RuntimeError(
-                f"Logs sync failed: {logs_result.get('message')}"
+        companies = Company.objects.filter(
+            is_active=True,
+            biotime_settings__isnull=False
+        ).distinct()
+
+        if not companies.exists():
+            logger.info("ℹ️ No active companies found.")
+            return
+
+        # --------------------------------------------------------
+        # 🔁 Process Each Company
+        # --------------------------------------------------------
+        for company in companies:
+
+            logger.info(
+                "🏢 Processing company ID=%s | %s",
+                company.id,
+                company.name if hasattr(company, "name") else ""
             )
 
-        # ---------------------------
-        # 2️⃣ Link to Attendance
-        # ---------------------------
-        attendance_result = sync_biotime_logs_to_attendance()
+            # ---------------------------
+            # 1️⃣ Sync Logs
+            # ---------------------------
+            logs_result = sync_logs(company=company)
 
-        # ---------------------------
-        # 3️⃣ Persist Sync Summary
-        # ---------------------------
-        BiotimeSyncLog.objects.create(
-            timestamp=timezone.now(),
-            devices_synced=0,
-            employees_synced=0,
-            logs_synced=attendance_result.get("synced", 0),
-            status="SUCCESS",
-            message=(
-                f"Logs synced & linked successfully | "
-                f"synced={attendance_result.get('synced')} | "
-                f"skipped={attendance_result.get('skipped')}"
-            ),
-        )
+            if logs_result.get("status") != "success":
+                logger.warning(
+                    "⚠️ Logs sync failed for company %s: %s",
+                    company.id,
+                    logs_result.get("message"),
+                )
+
+                BiotimeSyncLog.objects.create(
+                    company=company,
+                    timestamp=timezone.now(),
+                    devices_synced=0,
+                    employees_synced=0,
+                    logs_synced=0,
+                    status="FAILED",
+                    message=logs_result.get("message"),
+                )
+                continue
+
+            # ---------------------------
+            # 2️⃣ Link to Attendance
+            # ---------------------------
+            attendance_result = sync_biotime_logs_to_attendance(
+                company=company
+            )
+
+            # ---------------------------
+            # 3️⃣ Persist Company Summary
+            # ---------------------------
+            BiotimeSyncLog.objects.create(
+                company=company,
+                timestamp=timezone.now(),
+                devices_synced=0,
+                employees_synced=0,
+                logs_synced=attendance_result.get("synced", 0),
+                status="SUCCESS",
+                message=(
+                    f"Logs synced & linked successfully | "
+                    f"new={logs_result.get('new')} | "
+                    f"updated={logs_result.get('updated')} | "
+                    f"attendance_synced={attendance_result.get('synced')}"
+                ),
+            )
 
         elapsed_ms = int(
             (timezone.now() - start_time).total_seconds() * 1000
@@ -103,15 +144,6 @@ def run_biotime_attendance_pipeline():
     except Exception as exc:
         logger.exception("❌ Biotime Attendance Pipeline failed")
 
-        BiotimeSyncLog.objects.create(
-            timestamp=timezone.now(),
-            devices_synced=0,
-            employees_synced=0,
-            logs_synced=0,
-            status="FAILED",
-            message=str(exc),
-        )
-
     finally:
         cache.delete(JOB_LOCK_KEY)
 
@@ -124,26 +156,36 @@ def start_biotime_attendance_scheduler():
     Starts APScheduler safely (idempotent).
     """
 
+    global scheduler
+
+    # إذا كان scheduler يعمل بالفعل
     if scheduler.running:
-        logger.info("⚠️ Biotime Scheduler already running.")
-        return
+        # تأكد أن الجوب غير موجود
+        existing_job = scheduler.get_job("biotime_attendance_job")
+        if existing_job:
+            logger.info("⚠️ Biotime Attendance job already registered.")
+            return
 
-    logger.info("🔥 Starting Biotime Attendance Scheduler…")
-
-    scheduler.add_jobstore(DjangoJobStore(), "default")
-
-    scheduler.add_job(
-        run_biotime_attendance_pipeline,
-        trigger="interval",
-        minutes=30,                 # 🔁 قابل للتعديل لاحقًا
-        id="biotime_attendance_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    logger.info("🔥 Initializing Biotime Attendance Scheduler…")
 
     try:
-        scheduler.start()
+        if not scheduler.running:
+            scheduler.add_jobstore(DjangoJobStore(), "default")
+
+        scheduler.add_job(
+            run_biotime_attendance_pipeline,
+            trigger="interval",
+            minutes=10,
+            id="biotime_attendance_job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+        if not scheduler.running:
+            scheduler.start()
+
         logger.info("🚀 Biotime Attendance Scheduler started successfully.")
+
     except Exception:
         logger.exception("❌ Failed to start Biotime Attendance Scheduler")

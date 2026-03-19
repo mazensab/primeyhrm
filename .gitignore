@@ -45,3 +45,14 @@ logs/
 db.sqlite3
 media/
 staticfiles/
+
+shadcn_source/
+
+credentials/
+
+whatsapp_center/session_gateway/sessions/
+
+cabby.sql
+cabby_backup.sql
+drive_test.txt
+test_drive.py

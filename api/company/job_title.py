@@ -1,12 +1,7 @@
 # ======================================================
 # 🧩 Job Title API — Company Scope
 # Primey HR Cloud
-# Version: JT1.5 FINAL (UPSERT PATCH ✅)
-# ======================================================
-# ✔ Update = Update OR Create (Upsert)
-# ✔ CSRF exempt for internal POST APIs
-# ✔ Session Auth preserved
-# ✔ No Biotime sync here (by design)
+# Version: JT1.7 FINAL (SAFE BIO TIME)
 # ======================================================
 
 import json
@@ -33,22 +28,14 @@ def _resolve_company(request):
     if hasattr(request, "company") and request.company:
         return request.company
 
-    company_user = (
+    cu = (
         CompanyUser.objects
         .select_related("company")
-        .filter(
-            user=request.user,
-            is_active=True,
-            company__isnull=False,
-        )
+        .filter(user=request.user, is_active=True)
         .order_by("-id")
         .first()
     )
-
-    if company_user:
-        return company_user.company
-
-    return None
+    return cu.company if cu else None
 
 
 def _require_company(request):
@@ -72,15 +59,13 @@ def job_titles_list(request):
     if error:
         return error
 
-    qs = JobTitle.objects.filter(company=company).order_by("id")
-
     data = [
         {
             "id": jt.id,
             "name": jt.name,
             "is_active": jt.is_active,
         }
-        for jt in qs
+        for jt in JobTitle.objects.filter(company=company).order_by("id")
     ]
 
     return JsonResponse({"job_titles": data})
@@ -110,6 +95,18 @@ def job_title_create(request):
         is_active=True,
     )
 
+    # 🔗 Try BioTime create (SAFE / OPTIONAL)
+    try:
+        from biotime_center.sync_service import create_biotime_position
+
+        result = create_biotime_position(company=company, job_title=jt)
+        if result and result.get("position_id"):
+            jt.biotime_position_id = result["position_id"]
+            jt.save(update_fields=["biotime_position_id"])
+
+    except Exception as e:
+        print(f"[JobTitle Create] BioTime skipped jt={jt.id}: {e}")
+
     return JsonResponse({
         "status": "success",
         "id": jt.id,
@@ -118,7 +115,7 @@ def job_title_create(request):
 
 
 # ======================================================
-# ✏️ Update OR Create Job Title (UPSERT)
+# ✏️ Update OR Create Job Title (UPSERT + BioTime SAFE)
 # ======================================================
 
 @csrf_exempt
@@ -139,7 +136,7 @@ def job_title_update(request, job_title_id):
     ).first()
 
     # --------------------------------------------------
-    # 🆕 Create if not exists
+    # 🆕 Create if not exists (Local DB only)
     # --------------------------------------------------
     if not jt:
         if not name:
@@ -164,7 +161,7 @@ def job_title_update(request, job_title_id):
         })
 
     # --------------------------------------------------
-    # ✏️ Update existing
+    # ✏️ Update local fields
     # --------------------------------------------------
     if name is not None:
         jt.name = name
@@ -172,10 +169,49 @@ def job_title_update(request, job_title_id):
     if isinstance(is_active, bool):
         jt.is_active = is_active
 
-    jt.save()
+    jt.save(update_fields=["name", "is_active"])
 
-    return JsonResponse({
-        "status": "success",
-        "id": jt.id,
-        "created": False,
-    })
+        # --------------------------------------------------
+    # 🧠 BioTime SYNC (UPDATE ONLY - SAFE)
+    # --------------------------------------------------
+    try:
+        from biotime_center.sync_service import BiotimeAPIClient
+        from biotime_center.models import BiotimeSetting
+
+        # جلب إعداد BioTime الصحيح
+        biotime_setting = (
+            BiotimeSetting.objects
+            .filter(company=company)
+            .first()
+        )
+
+        if not biotime_setting:
+            raise Exception("BioTime setting not configured for company")
+
+        # لا يوجد ربط → لا تحديث
+        if not jt.biotime_position_id:
+            return JsonResponse({
+                "status": "success",
+                "id": jt.id,
+                "created": False,
+            })
+
+        client = BiotimeAPIClient(setting=biotime_setting)
+
+        # ⚠️ BioTime requires FULL payload + PUT
+        payload = {
+            "id": jt.biotime_position_id,
+            "position_name": jt.name,
+            "parent": None,
+        }
+
+        client._put(
+            f"/personnel/positions/{jt.biotime_position_id}/",
+            payload,
+        )
+
+    except Exception as e:
+        # ❗ لا نكسر التحديث المحلي
+        print(
+            f"[JobTitle BioTime Update] skipped jt={jt.id}: {e}"
+        )

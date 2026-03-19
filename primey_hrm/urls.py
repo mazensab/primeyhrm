@@ -68,7 +68,7 @@ urlpatterns = [
     # 🆕 API LAYER — MUST BE FIRST
     # ========================================================
     path("api/", include("api.urls")),
-
+    
     # ========================================================
     # 🔐 Admin & Auth
     # ========================================================
@@ -83,8 +83,6 @@ urlpatterns = [
     path("companies/", include(("company_manager.urls", "company_manager"), namespace="company_manager")),
     path("billing-center/", include(("billing_center.urls", "billing_center"), namespace="billing_center")),
     path("notifications/", include(("notification_center.urls", "notification_center"), namespace="notification_center")),
-    path("analytics/", include(("analytics_engine.urls", "analytics_engine"), namespace="analytics_engine")),
-    path("assistant/", include(("smart_assistant.urls", "smart_assistant"), namespace="smart_assistant")),
     path("settings/", include(("settings_center.urls", "settings_center"), namespace="settings_center")),
 
     # ========================================================
@@ -138,5 +136,17 @@ if settings.DEBUG:
 # ============================================================
 # ⚙️ Error Handlers
 # ============================================================
-handler404 = "primey_hrm.urls.custom_404_view"
 handler500 = "primey_hrm.urls.custom_500_view"
+
+from django.conf import settings
+from django.conf.urls.static import static
+
+if not settings.DEBUG:
+    handler404 = "primey_hrm.urls.custom_404_view"
+    handler500 = "primey_hrm.urls.custom_500_view"
+
+if settings.DEBUG:
+    urlpatterns += static(
+        settings.STATIC_URL,
+        document_root=settings.STATIC_ROOT
+    )

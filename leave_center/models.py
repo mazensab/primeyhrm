@@ -8,7 +8,7 @@
 # ✔ تصميم نظيف وقابل للتوسع بسهولة
 # ================================================================
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
@@ -58,7 +58,107 @@ class LeaveType(models.Model):
     def __str__(self):
         return self.name
 
+# ================================================================
+# 🟪 Leave Policy — B+ Engine Core (Multi-Tenant Safe)
+# Phase P1
+# ================================================================
+class LeavePolicy(models.Model):
+    """
+    Company Scoped Leave Policy
+    Source of Truth for Leave Rules
+    B+ Expandable Architecture
+    """
 
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name="leave_policies"
+    )
+
+    leave_type = models.ForeignKey(
+        LeaveType,
+        on_delete=models.CASCADE,
+        related_name="policies"
+    )
+
+    # ============================================================
+    # 🟢 Core Policy Settings
+    # ============================================================
+    default_days = models.PositiveIntegerField(
+        default=0,
+        help_text="عدد الأيام الأساسية سنويًا"
+    )
+
+    # خدمة ≥ X سنوات → يحصل على أيام مختلفة
+    min_service_years = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="الحد الأدنى لسنوات الخدمة لتطبيق days_after_service"
+    )
+
+    days_after_service = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="عدد الأيام بعد تجاوز سنوات الخدمة"
+    )
+
+    # ============================================================
+    # 🔁 Carry Forward
+    # ============================================================
+    carry_forward_enabled = models.BooleanField(default=False)
+
+    carry_forward_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="الحد الأعلى للترحيل"
+    )
+
+    # ============================================================
+    # 🔄 Reset Settings
+    # ============================================================
+    reset_month = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="شهر إعادة تعيين الرصيد"
+    )
+
+    # ============================================================
+    # ⚖ Behaviour Flags
+    # ============================================================
+    paid_leave = models.BooleanField(default=True)
+
+    requires_manager_approval = models.BooleanField(default=True)
+    requires_hr_approval = models.BooleanField(default=False)
+
+    max_consecutive_days = models.PositiveIntegerField(
+        null=True,
+        blank=True
+    )
+
+    gender_restriction = models.CharField(
+        max_length=10,
+        choices=[
+            ("male", "ذكر"),
+            ("female", "أنثى"),
+        ],
+        null=True,
+        blank=True
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # ============================================================
+    # 🛡 Multi-Tenant Isolation Guard
+    # ============================================================
+    class Meta:
+        unique_together = ("company", "leave_type")
+        verbose_name = "Leave Policy"
+        verbose_name_plural = "Leave Policies"
+
+    def __str__(self):
+        return f"{self.company.name} — {self.leave_type.name}"
 # ================================================================
 # 🟦 Company Annual Leave Policy — Phase F.5.2
 # Company Level Source of Truth
@@ -133,7 +233,7 @@ class ResetHistory(models.Model):
 
 
 # ================================================================
-# 🟦 3) Leave Balance — V4 Ultra Pro
+# 🟦 3) Leave Balance — V4 Ultra Pro (Unified Reset Engine)
 # ================================================================
 class LeaveBalance(models.Model):
 
@@ -154,7 +254,7 @@ class LeaveBalance(models.Model):
     last_reset = models.DateField(null=True, blank=True)
 
     auto_reset_enabled = models.BooleanField(default=True)
-    auto_reset_month = models.IntegerField(default=1)  # يناير
+    auto_reset_month = models.IntegerField(default=1)  # Fallback فقط
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -162,7 +262,7 @@ class LeaveBalance(models.Model):
         return f"Leave Balance — {self.employee.full_name}"
 
     # ------------------------------------------------------------
-    # 🔥 هل يجب إعادة الضبط؟
+    # 🔥 هل يجب إعادة الضبط؟ (Policy Driven — Unified)
     # ------------------------------------------------------------
     def should_reset(self):
         today = timezone.now().date()
@@ -170,7 +270,22 @@ class LeaveBalance(models.Model):
         if not self.auto_reset_enabled:
             return False
 
-        if today.month != self.auto_reset_month:
+        from leave_center.models import LeaveType
+        from leave_center.services.policy_resolver import PolicyResolver
+
+        annual_leave_type = LeaveType.objects.filter(
+            company=self.company,
+            category="annual"
+        ).first()
+
+        if not annual_leave_type:
+            return False
+
+        resolved = PolicyResolver.resolve(self.employee, annual_leave_type)
+
+        reset_month = resolved.get("reset_month") or self.auto_reset_month
+
+        if today.month != reset_month:
             return False
 
         if not self.last_reset or self.last_reset.year < today.year:
@@ -180,74 +295,79 @@ class LeaveBalance(models.Model):
 
     # ------------------------------------------------------------
     # 🔥 تنفيذ إعادة التعيين + سجل
+    # 🔵 Phase F.5.3 — Reset Engine Binding (PolicyResolver)
     # ------------------------------------------------------------
     def perform_reset(self, performed_by=None):
-        from django.db.utils import ProgrammingError
 
         today = timezone.now().date()
 
-        # --------------------------------------------------------
-        # 🧠 Phase F.5.3 — CompanyAnnualLeavePolicy Source of Truth
-        # (Safe Query — بدون كسر إذا الجدول غير موجود)
-        # --------------------------------------------------------
-        policy = None
-        try:
-            policy = CompanyAnnualLeavePolicy.objects.filter(
-                company=self.company,
-                is_active=True
-            ).first()
-        except ProgrammingError:
-            # الجدول غير موجود (قبل migration) → fallback آمن
-            policy = None
+        from leave_center.models import LeaveType
+        from leave_center.services.policy_resolver import PolicyResolver
 
-        # --------------------------------------------------------
-        # 🛡️ Fallback افتراضي (يحاكي السلوك السابق 100%)
-        # --------------------------------------------------------
-        annual_days = 21
-        carry_enabled = True
-        carry_limit = 15
-        reset_month = self.auto_reset_month
+        # ------------------------------------------------------------
+        # 1️⃣ جلب نوع الإجازة السنوية
+        # ------------------------------------------------------------
+        annual_leave_type = LeaveType.objects.filter(
+            company=self.company,
+            category="annual"
+        ).first()
 
-        if policy:
-            annual_days = policy.annual_days
-            carry_enabled = policy.carry_forward_enabled
-            carry_limit = policy.carry_forward_limit
-            reset_month = policy.reset_month
+        if not annual_leave_type:
+            return
 
-        # --------------------------------------------------------
-        # ⏱️ تأكيد شهر إعادة التعيين
-        # --------------------------------------------------------
+        # ------------------------------------------------------------
+        # 2️⃣ حل السياسة عبر PolicyResolver (Single Source of Truth)
+        # ------------------------------------------------------------
+        resolved = PolicyResolver.resolve(self.employee, annual_leave_type)
+
+        # ------------------------------------------------------------
+        # 3️⃣ تحديد شهر إعادة التعيين
+        # ------------------------------------------------------------
+        reset_month = resolved.get("reset_month") or self.auto_reset_month
+
         if today.month != reset_month:
             return
 
-        # --------------------------------------------------------
-        # 🔁 حساب الرصيد الجديد
-        # --------------------------------------------------------
+        # ------------------------------------------------------------
+        # 4️⃣ تحديد الأيام الأساسية
+        # ------------------------------------------------------------
+        annual_days = resolved.get("allowed_days", 21)
+
+        # ------------------------------------------------------------
+        # 5️⃣ Carry Forward
+        # ------------------------------------------------------------
+        carry = 0
+
+        if resolved.get("carry_forward_enabled"):
+            limit = resolved.get("carry_forward_limit") or 0
+            carry = min(self.annual_balance, limit)
+
+        new_balance = annual_days + carry
+
+        # ------------------------------------------------------------
+        # 6️⃣ Idempotency Guard (منع إعادة التنفيذ)
+        # ------------------------------------------------------------
+        if self.last_reset and self.last_reset.year == today.year:
+            return
+
+        # ------------------------------------------------------------
+        # 7️⃣ Audit Log
+        # ------------------------------------------------------------
         old = self.annual_balance
 
-        if carry_enabled:
-            carry = min(self.annual_balance, carry_limit)
-        else:
-            carry = 0
-
-        new = annual_days + carry
-
-        # --------------------------------------------------------
-        # 🟧 Reset History (Audit)
-        # --------------------------------------------------------
         ResetHistory.objects.create(
             company=self.company,
             employee=self.employee,
             old_balance=old,
-            new_balance=new,
+            new_balance=new_balance,
             year=today.year,
             performed_by=performed_by
         )
 
-        # --------------------------------------------------------
-        # 🔄 Reset Balances (كما هو — بدون تغيير)
-        # --------------------------------------------------------
-        self.annual_balance = new
+        # ------------------------------------------------------------
+        # 8️⃣ تطبيق الرصيد الجديد
+        # ------------------------------------------------------------
+        self.annual_balance = new_balance
         self.sick_balance = 30
         self.maternity_balance = 10
         self.marriage_balance = 5
@@ -256,11 +376,27 @@ class LeaveBalance(models.Model):
         self.study_balance = 15
 
         self.last_reset = today
-        self.save()
 
+        self.save(update_fields=[
+            "annual_balance",
+            "sick_balance",
+            "maternity_balance",
+            "marriage_balance",
+            "death_balance",
+            "hajj_balance",
+            "study_balance",
+            "last_reset",
+        ])
 # ================================================================
 # 🟩 4) Leave Request — طلب الإجازة
 # ================================================================
+
+from django.db import models, transaction
+from django.core.exceptions import ValidationError
+from django.contrib.auth.models import User
+from django.utils import timezone
+
+
 class LeaveRequest(models.Model):
 
     STATUS = [
@@ -271,9 +407,9 @@ class LeaveRequest(models.Model):
         ("cancelled", "ملغي"),
     ]
 
-    company = models.ForeignKey(Company, on_delete=models.CASCADE)
-    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
-    leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
+    company = models.ForeignKey("company_manager.Company", on_delete=models.CASCADE)
+    employee = models.ForeignKey("employee_center.Employee", on_delete=models.CASCADE)
+    leave_type = models.ForeignKey("LeaveType", on_delete=models.CASCADE)
 
     start_date = models.DateField()
     end_date = models.DateField()
@@ -288,6 +424,15 @@ class LeaveRequest(models.Model):
     manager_approved_at = models.DateTimeField(null=True, blank=True)
     hr_approved_at = models.DateTimeField(null=True, blank=True)
 
+    # ============================================================
+    # 🟣 Phase P6 — Sick Snapshot (Immutable After Approval)
+    # ============================================================
+
+    sick_tier = models.CharField(max_length=30, null=True, blank=True)
+    pay_percentage = models.PositiveSmallIntegerField(null=True, blank=True)
+    sick_days_counted = models.PositiveIntegerField(null=True, blank=True)
+    sick_calculated_at = models.DateTimeField(null=True, blank=True)
+
     rejected_at = models.DateTimeField(null=True, blank=True)
     rejected_by = models.ForeignKey(
         User,
@@ -300,13 +445,112 @@ class LeaveRequest(models.Model):
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.TextField(blank=True, null=True)
 
+    # ============================================================
+    # 🔒 Enterprise Validation Layer
+    # ============================================================
+
+    def clean(self):
+
+        # 1️⃣ Date Integrity
+        if self.start_date and self.end_date:
+            if self.end_date < self.start_date:
+                raise ValidationError("تاريخ نهاية الإجازة لا يمكن أن يكون قبل تاريخ البداية.")
+
+        # 2️⃣ Hire Date Guard
+        if self.employee and self.start_date:
+            work_start = getattr(self.employee, "work_start_date", None)
+            if work_start and self.start_date < work_start:
+                raise ValidationError(
+                    f"لا يمكن طلب إجازة قبل تاريخ المباشرة ({work_start})."
+                )
+
+        # 3️⃣ Overlap Guard (Soft Layer — قبل الحفظ)
+        if self.employee_id and self.company_id and self.start_date and self.end_date:
+            overlapping = LeaveRequest.objects.filter(
+                employee_id=self.employee_id,
+                company_id=self.company_id,
+                start_date__lte=self.end_date,
+                end_date__gte=self.start_date,
+                status__in=["pending_manager", "pending_hr", "approved"],
+            ).exclude(id=self.id)
+
+            if overlapping.exists():
+                conflict = overlapping.first()
+                raise ValidationError(
+                    f"يوجد تداخل مع طلب إجازة آخر "
+                    f"({conflict.start_date} → {conflict.end_date})."
+                )
+
+    # ============================================================
+    # 🔒 SAVE — Enterprise Hard Guard
+    # ============================================================
+
+    def save(self, *args, **kwargs):
+
+        with transaction.atomic():
+
+            # ----------------------------------------------------
+            # 🔒 Snapshot Immutability Guard (DB Truth Based)
+            # ----------------------------------------------------
+            if self.pk:
+
+                db_instance = LeaveRequest.objects.select_for_update().get(pk=self.pk)
+
+                if db_instance.status == "approved":
+
+                    protected_fields = [
+                        "sick_tier",
+                        "pay_percentage",
+                        "sick_days_counted",
+                        "sick_calculated_at",
+                    ]
+
+                    for field in protected_fields:
+                        old_value = getattr(db_instance, field)
+                        new_value = getattr(self, field)
+
+                        if old_value != new_value:
+                            raise ValidationError(
+                                "لا يمكن تعديل بيانات الشريحة المرضية بعد الموافقة."
+                            )
+
+            # ----------------------------------------------------
+            # 🛡 Hard Overlap Guard (DB Lock Level)
+            # ----------------------------------------------------
+            if self.employee_id and self.company_id and self.start_date and self.end_date:
+
+                overlapping = LeaveRequest.objects.select_for_update().filter(
+                    employee_id=self.employee_id,
+                    company_id=self.company_id,
+                    start_date__lte=self.end_date,
+                    end_date__gte=self.start_date,
+                    status__in=["pending_manager", "pending_hr", "approved"],
+                ).exclude(id=self.id)
+
+                if overlapping.exists():
+                    conflict = overlapping.first()
+                    raise ValidationError(
+                        f"يوجد تداخل مع طلب إجازة آخر "
+                        f"({conflict.start_date} → {conflict.end_date})."
+                    )
+
+            # ----------------------------------------------------
+            # 🔍 Full Validation
+            # ----------------------------------------------------
+            self.full_clean()
+
+            super().save(*args, **kwargs)
+
+    # ============================================================
+    # Helpers
+    # ============================================================
+
     def __str__(self):
         return f"Leave Request #{self.id} — {self.employee.full_name}"
 
     @property
     def total_days(self):
         return (self.end_date - self.start_date).days + 1
-
 
 
 # ================================================================

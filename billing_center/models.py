@@ -1,5 +1,5 @@
 # =====================================================================
-# 📦 Billing Center — Models V10.0 Ultra Stable (USERNAME PATCHED 🔒)
+# 📦 Billing Center — Models V10.1 Ultra Stable (PUBLIC FLOW PATCHED 🔒)
 # Primey HR Cloud — Subscription + Invoicing + Unified Payments
 # =====================================================================
 
@@ -79,10 +79,10 @@ class CompanySubscription(models.Model):
         ("PENDING", "قيد التفعيل"),
     ]
 
-    company = models.OneToOneField(
+    company = models.ForeignKey(
         Company,
         on_delete=models.CASCADE,
-        related_name="subscription",
+        related_name="subscriptions"
     )
 
     plan = models.ForeignKey(
@@ -107,6 +107,19 @@ class CompanySubscription(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # ------------------------------------------------
+    # Database Safety Constraint
+    # يمنع وجود أكثر من اشتراك ACTIVE لنفس الشركة
+    # ------------------------------------------------
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(status="ACTIVE"),
+                name="unique_active_subscription_per_company",
+            )
+        ]
 
     def is_active(self):
         return self.status == "ACTIVE"
@@ -138,12 +151,16 @@ class Invoice(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        related_name="invoices",
     )
 
     invoice_number = models.CharField(max_length=50, unique=True)
     issue_date = models.DateField(default=timezone.now)
     due_date = models.DateField(blank=True, null=True)
 
+    # -----------------------------------------------------------------
+    # Legacy / Existing billing fields
+    # -----------------------------------------------------------------
     subtotal_amount = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
     )
@@ -166,6 +183,23 @@ class Invoice(models.Model):
         max_digits=10, decimal_places=2, null=True, blank=True
     )
 
+    # -----------------------------------------------------------------
+    # New fields required by onboarding/payment flow
+    # confirm_payment.py currently writes subtotal + vat مباشرة
+    # -----------------------------------------------------------------
+    subtotal = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    vat = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
 
     subscription_snapshot = models.JSONField(null=True, blank=True)
@@ -174,6 +208,23 @@ class Invoice(models.Model):
         max_length=20,
         choices=STATUS_CHOICES,
         default="PENDING",
+    )
+
+    # ------------------------------------------------
+    # Billing Reason (سبب الفاتورة)
+    # ------------------------------------------------
+    BILLING_REASONS = [
+        ("NEW_SUBSCRIPTION", "اشتراك جديد"),
+        ("RENEWAL", "تجديد الاشتراك"),
+        ("UPGRADE", "ترقية الباقة"),
+        ("DOWNGRADE", "تخفيض الباقة"),
+        ("ADDON", "إضافة خدمة"),
+    ]
+
+    billing_reason = models.CharField(
+        max_length=30,
+        choices=BILLING_REASONS,
+        default="NEW_SUBSCRIPTION",
     )
 
     is_approved = models.BooleanField(default=False)
@@ -202,6 +253,7 @@ class Payment(models.Model):
         ("CREDIT_CARD", "بطاقة"),
         ("APPLE_PAY", "Apple Pay"),
         ("STC_PAY", "STC Pay"),
+        ("TAMARA", "Tamara"),
         ("CASH", "كاش"),
     ]
 
@@ -209,6 +261,7 @@ class Payment(models.Model):
         Invoice,
         on_delete=models.CASCADE,
         related_name="payments",
+        db_index=True,
     )
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -245,6 +298,7 @@ class PaymentTransaction(models.Model):
         ("bank", "حوالة"),
         ("stc", "STC Pay"),
         ("apple", "Apple Pay"),
+        ("tamara", "Tamara"),
         ("cash", "كاش"),
     ]
 
@@ -311,14 +365,22 @@ class CompanyOnboardingTransaction(models.Model):
 
     STATUS_CHOICES = [
         ("DRAFT", "Draft"),
+        ("CONFIRMED", "Confirmed"),
         ("PENDING_PAYMENT", "بانتظار الدفع"),
         ("PAID", "مدفوعة"),
         ("CANCELLED", "ملغاة"),
     ]
 
+    # -----------------------------------------------------------------
+    # مهم جدًا:
+    # owner أصبح اختياريًا لدعم Public Registration Flow
+    # لأن التسجيل الخارجي قد يتم بدون مستخدم Logged-In
+    # -----------------------------------------------------------------
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="onboarding_transactions",
     )
 
@@ -367,6 +429,22 @@ class CompanyOnboardingTransaction(models.Model):
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     vat_amount = models.DecimalField(max_digits=10, decimal_places=2)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    PAYMENT_METHOD_CHOICES = [
+        ("BANK_TRANSFER", "حوالة"),
+        ("CREDIT_CARD", "بطاقة"),
+        ("APPLE_PAY", "Apple Pay"),
+        ("STC_PAY", "STC Pay"),
+        ("TAMARA", "Tamara"),
+    ]
+
+    payment_method = models.CharField(
+        max_length=30,
+        choices=PAYMENT_METHOD_CHOICES,
+        blank=True,
+        null=True,
+        db_index=True,
+    )
 
     status = models.CharField(
         max_length=20,

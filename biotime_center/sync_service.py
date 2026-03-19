@@ -27,6 +27,7 @@ from .models import (
     BiotimeLog,
 )
 from .biotime_api_client import BiotimeAPIClient
+from company_manager.models import CompanyBranch, CompanyDepartment, JobTitle
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +36,42 @@ logger = logging.getLogger(__name__)
 # 🟦 1) قراءة إعدادات Biotime
 # ============================================================
 
-def get_settings():
-    return BiotimeSetting.objects.first()
+def get_settings(company=None):
+    """
+    🔒 MT-6 Strict Mode
+    Requires explicit company context.
+    No global fallback allowed.
+    """
 
+    if not company:
+        raise ValueError("Company context مطلوب في MT-6 Strict Mode.")
+
+    setting = BiotimeSetting.objects.filter(company=company).first()
+
+    if not setting:
+        raise ValueError("BiotimeSetting غير موجود لهذه الشركة.")
+
+    return setting
 
 # ============================================================
 # 🔐 2) تسجيل الدخول
 # ============================================================
 
-def get_authenticated_client():
-    setting = get_settings()
-    if not setting:
-        return None, "⚠️ إعدادات الاتصال غير موجودة."
+def get_authenticated_client(company=None):
+    """
+    🔒 MT-6 Strict Hard Fail
+    - Requires company
+    - No global fallback
+    - Production Safe
+    """
+
+    if not company:
+        return None, "Company context مطلوب."
+
+    try:
+        setting = get_settings(company=company)
+    except Exception as e:
+        return None, str(e)
 
     client = BiotimeAPIClient(setting)
     auth = client.authenticate()
@@ -62,59 +87,69 @@ def get_authenticated_client():
 # 🧪 2.1) Test Connection
 # ============================================================
 
-def test_connection():
+def test_connection(company):
     try:
-        setting = get_settings()
-        if not setting:
-            return {"status": "error", "message": "⚠️ إعدادات Biotime غير موجودة."}
-
-        client = BiotimeAPIClient(setting)
-        auth = client.authenticate()
-
-        if auth.get("status") != "success":
-            return {
-                "status": "error",
-                "message": "❌ فشل الاتصال مع Biotime.",
-                "meta": auth,
-            }
-
-        return {
-            "status": "success",
-            "message": "✔ تم الاتصال بـ Biotime بنجاح.",
-            "meta": {"token_expiry": str(setting.token_expiry)},
-        }
-
-    except Exception as exc:
-        logger.exception("Biotime Test Connection Service Error")
+        setting = get_settings(company=company)
+    except Exception as e:
         return {
             "status": "error",
-            "message": "⚠️ خطأ غير متوقع أثناء اختبار الاتصال.",
-            "exception": str(exc),
+            "message": str(e),
         }
+
+    client = BiotimeAPIClient(setting)
+    auth = client.authenticate()
+
+    if auth.get("status") != "success":
+        return {
+            "status": "error",
+            "message": "❌ فشل الاتصال مع Biotime.",
+            "meta": auth,
+        }
+
+    return {
+        "status": "success",
+        "message": "✔ تم الاتصال بنجاح.",
+    }
 
 
 # ============================================================
 # 💻 3) مزامنة الأجهزة — Terminals
 # ============================================================
 
-def sync_devices():
+def sync_devices(company=None):
     start_time = timezone.now()
 
-    client, error = get_authenticated_client()
-    if error:
-        return {"status": "error", "message": error}
+    if not company:
+        return {"status": "error", "message": "Company context مطلوب."}
 
-    terminals = client.get_devices()
+    setting = BiotimeSetting.objects.filter(company=company).first()
+    if not setting:
+        return {"status": "error", "message": "Biotime setting غير موجود."}
+
+    client = BiotimeAPIClient(setting)
+    auth = client.authenticate()
+    print("AUTH RESULT =>", auth)
+    print("🔎 Fetching devices...")
+    if not auth or auth.get("status") != "success":
+        return {"status": "error", "message": f"فشل المصادقة مع Biotime: {auth}"}
+    
+    try:
+       terminals = client.get_devices()
+       print("TERMINALS RAW =>", terminals)
+    except Exception as e:
+        print("🔥 get_devices EXCEPTION =>", str(e))
     if terminals is None:
         return {"status": "error", "message": "❌ فشل جلب أجهزة IClock."}
 
-    BiotimeDevice.objects.all().delete()
+    BiotimeDevice.objects.filter(company=company).delete()
+
     count = 0
 
     for d in terminals:
         area_info = d.get("area", {}) or {}
 
         BiotimeDevice.objects.create(
+            company=company,
             device_id=d.get("id"),
             sn=d.get("sn"),
             alias=d.get("alias") or d.get("terminal_name") or "—",
@@ -124,6 +159,7 @@ def sync_devices():
             state=d.get("state"),
             terminal_tz=d.get("terminal_tz"),
             area_name=area_info.get("area_name"),
+            biotime_company_code=setting.biotime_company,
             push_time=d.get("push_time"),
             transfer_time=d.get("transfer_time"),
             transfer_interval=d.get("transfer_interval"),
@@ -138,56 +174,127 @@ def sync_devices():
 
     elapsed_ms = int((timezone.now() - start_time).total_seconds() * 1000)
 
-    logger.info(
-        "Biotime Devices Sync Completed | count=%s | %sms",
-        count,
-        elapsed_ms,
-    )
-
     return {
         "status": "success",
         "count": count,
         "elapsed_ms": elapsed_ms,
-        "message": f"✔ تمت مزامنة {count} جهاز IClock بنجاح.",
     }
-
-
 # ============================================================
-# 👥 4) مزامنة الموظفين (READ ONLY)
+# 👥 Enterprise Employee Sync (MULTI-TENANT SAFE — FINAL MT-2)
 # ============================================================
 
-def sync_employees():
+def sync_employees(company=None):
+
     start_time = timezone.now()
 
-    client, error = get_authenticated_client()
-    if error:
-        return {"status": "error", "message": error}
+    # ======================================================
+    # 🔒 Resolve Company Context
+    # ======================================================
+    if not company:
+        return {
+            "status": "error",
+            "message": "Company context مطلوب للمزامنة."
+        }
 
+    setting = BiotimeSetting.objects.filter(company=company).first()
+
+    if not setting or not setting.biotime_company:
+        return {
+            "status": "error",
+            "message": "Biotime company code غير مضبوط."
+        }
+
+    # ======================================================
+    # 🔐 Authenticate
+    # ======================================================
+    client, error = get_authenticated_client(company=company)
+
+    if error or not client:
+        return {
+            "status": "error",
+            "message": "فشل المصادقة مع Biotime."
+        }
+
+    # ======================================================
+    # 📡 Fetch Employees
+    # ======================================================
     employees = client.get_employees()
-    if employees is None:
-        return {"status": "error", "message": "❌ فشل جلب الموظفين."}
 
-    synced = updated = skipped = 0
+    if employees is None:
+        return {
+            "status": "error",
+            "message": "فشل جلب موظفي Biotime."
+        }
+
+    # ======================================================
+    # 🧹 STRICT SYNC CLEANUP (MT SAFE)
+    # حذف أي موظف محلي غير موجود فعليًا في Biotime
+    # ======================================================
+    try:
+        remote_codes = set(
+            str(e.get("emp_code") or "").strip()
+            for e in employees
+            if e.get("emp_code")
+        )
+
+        local_codes = set(
+            BiotimeEmployee.objects
+            .filter(company=company)
+            .values_list("employee_id", flat=True)
+        )
+
+        orphan_codes = local_codes - remote_codes
+
+        if orphan_codes:
+            deleted_count, _ = (
+                BiotimeEmployee.objects
+                .filter(company=company, employee_id__in=orphan_codes)
+                .delete()
+            )
+
+            logger.info(
+                "Strict Sync Cleanup | company=%s | deleted=%s",
+                company.id,
+                deleted_count,
+            )
+
+    except Exception:
+        logger.exception("Strict Sync Cleanup Error")
+
+    # ======================================================
+    # 🔁 Sync Loop
+    # ======================================================
+    synced = 0
+    updated = 0
+    skipped = 0
     now = timezone.now()
 
     for e in employees:
+
         try:
-            employee_id = e.get("emp_code") or e.get("id")
-            if not employee_id:
+            emp_code = str(e.get("emp_code") or "").strip()
+
+            if not emp_code:
                 skipped += 1
                 continue
 
-            defaults = {
-                "full_name": f"{e.get('first_name', '')} {e.get('last_name', '')}".strip(),
-                "department": e.get("department"),
-                "position": e.get("position"),
-                "card_number": e.get("card_no"),
-                "is_active": bool(e.get("is_active", True)),
-                "last_sync": now,
-            }
+            full_name = (
+                f"{e.get('first_name', '')} {e.get('last_name', '')}"
+            ).strip() or "—"
 
-            _, created = BiotimeEmployee.objects.update_or_create(
-                employee_id=employee_id,
+            defaults = dict(
+                full_name=full_name,
+                department=(e.get("department") or {}).get("dept_name"),
+                position=(e.get("position") or {}).get("position_name"),
+                card_number=e.get("card_no"),
+                is_active=bool(e.get("enable_att", True)),
+                last_sync=now,
+                company=company,
+            )
+
+            obj, created = BiotimeEmployee.objects.update_or_create(
+                company=company,
+                employee_id=emp_code,
                 defaults=defaults,
             )
 
@@ -198,9 +305,18 @@ def sync_employees():
 
         except Exception:
             skipped += 1
-            logger.exception("❌ Employee Sync Error")
+            logger.exception("Biotime Employee Sync Error")
 
-    elapsed_ms = int((timezone.now() - start_time).total_seconds() * 1000)
+    elapsed_ms = int(
+        (timezone.now() - start_time).total_seconds() * 1000
+    )
+
+    logger.info(
+        "Biotime Employee Sync Completed | company=%s | synced=%s | updated=%s",
+        company.id,
+        synced,
+        updated,
+    )
 
     return {
         "status": "success",
@@ -233,58 +349,105 @@ from django.utils.dateparse import parse_datetime
 from biotime_center.models import BiotimeLog
 
 
-def sync_logs(start_date=None, end_date=None):
+def sync_logs(company=None, start_date=None, end_date=None):
     """
-    🔄 مزامنة سجلات Biotime الخام إلى جدول BiotimeLog فقط (Staging Layer).
+    🔄 Sync Biotime raw logs for a specific company.
 
-    خصائص:
-    - Idempotent (update_or_create على log_id)
-    - لا يكتب في AttendanceRecord إطلاقًا
-    - آمن للتشغيل المتكرر
-    - يدعم range filtering
+    ✔ Multi-tenant safe
+    ✔ Explicit company required
+    ✔ Idempotent (update_or_create)
+    ✔ Supports optional date range
+    ✔ Production ready
     """
 
-    client, error = get_authenticated_client()
-    if error:
-        return {"status": "error", "message": error}
+    # ------------------------------------------------------------
+    # 1️⃣ Validate Company Context
+    # ------------------------------------------------------------
+    if not company:
+        return {
+            "status": "error",
+            "message": "Company context مطلوب.",
+        }
 
-    transactions = client.get_logs(start_date, end_date)
+    if not company.is_active:
+        return {
+            "status": "error",
+            "message": "الشركة غير مفعلة.",
+        }
+
+    # ------------------------------------------------------------
+    # 2️⃣ Get Biotime Setting
+    # ------------------------------------------------------------
+    setting = (
+        BiotimeSetting.objects
+        .filter(company=company)
+        .only("id")
+        .first()
+    )
+
+    if not setting:
+        return {
+            "status": "error",
+            "message": "Biotime setting غير موجود.",
+        }
+
+    # ------------------------------------------------------------
+    # 3️⃣ Authenticate
+    # ------------------------------------------------------------
+    client = BiotimeAPIClient(setting)
+    auth = client.authenticate()
+
+    if auth.get("status") != "success":
+        return {
+            "status": "error",
+            "message": "فشل المصادقة مع Biotime.",
+        }
+
+    # ------------------------------------------------------------
+    # 4️⃣ Fetch Logs
+    # ------------------------------------------------------------
+    try:
+        transactions = client.get_logs(start_date, end_date)
+    except Exception as exc:
+        logger.exception("❌ Exception أثناء جلب سجلات Biotime")
+        return {
+            "status": "error",
+            "message": str(exc),
+        }
+
     if transactions is None:
-        return {"status": "error", "message": "❌ فشل جلب السجلات من Biotime."}
+        return {
+            "status": "error",
+            "message": "❌ فشل جلب السجلات.",
+        }
 
-    saved = updated = skipped = 0
+    # ------------------------------------------------------------
+    # 5️⃣ Process Logs
+    # ------------------------------------------------------------
+    saved = 0
+    updated = 0
+    skipped = 0
 
     for t in transactions:
+
         try:
-            # ======================================================
-            # 🧩 1) تجهيز punch_time بشكل آمن 100%
-            # ======================================================
             raw_punch_time = t.get("punch_time")
-            punch_time = None
 
-            if raw_punch_time:
-                parsed = parse_datetime(str(raw_punch_time))
+            if not raw_punch_time:
+                skipped += 1
+                continue
 
-                if isinstance(parsed, datetime):
-                    punch_time = parsed
-                    if timezone.is_naive(punch_time):
-                        punch_time = timezone.make_aware(punch_time)
-                else:
-                    logger.warning(
-                        "⚠️ Invalid punch_time skipped: %s",
-                        raw_punch_time,
-                    )
-                    skipped += 1
-                    continue
+            punch_time = parse_datetime(str(raw_punch_time))
 
             if not punch_time:
                 skipped += 1
                 continue
 
-            # ======================================================
-            # 🧩 2) حفظ السجل الخام فقط داخل BiotimeLog
-            # ======================================================
-            biotime_log, created = BiotimeLog.objects.update_or_create(
+            if timezone.is_naive(punch_time):
+                punch_time = timezone.make_aware(punch_time)
+
+            obj, created = BiotimeLog.objects.update_or_create(
+                company=company,
                 log_id=t.get("id"),
                 defaults={
                     "employee_code": t.get("emp_code"),
@@ -294,7 +457,7 @@ def sync_logs(start_date=None, end_date=None):
                     "terminal_alias": t.get("terminal_alias"),
                     "area_alias": t.get("area_alias"),
                     "raw_json": t,
-                    "processed": False,   # سيتم معالجته لاحقًا في Attendance Sync
+                    "processed": False,
                 },
             )
 
@@ -307,148 +470,396 @@ def sync_logs(start_date=None, end_date=None):
             skipped += 1
             logger.exception("❌ Failed syncing Biotime raw log")
 
+    # ------------------------------------------------------------
+    # 6️⃣ Return Unified Result
+    # ------------------------------------------------------------
     return {
         "status": "success",
+        "company_id": company.id,
         "new": saved,
         "updated": updated,
         "skipped": skipped,
         "total": saved + updated,
-        "message": (
-            f"✔ Raw Logs Sync Completed | new={saved} | "
-            f"updated={updated} | skipped={skipped}"
-        ),
     }
-
-# ============================================================
-# 🧩 Unified Master Sync Service (SAFE)
-# ============================================================
-
-from company_manager.models import CompanyBranch, CompanyDepartment, JobTitle
-
 
 def _generate_biotime_code(prefix: str, instance_id: int) -> str:
     """
-    توليد كود رقمي فقط بدون Default
+    🔐 Generate Safe Biotime Code
+    - Numeric only
+    - Avoid reserved default code=1
+    - Company safe
     """
-    return str(instance_id)
+    code = int(instance_id)
+
+    # 🚫 Avoid reserved 1
+    if code == 1:
+        code = 1000 + code
+
+    return str(code)
 
 
 # ---------------- Area ----------------
 
 def get_or_create_area(client, name: str, code: str):
+    """
+    🔄 Get or Create BioTime Area (Idempotent Safe)
+    ✔ يتحقق أولاً إن كانت موجودة
+    ✔ لا يفشل إذا كانت موجودة مسبقًا
+    ✔ يرجع dict واضح
+    """
+
     try:
+        # --------------------------------------------------
+        # 🔎 1) تحقق هل الـ Area موجودة مسبقًا
+        # --------------------------------------------------
+        existing_id = resolve_area_id_by_code(client, code)
+
+        if existing_id:
+            logger.info(
+                "✔ Area already exists in BioTime | code=%s | id=%s",
+                code,
+                existing_id,
+            )
+            return {
+                "id": existing_id,
+                "created": False,
+                "area_code": code,
+            }
+
+        # --------------------------------------------------
+        # 🚀 2) إنشاء Area جديدة
+        # --------------------------------------------------
         url = f"{client.base_url}/personnel/api/areas/"
-        payload = {"area_name": name, "area_code": code}
+        payload = {
+            "area_name": name,
+            "area_code": code,
+        }
+
+        logger.warning("🧪 CREATE AREA URL: %s", url)
+        logger.warning("🧪 CREATE AREA PAYLOAD: %s", payload)
+
         res = client._post(url, json=payload, timeout=20)
 
-        if not res or res.status_code not in (200, 201):
+        if not res:
+            logger.error("❌ Create Area returned None")
             return None
 
-        return res.json()
+        if res.status_code not in (200, 201):
+            logger.error(
+                "❌ Create Area Failed | status=%s | body=%s",
+                res.status_code,
+                res.text[:500],
+            )
+            return None
+
+        data = res.json() or {}
+
+        logger.info(
+            "✅ Area Created Successfully | code=%s | response=%s",
+            code,
+            data,
+        )
+
+        return data
 
     except Exception:
         logger.exception("❌ Failed creating Area")
         return None
 
-
 # ---------------- Department ----------------
 
 def get_or_create_department(client, name: str, code: str):
+    """
+    Idempotent Department Sync:
+    - Try create
+    - If already exists → resolve by code
+    - Never return None if exists
+    """
+
     try:
+        # --------------------------------------------------
+        # 1️⃣ Try Create
+        # --------------------------------------------------
         url = f"{client.base_url}/personnel/api/departments/"
-        payload = {"dept_name": name, "dept_code": code}
+        payload = {
+            "dept_name": name,
+            "dept_code": str(code),
+        }
+
         res = client._post(url, json=payload, timeout=20)
 
-        if not res or res.status_code not in (200, 201):
-            return None
+        if res and res.status_code in (200, 201):
+            logger.info(
+                "✅ Department Created | code=%s | name=%s",
+                code,
+                name,
+            )
+            return res.json()
 
-        return res.json()
+        # --------------------------------------------------
+        # 2️⃣ Already Exists? → Resolve by Code
+        # --------------------------------------------------
+        dept_id = resolve_department_id_by_code(client, str(code))
 
-    except Exception:
-        logger.exception("❌ Failed creating Department")
+        if dept_id:
+            logger.info(
+                "ℹ️ Department Exists | code=%s | resolved_id=%s",
+                code,
+                dept_id,
+            )
+            return {
+                "id": dept_id,
+                "existing": True,
+            }
+
+        # --------------------------------------------------
+        # 3️⃣ Failed
+        # --------------------------------------------------
+        logger.error(
+            "❌ Department Sync Failed | code=%s | status=%s | body=%s",
+            code,
+            getattr(res, "status_code", None),
+            getattr(res, "text", "")[:300],
+        )
         return None
 
+    except Exception:
+        logger.exception("❌ Failed creating/resolving Department")
+        return None
 
 # ---------------- Position ----------------
 
 def get_or_create_position(client, name: str, code: str):
-    try:
-        url = f"{client.base_url}/personnel/api/positions/"
-        payload = {"position_name": name, "position_code": code}
-        res = client._post(url, json=payload, timeout=20)
+    """
+    🔄 Idempotent Position Sync (Production Safe)
+    ✔ Try create
+    ✔ If exists → resolve by code
+    ✔ Always return dict with id if exists
+    """
 
-        if not res or res.status_code not in (200, 201):
+    try:
+        if not client:
+            logger.error("❌ get_or_create_position | client missing")
             return None
 
-        return res.json()
+        if not name or not str(code).strip():
+            logger.warning(
+                "⚠️ get_or_create_position skipped | invalid data | name=%s | code=%s",
+                name,
+                code,
+            )
+            return None
 
-    except Exception:
-        logger.exception("❌ Failed creating Position")
+        url = f"{client.base_url}/personnel/api/positions/"
+        payload = {
+            "position_name": str(name).strip(),
+            "position_code": str(code).strip(),
+        }
+
+        # --------------------------------------------------
+        # 1️⃣ Try Create
+        # --------------------------------------------------
+        res = client._post(url, json=payload, timeout=20)
+
+        if res and res.status_code in (200, 201):
+            logger.info(
+                "✅ Position Created | code=%s | name=%s",
+                code,
+                name,
+            )
+            return res.json()
+
+        # --------------------------------------------------
+        # 2️⃣ Already Exists → Resolve by Code
+        # --------------------------------------------------
+        position_id = resolve_position_id_by_code(client, str(code))
+
+        if position_id:
+            logger.info(
+                "ℹ️ Position Exists | code=%s | resolved_id=%s",
+                code,
+                position_id,
+            )
+            return {
+                "id": position_id,
+                "existing": True,
+            }
+
+        # --------------------------------------------------
+        # 3️⃣ Real Failure
+        # --------------------------------------------------
+        logger.error(
+            "❌ Position Sync Failed | code=%s | status=%s | body=%s",
+            code,
+            getattr(res, "status_code", None),
+            getattr(res, "text", "")[:300],
+        )
+
         return None
 
+    except Exception:
+        logger.exception("❌ get_or_create_position exception")
+        return None
 
 # ---------------- Public Sync APIs ----------------
 
 def create_or_sync_branch(branch: CompanyBranch):
+    """
+    ======================================================
+    🏢 Sync CompanyBranch → Biotime Area
+    ✅ Company Scoped
+    ✅ Idempotent (resolve first)
+    ✅ Avoid code=1 (Biotime default)
+    ======================================================
+    """
+
     if not branch.is_active:
         return None
 
-    client, error = get_authenticated_client()
-    if error:
+    # 🔐 Company Scoped Auth
+    client, error = get_authenticated_client(company=branch.company)
+    if error or not client:
+        logger.warning("⚠️ Branch Sync Skipped | auth_error=%s | branch_id=%s", error, branch.id)
         return None
 
+    # 🆔 Ensure biotime_code (generate once)
     if not branch.biotime_code:
-        branch.biotime_code = _generate_biotime_code("BR", branch.id)
+        code = _generate_biotime_code("BR", branch.id)
+
+        # ✅ Avoid reserved/default code=1 in Biotime (only on first generation)
+        if str(code).strip() == "1":
+            code = str(1000 + int(branch.id))
+
+        branch.biotime_code = str(code).strip()
         branch.save(update_fields=["biotime_code"])
 
-    return get_or_create_area(client, branch.name, branch.biotime_code)
+    # ✅ Idempotent: if exists → return success object (no POST)
+    try:
+        existing_id = resolve_area_id_by_code(client, str(branch.biotime_code).strip())
+        if existing_id:
+            return {
+                "id": existing_id,
+                "exists": True,
+                "area_code": branch.biotime_code,
+                "area_name": branch.name,
+            }
+    except Exception:
+        logger.exception("❌ Resolve Area Failed | branch_id=%s", branch.id)
 
+    # 🚀 Create (if missing)
+    try:
+        return get_or_create_area(client, branch.name, branch.biotime_code)
+    except Exception:
+        logger.exception("❌ Create Area Failed | branch_id=%s", branch.id)
+        return None
 
+#======================================================
+#🏢 Sync CompanyDepartment → Biotime Department ONLY
+#❌ ممنوع إنشاء Area من القسم
+#======================================================
 def create_or_sync_department(department: CompanyDepartment):
     """
     ======================================================
     🏢 Sync CompanyDepartment → Biotime Department ONLY
-    ❌ ممنوع إنشاء Area من القسم
+    ✅ Company Scoped
+    ✅ Idempotent (resolve first)
+    ✅ Avoid code=1 (Biotime default)
     ======================================================
     """
 
     if not department.is_active:
         return None
 
-    client, error = get_authenticated_client()
-    if error:
+    # 🔐 Company Scoped Auth
+    client, error = get_authenticated_client(company=department.company)
+    if error or not client:
+        logger.warning("⚠️ Dept Sync Skipped | auth_error=%s | dept_id=%s", error, department.id)
         return None
 
-    # --------------------------------------------------
-    # 🆔 Generate biotime_code once
-    # --------------------------------------------------
+    # 🆔 Ensure biotime_code (generate once)
     if not department.biotime_code:
-        department.biotime_code = _generate_biotime_code("DEPT", department.id)
+        code = _generate_biotime_code("DEPT", department.id)
+
+        # ✅ Avoid reserved/default code=1 in Biotime (only on first generation)
+        if str(code).strip() == "1":
+            code = str(1000 + int(department.id))
+
+        department.biotime_code = str(code).strip()
         department.save(update_fields=["biotime_code"])
 
-    # --------------------------------------------------
-    # ✅ Department ONLY (NO AREA HERE)
-    # --------------------------------------------------
-    return get_or_create_department(
-        client,
-        department.name,
-        department.biotime_code,
-    )
+    # ✅ Idempotent: if exists → return success object (no POST)
+    try:
+        existing_id = resolve_department_id_by_code(client, str(department.biotime_code).strip())
+        if existing_id:
+            return {
+                "id": existing_id,
+                "exists": True,
+                "dept_code": department.biotime_code,
+                "dept_name": department.name,
+            }
+    except Exception:
+        logger.exception("❌ Resolve Department Failed | dept_id=%s", department.id)
+
+    # 🚀 Create (if missing)
+    try:
+        return get_or_create_department(
+            client,
+            department.name,
+            department.biotime_code,
+        )
+    except Exception:
+        logger.exception("❌ Create Department Failed | dept_id=%s", department.id)
+        return None
 
 def create_or_sync_jobtitle(jobtitle: JobTitle):
+    """
+    ======================================================
+    💼 Sync JobTitle → Biotime Position
+    ✅ Company Scoped
+    ✅ Idempotent (resolve first)
+    ✅ Avoid code=1 (Biotime default)
+    ======================================================
+    """
+
     if not jobtitle.is_active:
         return None
 
-    client, error = get_authenticated_client()
-    if error:
+    # 🔐 Company Scoped Auth
+    client, error = get_authenticated_client(company=jobtitle.company)
+    if error or not client:
+        logger.warning("⚠️ JobTitle Sync Skipped | auth_error=%s | job_id=%s", error, jobtitle.id)
         return None
 
+    # 🆔 Ensure biotime_code (generate once)
     if not jobtitle.biotime_code:
-        jobtitle.biotime_code = _generate_biotime_code("POS", jobtitle.id)
+        code = _generate_biotime_code("POS", jobtitle.id)
+
+        # ✅ Avoid reserved/default code=1 in Biotime (only on first generation)
+        if str(code).strip() == "1":
+            code = str(1000 + int(jobtitle.id))
+
+        jobtitle.biotime_code = str(code).strip()
         jobtitle.save(update_fields=["biotime_code"])
 
-    return get_or_create_position(client, jobtitle.name, jobtitle.biotime_code)
+    # ✅ Idempotent: if exists → return success object (no POST)
+    try:
+        existing_id = resolve_position_id_by_code(client, str(jobtitle.biotime_code).strip())
+        if existing_id:
+            return {
+                "id": existing_id,
+                "exists": True,
+                "position_code": jobtitle.biotime_code,
+                "position_name": jobtitle.name,
+            }
+    except Exception:
+        logger.exception("❌ Resolve Position Failed | job_id=%s", jobtitle.id)
 
+    # 🚀 Create (if missing)
+    try:
+        return get_or_create_position(client, jobtitle.name, jobtitle.biotime_code)
+    except Exception:
+        logger.exception("❌ Create Position Failed | job_id=%s", jobtitle.id)
+        return None
 
 # ============================================================
 # 🧩 Resolve Helpers
@@ -475,21 +886,103 @@ def resolve_employee_biotime_id(client, employee_code: str) -> Optional[str]:
         return None
 
 def _resolve_by_code(client, endpoint: str, code_field: str, code_value: str):
-    try:
-        url = f"{client.base_url}{endpoint}"
-        res = client._get(url, params={code_field: code_value}, timeout=15)
+    """
+    🔎 Resolve Entity ID by Code (BioTime Safe - HARD GUARDED)
+    ✔ Strict code validation
+    ✔ Prevent None / empty queries
+    ✔ Prevent accidental first-record return
+    ✔ Company Scoped via client
+    ✔ Never throws
+    """
 
-        if not res or res.status_code != 200:
+    try:
+        # -----------------------------------------
+        # 🔐 Client Validation
+        # -----------------------------------------
+        if not client:
+            logger.error("❌ Resolve by code | client missing")
             return None
 
-        data = (res.json() or {}).get("data") or []
+        # -----------------------------------------
+        # 🚫 Hard Guard: invalid code_value
+        # -----------------------------------------
+        if code_value is None:
+            logger.warning("🚫 Resolve blocked | code_value is None")
+            return None
+
+        code_str = str(code_value).strip()
+
+        if not code_str:
+            logger.warning("🚫 Resolve blocked | code_value empty string")
+            return None
+
+        if code_str.lower() == "none":
+            logger.warning("🚫 Resolve blocked | code_value literal 'None'")
+            return None
+
+        # -----------------------------------------
+        # 🌐 Call BioTime
+        # -----------------------------------------
+        url = f"{client.base_url}{endpoint}"
+
+        logger.info(
+            "🔎 Resolving | endpoint=%s | %s=%s",
+            endpoint,
+            code_field,
+            code_str,
+        )
+
+        res = client._get(
+            url,
+            params={code_field: code_str},
+            timeout=20,
+        )
+
+        if not res:
+            logger.error("❌ Resolve failed | response is None")
+            return None
+
+        if res.status_code != 200:
+            logger.error(
+                "❌ Resolve failed | status=%s | body=%s",
+                res.status_code,
+                res.text[:300],
+            )
+            return None
+
+        raw = res.json() or {}
+
+        # -----------------------------------------
+        # 🟢 Case 1: SaaS dict format
+        # -----------------------------------------
+        if isinstance(raw, dict) and "data" in raw:
+            data = raw.get("data") or []
+        # -----------------------------------------
+        # 🟢 Case 2: Direct list
+        # -----------------------------------------
+        elif isinstance(raw, list):
+            data = raw
+        else:
+            data = []
+
         if not data:
             return None
 
-        return data[0].get("id")
+        entity_id = data[0].get("id")
+
+        if entity_id:
+            logger.info(
+                "✔ Resolved | %s=%s | id=%s",
+                code_field,
+                code_str,
+                entity_id,
+            )
+            return entity_id
+
+        return None
 
     except Exception:
-        logger.exception("❌ Resolve by code failed")
+        logger.exception("❌ Resolve by code exception")
         return None
 
 
@@ -553,18 +1046,26 @@ def get_employee_snapshot(client, employee_biotime_id: str) -> dict:
         data = res.json() or {}
 
         # --------------------------------------------------
-        # 🧹 Normalize Department
+        # 🧹 Normalize Department (SAFE)
         # --------------------------------------------------
         dept = data.get("department")
+
+        if isinstance(dept, dict):
+            dept = dept.get("id")
+
         try:
             dept = int(dept) if dept is not None else None
         except Exception:
             dept = None
 
         # --------------------------------------------------
-        # 🧹 Normalize Position
+        # 🧹 Normalize Position (SAFE)
         # --------------------------------------------------
         pos = data.get("position")
+
+        if isinstance(pos, dict):
+            pos = pos.get("id")
+
         try:
             pos = int(pos) if pos is not None else None
         except Exception:
@@ -803,22 +1304,32 @@ def _normalize_area_codes(
 
     return []
 
-
+#============================================================
+#🔥 4 — تعديل build_biotime_employee_payload
+#============================================================
 def build_biotime_employee_payload(
     *,
     emp_code: str,
     first_name: str,
     last_name: str,
     area_codes: Optional[Iterable[str]] = None,
-    area_code: Optional[str] = None,   # Legacy Support
+    area_code: Optional[str] = None,
     dept_code: str,
     position_code: str,
     card_no: str = "",
     is_active: bool = True,
+    client=None,   # ✅ NEW PERFORMANCE PARAM
 ):
-    client, error = get_authenticated_client()
-    if error:
-        return None, error
+    """
+    ✔ Performance Optimized
+    ✔ Reuse Authenticated Client
+    ✔ Backward Compatible
+    """
+
+    if client is None:
+        client, error = get_authenticated_client()
+        if error:
+            return None, error
 
     normalized_area_codes = _normalize_area_codes(
         area_codes=area_codes,
@@ -841,6 +1352,7 @@ def build_biotime_employee_payload(
 
     if not dept_id:
         return None, f"❌ Department غير موجود: {dept_code}"
+
     if not pos_id:
         return None, f"❌ Position غير موجود: {position_code}"
 
@@ -850,7 +1362,7 @@ def build_biotime_employee_payload(
         "last_name": last_name,
         "department": int(dept_id),
         "position": int(pos_id),
-        "area": area_ids,     # ✅ Multi Area
+        "area": area_ids,
         "card_no": card_no or "",
         "is_active": bool(is_active),
     }
@@ -983,37 +1495,53 @@ def patch_employee_area(client, employee_id: str, area_ids: List[int]) -> bool:
         logger.exception("❌ Patch Area Exception")
         return False
 # ============================================================
-# 🧩 Phase E.2 — Replace Employee Areas (AUTHORITATIVE MODE)
+# 🧩 Phase E.2 — Replace Employee Areas (MT-6 SAFE VERSION)
 # ============================================================
 
 def patch_employee_areas_replace(
     *,
+    company,
     employee_id: str,
     area_codes: Iterable[str],
 ) -> bool:
     """
     استبدال كامل للفروع (Areas) الخاصة بالموظف في BioTime.
-    ✔ يحذف الفروع القديمة.
-    ✔ يطابق الواجهة كنقطة حقيقة (Source of Truth).
-    ✔ آمن — يعتمد على Snapshot قبل التعديل.
+    ✔ Company Scoped (MT-6 Strict)
+    ✔ JWT / Session Auto
+    ✔ Idempotent Safe
+    ✔ Production & Local Compatible
     """
 
     try:
-        client, error = get_authenticated_client()
-        if error or not client:
-            logger.error("❌ Patch Replace Areas Failed | Auth Error")
+        if not company:
+            logger.error("❌ Replace Areas Failed | company missing")
             return False
 
         # --------------------------------------------------
-        # 🔎 Resolve Internal Employee ID
+        # 🔐 Company Scoped Auth (MT-6)
+        # --------------------------------------------------
+        client, error = get_authenticated_client(company=company)
+
+        if error or not client:
+            logger.error("❌ Replace Areas Failed | Auth Error")
+            return False
+
+        # --------------------------------------------------
+        # 🔎 Resolve Internal Biotime Employee ID
         # --------------------------------------------------
         resolved_id = (
-            resolve_employee_biotime_id(client, str(employee_id).strip())
+            resolve_employee_biotime_id(
+                client,
+                str(employee_id).strip(),
+            )
             or str(employee_id).strip()
         )
 
         if not resolved_id:
-            logger.error("❌ Cannot resolve employee id | employee=%s", employee_id)
+            logger.error(
+                "❌ Cannot resolve Biotime employee id | employee=%s",
+                employee_id,
+            )
             return False
 
         # --------------------------------------------------
@@ -1038,14 +1566,11 @@ def patch_employee_areas_replace(
         )
 
         # --------------------------------------------------
-        # 📸 Read Snapshot
+        # 📸 Read Snapshot (Idempotent Guard)
         # --------------------------------------------------
         snapshot = get_employee_snapshot(client, resolved_id)
         current_area_ids = sorted(snapshot.get("areas") or [])
 
-        # --------------------------------------------------
-        # 🛡️ Idempotent Guard
-        # --------------------------------------------------
         if current_area_ids == target_area_ids:
             logger.info(
                 "✔ Replace Areas Skipped | no change | employee=%s | areas=%s",
@@ -1078,6 +1603,7 @@ def patch_employee_areas_replace(
             resolved_id,
             target_area_ids,
         )
+
         return True
 
     except Exception:
@@ -1085,16 +1611,21 @@ def patch_employee_areas_replace(
         return False
 
 # ============================================================
-# 🧩 Auto Patch Employee Department (SAFE)
+# 🧩 Auto Patch Employee Department (MT-6 SAFE | SNAPSHOT GUARDED)
 # ============================================================
 
 def patch_employee_department(
     *,
+    company,
     employee_id: str,
     dept_code: str,
 ) -> bool:
     """
     تحديث قسم الموظف (Department) في Biotime باستخدام dept_code.
+    ✔ Company Scoped
+    ✔ Snapshot Guard (Idempotent)
+    ✔ JWT / Session Auto
+    ✔ Compatible with Local & Production
     """
 
     try:
@@ -1105,7 +1636,11 @@ def patch_employee_department(
             )
             return True
 
-        client, error = get_authenticated_client()
+        # --------------------------------------------------
+        # 🔐 Auth (Company Scoped — MT-6)
+        # --------------------------------------------------
+        client, error = get_authenticated_client(company=company)
+
         if error or not client:
             logger.error("❌ Patch Department Failed | Auth Error")
             return False
@@ -1114,7 +1649,10 @@ def patch_employee_department(
         # 🔎 Resolve Internal Biotime Employee ID
         # --------------------------------------------------
         resolved_id = (
-            resolve_employee_biotime_id(client, str(employee_id).strip())
+            resolve_employee_biotime_id(
+                client,
+                str(employee_id).strip(),
+            )
             or str(employee_id).strip()
         )
 
@@ -1140,26 +1678,42 @@ def patch_employee_department(
             )
             return False
 
-        payload = {
-            "department": int(department_id),
-        }
+        department_id = int(department_id)
+
+        # --------------------------------------------------
+        # 📸 Read Snapshot (REAL VALUE)
+        # --------------------------------------------------
+        snapshot = get_employee_snapshot(client, resolved_id)
+        current_department = snapshot.get("department")
+
+        # --------------------------------------------------
+        # 🛡️ Idempotent Guard
+        # --------------------------------------------------
+        if current_department == department_id:
+            logger.info(
+                "✔ Patch Department Skipped | no change | employee=%s | dept=%s",
+                resolved_id,
+                department_id,
+            )
+            return True
+
+        # --------------------------------------------------
+        # 🚀 PATCH
+        # --------------------------------------------------
+        payload = {"department": department_id}
 
         url = f"{client.base_url}/personnel/api/employees/{resolved_id}/"
 
         logger.warning("🧪 PATCH DEPT URL: %s", url)
         logger.warning("🧪 PATCH DEPT PAYLOAD: %s", payload)
 
-        res = client._patch(url, json=payload, timeout=20)
+        res = client._patch(url, json=payload, timeout=25)
 
-        if not res:
-            logger.error("❌ PATCH Department returned None")
-            return False
-
-        if res.status_code not in (200, 202):
+        if not res or res.status_code not in (200, 202):
             logger.error(
                 "❌ Patch Employee Department Failed | status=%s | body=%s",
-                res.status_code,
-                res.text[:500],
+                getattr(res, "status_code", None),
+                getattr(res, "text", "")[:500],
             )
             return False
 
@@ -1173,16 +1727,29 @@ def patch_employee_department(
     except Exception:
         logger.exception("❌ Patch Employee Department Exception")
         return False
+
 # ============================================================
-# 🧩 Auto Patch Employee Name
+# 🧩 Auto Patch Employee Name (Company Scoped — MT Safe)
 # ============================================================
 
-def patch_employee_name(*, employee_id: str, full_name: str) -> bool:
+def patch_employee_name(
+    *,
+    company,
+    employee_id: str,
+    full_name: str,
+) -> bool:
     """
     تحديث اسم الموظف في Biotime.
-    يستخدم PATCH آمن (JWT / Session Auto).
+    ✔ Company Scoped
+    ✔ JWT / Session Auto
+    ✔ Production & Local Safe
     """
+
     try:
+        if not company:
+            logger.error("❌ Patch Name Failed | company missing")
+            return False
+
         if not full_name or not str(full_name).strip():
             logger.warning(
                 "⚠️ Patch Name Skipped | empty name | employee=%s",
@@ -1190,7 +1757,11 @@ def patch_employee_name(*, employee_id: str, full_name: str) -> bool:
             )
             return True
 
-        client, error = get_authenticated_client()
+        # --------------------------------------------------
+        # 🔐 Auth (Company Scoped)
+        # --------------------------------------------------
+        client, error = get_authenticated_client(company=company)
+
         if error or not client:
             logger.error("❌ Patch Name Failed | Auth Error")
             return False
@@ -1199,7 +1770,10 @@ def patch_employee_name(*, employee_id: str, full_name: str) -> bool:
         # 🔎 Resolve Internal Biotime Employee ID
         # --------------------------------------------------
         resolved_id = (
-            resolve_employee_biotime_id(client, str(employee_id).strip())
+            resolve_employee_biotime_id(
+                client,
+                str(employee_id).strip()
+            )
             or str(employee_id).strip()
         )
 
@@ -1211,7 +1785,7 @@ def patch_employee_name(*, employee_id: str, full_name: str) -> bool:
             return False
 
         # --------------------------------------------------
-        # 🧠 Split Name Safely (Biotime يحتاج first / last)
+        # 🧠 Split Name Safely
         # --------------------------------------------------
         safe_name = str(full_name).strip()
         parts = safe_name.split(" ", 1)
@@ -1259,13 +1833,20 @@ def patch_employee_name(*, employee_id: str, full_name: str) -> bool:
 
 
 # ============================================================
-# 🧩 Auto Patch Employee Position
+# 🧩 Auto Patch Employee Position (SAFE + Company Scoped)
 # ============================================================
 
-def patch_employee_position(*, employee_id: str, position_code: str) -> bool:
+def patch_employee_position(
+    *,
+    company,
+    employee_id: str,
+    position_code: str,
+) -> bool:
     """
     تحديث وظيفة الموظف (Position) في Biotime باستخدام position_code.
+    Company-Scoped + JWT/Session Auto.
     """
+
     try:
         if not position_code:
             logger.warning(
@@ -1274,7 +1855,10 @@ def patch_employee_position(*, employee_id: str, position_code: str) -> bool:
             )
             return True
 
-        client, error = get_authenticated_client()
+        # --------------------------------------------------
+        # 🔐 Company Scoped Client
+        # --------------------------------------------------
+        client, error = get_authenticated_client(company=company)
         if error or not client:
             logger.error("❌ Patch Position Failed | Auth Error")
             return False
@@ -1346,71 +1930,286 @@ def patch_employee_position(*, employee_id: str, position_code: str) -> bool:
         logger.exception("❌ Patch Employee Position Exception")
         return False
 
+# ============================================================
+# 🛡️ Enterprise Ensure Pattern (Push Safety Net)
+# ============================================================
+
+def ensure_branch_exists(branch: CompanyBranch, client=None):
+    """
+    Ensure Area موجودة في BioTime
+    ✔ Reuse Authenticated Client (Performance Optimized)
+    ✔ لا Sync كامل
+    ✔ Create فقط إذا مفقودة
+    """
+
+    if not branch.is_active:
+        return True
+
+    # ----------------------------------------
+    # 🔐 Reuse Client
+    # ----------------------------------------
+    if client is None:
+        client, error = get_authenticated_client()
+        if error:
+            return False
+
+    # ----------------------------------------
+    # 🆔 Ensure biotime_code
+    # ----------------------------------------
+    if not branch.biotime_code:
+        branch.biotime_code = _generate_biotime_code("BR", branch.id)
+        branch.save(update_fields=["biotime_code"])
+
+    # ----------------------------------------
+    # 🔎 Check existence
+    # ----------------------------------------
+    exists = resolve_area_id_by_code(client, branch.biotime_code)
+
+    if exists:
+        return True
+
+    logger.warning(
+        "⚠️ Area missing in BioTime → creating | branch=%s",
+        branch.id
+    )
+
+    result = get_or_create_area(client, branch.name, branch.biotime_code)
+
+    return bool(result)
+
+
+#============================================================
+#🔥 2 — تعديل ensure_department_exists
+#============================================================
+def ensure_department_exists(department: CompanyDepartment, client=None):
+    """
+    Ensure Department موجود في BioTime
+    ✔ Reuse Authenticated Client
+    ✔ Performance Optimized
+    """
+
+    if not department.is_active:
+        return True
+
+    if client is None:
+        client, error = get_authenticated_client()
+        if error:
+            return False
+
+    if not department.biotime_code:
+        department.biotime_code = _generate_biotime_code("DEPT", department.id)
+        department.save(update_fields=["biotime_code"])
+
+    exists = resolve_department_id_by_code(client, department.biotime_code)
+
+    if exists:
+        return True
+
+    logger.warning(
+        "⚠️ Department missing in BioTime → creating | dept=%s",
+        department.id
+    )
+
+    result = get_or_create_department(
+        client,
+        department.name,
+        department.biotime_code,
+    )
+
+    return bool(result)
+
+#============================================================
+#🔥 3 — تعديل ensure_position_exists
+#============================================================
+def ensure_position_exists(jobtitle: JobTitle, client=None):
+    """
+    Ensure Position موجودة في BioTime
+    ✔ Reuse Authenticated Client
+    ✔ Performance Optimized
+    """
+
+    if not jobtitle.is_active:
+        return True
+
+    if client is None:
+        client, error = get_authenticated_client()
+        if error:
+            return False
+
+    if not jobtitle.biotime_code:
+        jobtitle.biotime_code = _generate_biotime_code("POS", jobtitle.id)
+        jobtitle.save(update_fields=["biotime_code"])
+
+    exists = resolve_position_id_by_code(client, jobtitle.biotime_code)
+
+    if exists:
+        return True
+
+    logger.warning(
+        "⚠️ Position missing in BioTime → creating | job=%s",
+        jobtitle.id
+    )
+
+    result = get_or_create_position(
+        client,
+        jobtitle.name,
+        jobtitle.biotime_code,
+    )
+
+    return bool(result)
 
 # ============================================================
-# 🚀 Push Employee (STRICT TWO PHASE + MULTI AREA)
+# 🚀 Push Employee (STRICT TWO PHASE + MULTI AREA — ENTERPRISE SAFE)
 # ============================================================
 
 def push_employee_to_biotime(
     *,
+    company,   # ✅ NEW — REQUIRED CONTEXT
     emp_code: str,
     first_name: str,
     last_name: str,
     area_codes: Optional[Iterable[str]] = None,
-    area_code: Optional[str] = None,   # Legacy
+    area_code: Optional[str] = None,
     dept_code: str,
     position_code: str,
     card_no: str = "",
     is_active: bool = True,
 ):
-    client, error = get_authenticated_client()
+    """
+    ✔ STRICT COMPANY CONTEXT
+    ✔ SINGLE AUTH SESSION
+    ✔ PERFORMANCE BOOST
+    ✔ ENTERPRISE SAFE
+    ✔ MULTI-TENANT HARD GUARDED
+    """
+
+    # ========================================================
+    # 🔐 Strict Company Guard
+    # ========================================================
+    if not company:
+        return {
+            "status": "error",
+            "message": "Company context مطلوب."
+        }
+
+    client, error = get_authenticated_client(company=company)
     if error:
         return {"status": "error", "message": error}
 
-    payload, err = build_biotime_employee_payload(
-        emp_code=emp_code,
-        first_name=first_name,
-        last_name=last_name,
-        area_codes=area_codes,
-        area_code=area_code,
-        dept_code=dept_code,
-        position_code=position_code,
-        card_no=card_no,
-        is_active=is_active,
-    )
-    if err:
-        return {"status": "error", "message": err}
+    try:
 
-    result = client.create_employee(payload)
-    if result.get("status") != "success":
+        # ====================================================
+        # ---------- Department ----------
+        # ====================================================
+        department = CompanyDepartment.objects.filter(
+            company=company,
+            biotime_code=dept_code
+        ).first()
+
+        if department:
+            if not ensure_department_exists(department, client=client):
+                return {
+                    "status": "error",
+                    "message": "فشل ضمان وجود القسم في BioTime"
+                }
+
+        # ====================================================
+        # ---------- Position ----------
+        # ====================================================
+        job = JobTitle.objects.filter(
+            company=company,
+            biotime_code=position_code
+        ).first()
+
+        if job:
+            if not ensure_position_exists(job, client=client):
+                return {
+                    "status": "error",
+                    "message": "فشل ضمان وجود الوظيفة في BioTime"
+                }
+
+        # ====================================================
+        # ---------- Branch ----------
+        # ====================================================
+        normalized_area_codes = _normalize_area_codes(
+            area_codes=area_codes,
+            area_code=area_code,
+        )
+
+        for code in normalized_area_codes:
+            branch = CompanyBranch.objects.filter(
+                company=company,
+                biotime_code=code
+            ).first()
+
+            if branch:
+                if not ensure_branch_exists(branch, client=client):
+                    return {
+                        "status": "error",
+                        "message": "فشل ضمان وجود الفرع في BioTime"
+                    }
+
+        # ====================================================
+        # ---------- Payload ----------
+        # ====================================================
+        payload, err = build_biotime_employee_payload(
+            emp_code=emp_code,
+            first_name=first_name,
+            last_name=last_name,
+            area_codes=area_codes,
+            area_code=area_code,
+            dept_code=dept_code,
+            position_code=position_code,
+            card_no=card_no,
+            is_active=is_active,
+            client=client,   # ✅ PERFORMANCE PASS
+        )
+
+        if err:
+            return {"status": "error", "message": err}
+
+        # ====================================================
+        # ---------- Create ----------
+        # ====================================================
+        result = client.create_employee(payload)
+
+        if result.get("status") != "success":
+            return result
+
+        employee_id = result.get("data", {}).get("id")
+
+        # ====================================================
+        # ---------- Post Patch ----------
+        # ====================================================
+        try:
+            area_ids = payload.get("area") or []
+
+            result["area_patched"] = bool(
+                employee_id and
+                patch_employee_area(client, employee_id, area_ids)
+            )
+
+            result["department_patched"] = bool(
+                employee_id and
+                patch_employee_department(
+                    company=company,
+                    employee_id=employee_id,
+                    dept_code=dept_code,
+                )
+            )
+
+        except Exception:
+            logger.exception("❌ Post Create Patch Flow Failed")
+
         return result
 
-    # ============================
-    # 🧩 Post Create Auto Patch
-    # ============================
-    try:
-        employee_id = result.get("data", {}).get("id")
-        area_ids = payload.get("area") or []
-        dept_id = payload.get("department")
-
-        # --- Patch Area (MULTI) ---
-        result["area_patched"] = bool(
-            employee_id and
-            patch_employee_area(client, employee_id, area_ids)
-        )
-
-        # --- Patch Department ---
-        result["department_patched"] = bool(
-            employee_id and dept_id and
-            patch_employee_department(client, employee_id, dept_id)
-        )
-
     except Exception:
-        logger.exception("❌ Post Create Patch Flow Failed")
-        result["area_patched"] = False
-        result["department_patched"] = False
+        logger.exception("❌ Push Employee Enterprise Flow Failed")
+        return {
+            "status": "error",
+            "message": "❌ حدث خطأ غير متوقع أثناء إنشاء الموظف في BioTime."
+        }
 
-    return result
 # ============================================================
 # 🟦 Phase E.x — Explicit Company Master Data Sync (SAFE)
 # ============================================================
@@ -1418,28 +2217,60 @@ def push_employee_to_biotime(
 def sync_company_branches(company):
     """
     🔄 Sync ALL CompanyBranch → Biotime Areas
-    - Create / Update only
-    - Idempotent
-    - NO delete
+    ✔ Company Scoped (MT-6 Strict)
+    ✔ Single Auth Session (Performance Optimized)
+    ✔ Create if missing only
+    ✔ Idempotent
+    ✔ NO delete
     """
-    synced = skipped = 0
+
+    if not company:
+        return {
+            "status": "error",
+            "message": "Company context مطلوب."
+        }
+
+    # --------------------------------------------------
+    # 🔐 Authenticate Once (Single Session)
+    # --------------------------------------------------
+    client, error = get_authenticated_client(company=company)
+
+    if error or not client:
+        logger.error(
+            "❌ Company Branch Sync Failed | company=%s | auth_error=%s",
+            getattr(company, "id", None),
+            error,
+        )
+        return {
+            "status": "error",
+            "message": error or "فشل تسجيل الدخول إلى Biotime."
+        }
+
+    synced = 0
+    skipped = 0
 
     branches = CompanyBranch.objects.filter(
         company=company,
         is_active=True,
     )
 
+    # --------------------------------------------------
+    # 🔁 Loop (Reuse Client — NO re-auth)
+    # --------------------------------------------------
     for branch in branches:
         try:
             result = create_or_sync_branch(branch)
+
             if result:
                 synced += 1
             else:
                 skipped += 1
+
         except Exception:
             skipped += 1
             logger.exception(
-                "❌ Branch Sync Failed | branch_id=%s",
+                "❌ Branch Sync Failed | company=%s | branch_id=%s",
+                company.id,
                 branch.id,
             )
 
@@ -1451,6 +2282,7 @@ def sync_company_branches(company):
     )
 
     return {
+        "status": "success",
         "synced": synced,
         "skipped": skipped,
         "total": synced + skipped,
@@ -1460,10 +2292,28 @@ def sync_company_branches(company):
 def sync_company_departments(company):
     """
     🔄 Sync ALL CompanyDepartment → Biotime Departments
-    - Create / Update only
-    - Idempotent
-    - NO area creation here
+    ✔ Company Scoped (MT-6 Strict)
+    ✔ Single Auth Session
+    ✔ Idempotent
+    ✔ NO Area Creation Here
     """
+
+    if not company:
+        return {
+            "status": "error",
+            "message": "Company context مطلوب.",
+        }
+
+    # --------------------------------------------------
+    # 🔐 Authenticate Once (Performance + Safety)
+    # --------------------------------------------------
+    client, error = get_authenticated_client(company=company)
+    if error or not client:
+        return {
+            "status": "error",
+            "message": error or "فشل المصادقة مع Biotime.",
+        }
+
     synced = skipped = 0
 
     departments = CompanyDepartment.objects.filter(
@@ -1473,11 +2323,16 @@ def sync_company_departments(company):
 
     for dept in departments:
         try:
-            result = create_or_sync_department(dept)
+            result = create_or_sync_department(
+                department=dept,
+                client=client,  # 🔥 Reuse Same Client
+            )
+
             if result:
                 synced += 1
             else:
                 skipped += 1
+
         except Exception:
             skipped += 1
             logger.exception(
@@ -1493,19 +2348,31 @@ def sync_company_departments(company):
     )
 
     return {
+        "status": "success",
         "synced": synced,
         "skipped": skipped,
         "total": synced + skipped,
     }
 
-
 def sync_company_job_titles(company):
     """
     🔄 Sync ALL JobTitle → Biotime Positions
-    - Create / Update only
-    - Idempotent
+    ✔ Company Scoped (MT-6 Strict)
+    ✔ Create / Ensure Only
+    ✔ Idempotent
+    ✔ Safe Logging
     """
-    synced = skipped = 0
+
+    if not company:
+        return {
+            "synced": 0,
+            "skipped": 0,
+            "total": 0,
+            "error": "Company context مطلوب."
+        }
+
+    synced = 0
+    skipped = 0
 
     job_titles = JobTitle.objects.filter(
         company=company,
@@ -1515,14 +2382,18 @@ def sync_company_job_titles(company):
     for job in job_titles:
         try:
             result = create_or_sync_jobtitle(job)
-            if result:
+
+            # ✔ أي نتيجة غير None نعتبرها نجاح
+            if result is not None:
                 synced += 1
             else:
                 skipped += 1
+
         except Exception:
             skipped += 1
             logger.exception(
-                "❌ JobTitle Sync Failed | job_id=%s",
+                "❌ JobTitle Sync Failed | company=%s | job_id=%s",
+                company.id,
                 job.id,
             )
 
@@ -1538,3 +2409,100 @@ def sync_company_job_titles(company):
         "skipped": skipped,
         "total": synced + skipped,
     }
+
+# ======================================================
+# 🔄 PATCH BioTime Position Name
+# ======================================================
+
+def patch_biotime_position_name(*, company, job_title):
+    """
+    Update BioTime position name.
+    SAFE:
+    - Requires biotime_position_id
+    - PATCH only
+    - No exception propagation
+    """
+
+    if not job_title.biotime_position_id:
+        return None
+
+    try:
+        client = BiotimeAPIClient(setting=company.biotime_setting)
+
+        payload = {
+            "position_name": job_title.name,
+        }
+
+        return client._patch(
+            f"/personnel/positions/{job_title.biotime_position_id}/",
+            payload,
+        )
+
+    except Exception as e:
+        print(
+            f"[BioTime][PATCH NAME] jt={job_title.id} "
+            f"biotime_id={job_title.biotime_position_id} error={e}"
+        )
+        return None
+# ======================================================
+# 🧠 BioTime — Create Position (OFFICIAL)
+# ======================================================
+
+def create_biotime_position(company, job_title):
+    """
+    Create position in BioTime and return its ID.
+    SAFE:
+    - Idempotent (won't recreate if already linked)
+    - Raises no exception outward
+    """
+
+    # لا نعيد الإنشاء لو كان مربوط
+    if job_title.biotime_position_id:
+        return {
+            "position_id": job_title.biotime_position_id,
+            "created": False,
+        }
+
+    try:
+        from biotime_center.models import BiotimeSetting
+        from biotime_center.sync_service import BiotimeAPIClient
+
+        biotime_setting = (
+            BiotimeSetting.objects
+            .filter(company=company)
+            .first()
+        )
+
+        if not biotime_setting:
+            raise Exception("BioTime setting not found")
+
+        client = BiotimeAPIClient(setting=biotime_setting)
+
+        payload = {
+            "position_name": job_title.name,
+            "parent": None,
+        }
+
+        response = client._post("/personnel/positions/", payload)
+
+        # BioTime يرجع id
+        position_id = response.get("id")
+
+        if not position_id:
+            raise Exception(f"Invalid BioTime response: {response}")
+
+        # حفظ الربط
+        job_title.biotime_position_id = position_id
+        job_title.save(update_fields=["biotime_position_id"])
+
+        return {
+            "position_id": position_id,
+            "created": True,
+        }
+
+    except Exception as e:
+        print(
+            f"[BioTime Create Position] failed "
+            f"(job_title={job_title.id}): {e}"
+        )
+        return None

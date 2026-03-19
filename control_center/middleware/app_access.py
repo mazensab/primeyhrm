@@ -1,5 +1,5 @@
 # ============================================================
-# 🔐 App Access Control Middleware — V1 Ultra Safe
+# 🔐 App Access Control Middleware — V2 Ultra Safe
 # Primey HR Cloud
 # ============================================================
 
@@ -28,8 +28,8 @@ class AppAccessMiddleware:
     """
     🔒 Enforces app/module access based on subscription.apps_snapshot
     - Super Admin: bypass
-    - System routes: bypass
-    - No subscription: block
+    - System/API/Public routes: bypass
+    - No subscription: block only on real app routes
     """
 
     def __init__(self, get_response):
@@ -48,28 +48,42 @@ class AppAccessMiddleware:
             "/auth/",
             "/static/",
             "/media/",
+            "/ws/",
+            "/_next/",
+            "/favicon.ico",
         )):
             return self.get_response(request)
 
         # ----------------------------------------------------
-        # 2) Not authenticated
+        # 2) Detect app route early
+        # ----------------------------------------------------
+        requested_app = self._resolve_app_from_path(path)
+
+        # Not an app route → allow
+        if not requested_app:
+            return self.get_response(request)
+
+        # ----------------------------------------------------
+        # 3) Not authenticated
         # ----------------------------------------------------
         if not request.user.is_authenticated:
             return self.get_response(request)
 
         # ----------------------------------------------------
-        # 3) Super Admin bypass
+        # 4) Super Admin bypass
         # ----------------------------------------------------
         if request.user.is_superuser:
             return self.get_response(request)
 
         # ----------------------------------------------------
-        # 4) Resolve company user
+        # 5) Resolve company user
         # ----------------------------------------------------
         try:
-            company_user = CompanyUser.objects.select_related(
-                "company"
-            ).get(user=request.user)
+            company_user = (
+                CompanyUser.objects
+                .select_related("company")
+                .get(user=request.user)
+            )
         except CompanyUser.DoesNotExist:
             return JsonResponse(
                 {"detail": "Company context not found"},
@@ -79,26 +93,47 @@ class AppAccessMiddleware:
         company = company_user.company
 
         # ----------------------------------------------------
-        # 5) Resolve subscription
+        # 6) Resolve active subscription safely
         # ----------------------------------------------------
-        try:
-            subscription = company.subscription
-        except CompanySubscription.DoesNotExist:
+        subscription = (
+            CompanySubscription.objects
+            .filter(company=company, status="ACTIVE")
+            .order_by("-id")
+            .first()
+        )
+
+        if not subscription:
+            subscription = (
+                CompanySubscription.objects
+                .filter(company=company, is_active=True)
+                .order_by("-id")
+                .first()
+            )
+
+        if not subscription:
+            subscription = (
+                CompanySubscription.objects
+                .filter(company=company)
+                .order_by("-id")
+                .first()
+            )
+
+        if not subscription:
             return JsonResponse(
                 {"detail": "No active subscription"},
                 status=403,
             )
 
         # ----------------------------------------------------
-        # 6) App access enforcement
+        # 7) App access enforcement
         # ----------------------------------------------------
-        requested_app = self._resolve_app_from_path(path)
-
-        # Not an app route → allow
-        if not requested_app:
-            return self.get_response(request)
-
         allowed_apps = subscription.apps_snapshot or []
+
+        allowed_apps = [
+            str(app).strip().lower()
+            for app in allowed_apps
+            if str(app).strip()
+        ]
 
         if requested_app not in allowed_apps:
             return JsonResponse(

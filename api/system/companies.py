@@ -66,28 +66,74 @@ DEFAULT_COMPANY_ROLES = [
 # ====================================================================
 # 1) Overview — KPIs
 # ====================================================================
+from django.db.models import Count
+from django.utils.timezone import now
+from datetime import timedelta
+
 def companies_overview(request):
+    today = now().date()
+
+    # ===============================
+    # 🏢 Companies Stats
+    # ===============================
     total = Company.objects.count()
     active = Company.objects.filter(is_active=True).count()
     suspended = Company.objects.filter(is_active=False).count()
 
-    today = now().date()
+    # ===============================
+    # 👥 Total Users (System Level)
+    # ===============================
+    total_users = CompanyUser.objects.count()
+    # ===============================
+    # 📊 Subscriptions Stats (NEW)
+    # ===============================
+    subscriptions_total = CompanySubscription.objects.count()
 
-    subs = CompanySubscription.objects.all()
-    expiring_7 = subs.filter(end_date__lte=today + timedelta(days=7)).count()
-    expiring_30 = subs.filter(end_date__lte=today + timedelta(days=30)).count()
+    subscriptions_active = CompanySubscription.objects.filter(
+        status="ACTIVE"
+    ).count()
+
+    subscriptions_trial = CompanySubscription.objects.filter(
+        status="TRIAL"
+    ).count()
+    # ===============================
+    # 📦 Subscription Expiry Logic
+    # ===============================
+    subs = CompanySubscription.objects.exclude(end_date__isnull=True)
+
+    expiring_7 = subs.filter(
+        end_date__gte=today,
+        end_date__lte=today + timedelta(days=7),
+    ).count()
+
+    expiring_30 = subs.filter(
+        end_date__gte=today,
+        end_date__lte=today + timedelta(days=30),
+    ).count()
+
+    expired = subs.filter(end_date__lt=today).count()
 
     return JsonResponse(
         {
-            "total": total,
-            "active": active,
-            "suspended": suspended,
-            "expiring_7": expiring_7,
-            "expiring_30": expiring_30,
+            "companies": {
+                "total": total,
+                "active": active,
+                "suspended": suspended,
+            },
+            "users_total": total_users,
+            "subscriptions": {
+                "total": subscriptions_total,
+                "active": subscriptions_active,
+                "trial": subscriptions_trial,
+                "expired": expired,
+
+                "expiring_7": expiring_7,
+                "expiring_30": expiring_30,
+                
+            },
         },
         status=200,
     )
-
 
 # ====================================================================
 # 2) Companies List
@@ -368,3 +414,28 @@ def company_create(request):
         },
         status=201,
     )
+# ================================================================
+# 🔁 Toggle Company Active
+# ================================================================
+
+from django.shortcuts import get_object_or_404
+from django.http import JsonResponse
+from company_manager.models import Company
+
+
+@login_required
+def toggle_company_active(request, company_id):
+
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    company = get_object_or_404(Company, id=company_id)
+
+    company.is_active = not company.is_active
+    company.save(update_fields=["is_active"])
+
+    return JsonResponse({
+        "success": True,
+        "company_id": company.id,
+        "is_active": company.is_active
+    })

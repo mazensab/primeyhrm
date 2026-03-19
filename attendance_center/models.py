@@ -194,14 +194,21 @@ class WorkSchedule(models.Model):
     early_arrival_minutes = models.PositiveIntegerField(default=0, verbose_name="السماح بالدخول المبكر (دقائق)")
     early_exit_minutes    = models.PositiveIntegerField(default=0, verbose_name="السماح بالخروج المبكر (دقائق)")
 
+    grace_minutes = models.PositiveIntegerField(
+    default=0,
+    verbose_name="سماحية التأخير (دقائق)",
+    help_text="عدد الدقائق المسموح بها بعد بداية الدوام بدون احتساب تأخير",
+    )
+
     # ============================================================
     # 📅 أيام الإجازة الأسبوعية
     # ============================================================
     weekend_days = models.CharField(
         max_length=50,
-        default="fri,sat",
+        default="",
+        blank=True,
         verbose_name="أيام الإجازة الأسبوعية",
-        help_text="مثال: الجمعة,السبت أو sat,sun",
+        help_text="مثال: fri أو sat أو fri,sat",
     )
 
     is_active = models.BooleanField(default=True, verbose_name="نشط")
@@ -334,6 +341,12 @@ class AttendancePolicy(models.Model):
     work_start = models.TimeField()
     work_end   = models.TimeField()
     grace_minutes = models.PositiveIntegerField(default=15)
+    absence_threshold_minutes = models.PositiveIntegerField(
+        default=60,
+        verbose_name="مهلة قبل احتساب الغياب (دقائق)",
+        help_text="بعد هذه المدة من بداية الدوام يتحول lifecycle_pending إلى غياب"
+    )
+
 
     overtime_enabled = models.BooleanField(default=True)
     overtime_rate = models.DecimalField(max_digits=5, decimal_places=2, default=1.50)
@@ -346,6 +359,56 @@ class AttendancePolicy(models.Model):
     def __str__(self):
         return f"سياسة حضور — {self.company}"
 
+# ============================================================
+# 🏢 Company Attendance Setting (Company Level Policy)
+# Clean Source of Truth for Settings Page
+# ============================================================
+class CompanyAttendanceSetting(models.Model):
+    """
+    إعدادات سياسة الحضور العامة للشركة
+    """
+
+    company = models.OneToOneField(
+        Company,
+        on_delete=models.CASCADE,
+        related_name="attendance_setting_config"
+    )
+
+    # ⏱️ Grace Minutes
+    grace_minutes = models.PositiveIntegerField(
+        default=15,
+        verbose_name="سماحية التأخير (دقائق)"
+    )
+
+    # ⏱️ Late After
+    late_after_minutes = models.PositiveIntegerField(
+        default=30,
+        verbose_name="يعتبر متأخر بعد (دقائق)"
+    )
+
+    # ⛔ Absence Threshold
+    absence_after_minutes = models.PositiveIntegerField(
+        default=180,
+        verbose_name="يعتبر غائب بعد (دقائق)"
+    )
+
+    # 🚫 Auto Absent
+    auto_absent_if_no_checkin = models.BooleanField(
+        default=True,
+        verbose_name="احتساب غياب تلقائي بدون تسجيل حضور"
+    )
+
+    # 🕒 Overtime
+    overtime_enabled = models.BooleanField(
+        default=True,
+        verbose_name="تفعيل العمل الإضافي"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Company Attendance Setting — {self.company}"
 
 # ============================================================
 # 🎯 3) Employee Attendance Policy (Overrides)
@@ -390,8 +453,19 @@ class AttendanceRecord(models.Model):
         ("late", "متأخر"),
         ("absent", "غائب"),
         ("leave", "إجازة"),
+        ("holiday", "إجازة رسمية"),
         ("weekend", "عطلة أسبوعية"),
+        ("not_started", "قبل المباشرة"),
         ("unknown", "غير معروف"),
+        ("terminated", "منتهي خدمة"),
+
+    ]
+
+    # 🟣 Overtime Type Classification
+    OVERTIME_TYPE_CHOICES = [
+        ("NORMAL", "Normal Overtime"),
+        ("WEEKEND", "Weekend Overtime"),
+        ("HOLIDAY", "Holiday Overtime"),
     ]
 
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
@@ -400,11 +474,19 @@ class AttendanceRecord(models.Model):
     check_in  = models.TimeField(null=True, blank=True)
     check_out = models.TimeField(null=True, blank=True)
 
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="present")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="present")
 
     late_minutes     = models.IntegerField(default=0)
     early_minutes    = models.IntegerField(default=0)
     overtime_minutes = models.IntegerField(default=0)
+    # 🟢 NEW FIELD
+    overtime_type = models.CharField(
+        max_length=20,
+        choices=OVERTIME_TYPE_CHOICES,
+        null=True,
+        blank=True,
+    )
+
     actual_hours     = models.FloatField(default=0.0)
     official_hours   = models.FloatField(default=0.0)
 
@@ -414,118 +496,139 @@ class AttendanceRecord(models.Model):
     synced_from_biotime = models.BooleanField(default=False)
 
     is_leave = models.BooleanField(default=False)
+    # ============================================================
+    # 🔒 Finalization Engine — Phase F.6 (V1)
+    # ============================================================
+    is_finalized = models.BooleanField(
+        default=False,
+        verbose_name="مقفل نهائيًا"
+    )
+
+    finalized_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ الإقفال"
+    )
+
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     # ============================================================
-    # 🧠 Step A — WorkdayEngine V4 Classification
+    # 🧠 WorkdayEngine Classification
     # ============================================================
     def classify_v4(self):
         try:
             from attendance_center.services.workday_engine import WorkdayEngine
-        except:
+            engine = WorkdayEngine(self.employee, self.employee.company)
+            return engine.classify(self)
+        except Exception:
             return None
 
-        engine = WorkdayEngine(self.employee, self.employee.company)
-        return engine.classify(self)
-
     # ============================================================
-    # 🧠 Step B — Reverse Integration Auto Trigger
+    # 🔄 Reverse Integration
     # ============================================================
     def run_reverse_integration(self):
         try:
             from attendance_center.services.reverse_integration_engine import ReverseIntegrationEngine
             ReverseIntegrationEngine(self).run()
-        except:
+        except Exception:
             pass
 
-# ============================================================
-# 🔄 Smart Hybrid Trigger — save()  (Phase H.5 PATCH)
-# ============================================================
-def save(self, *args, **kwargs):
+    # ============================================================
+    # 🧠 Clean Save — SAFE MODE (Engine Driven)
+    # ============================================================
+    def save(self, *args, skip_engine=False, **kwargs):
+        # 🔒 Engine Recursion Guard
+        if skip_engine:
+            return super().save(*args, **kwargs)
 
-    # ====================================================
-    # 🟥 Phase H — Company Holiday Guard (DB is Source of Truth)
-    # ====================================================
-    try:
-        if (
-            self.employee
-            and self.date
-            and HolidayResolver.is_holiday(
-                self.date,
-                self.employee.company
-            )
-        ):
-            # Idempotent: إذا سبق تثبيت الإجازة لا نعيد الحساب
-            if self.status == "holiday" and self.is_leave:
-                super().save(*args, **kwargs)
-                return
+        from attendance_center.services.holiday_resolver import HolidayResolver
 
-            self.status = "holiday"
-            self.reason_code = "company_holiday"
-            self.is_leave = True
+        # ====================================================
+        # 🟥 Company Holiday Guard (DB Source of Truth)
+        # ====================================================
+        try:
+            if (
+                self.employee
+                and self.date
+                and HolidayResolver.is_holiday(self.date, self.employee.company)
+            ):
+                # 🟢 فقط إذا لا يوجد حضور → اعتبره Holiday Leave
+                if not self.check_in and not self.check_out:
+                    self.status = "holiday"
+                    self.reason_code = "company_holiday"
+                    self.is_leave = False
 
-            # تصفير أي بيانات حضور
-            self.check_in = None
-            self.check_out = None
-            self.late_minutes = 0
-            self.early_minutes = 0
-            self.overtime_minutes = 0
-            self.actual_hours = 0
-            self.official_hours = 0
+                    self.late_minutes = 0
+                    self.early_minutes = 0
+                    self.overtime_minutes = 0
+                    self.actual_hours = 0
+                    self.official_hours = 0
 
-            # منع أي إعادة ربط من Biotime
-            self.synced_from_biotime = False
-            self.biotime_log = None
 
+                    super().save(*args, **kwargs)
+                    return
+
+        except Exception:
+            pass
+
+        # ====================================================
+        # 🟨 Approved Leave Guard
+        # ====================================================
+        if self.is_leave:
             super().save(*args, **kwargs)
             return
-    except Exception:
-        # Safety net — لا نكسر الحفظ
-        pass
 
-    # ====================================================
-    # 🟨 Approved Leave Guard (غير الإجازة الرسمية)
-    # ====================================================
-    if self.is_leave:
+        # ====================================================
+        # 🟦 Reverse Integration
+        # ====================================================
+        if self.synced_from_biotime:
+            self.run_reverse_integration()
+
+
+            # 🔒 V7 Lifecycle Guard
+            if self.reason_code == "lifecycle_pending":
+                super().save(*args, **kwargs)
+                return
+            # ====================================================
+            # 🟢 Auto Recalculate On Manual Edit (Non-Finalized Only)
+            # ====================================================
+            if not self.is_finalized:
+                try:
+                    from attendance_center.services.workday_engine import WorkdayEngine
+                    engine = WorkdayEngine(self.employee, self.employee.company)
+
+                    # 🔁 إعادة الحساب
+                    engine.apply(self)
+
+                    # 🔒 إعادة الإقفال بعد النجاح
+                    self.is_finalized = True
+                    self.finalized_at = timezone.now()
+
+                except Exception:
+                    pass
+
+
         super().save(*args, **kwargs)
-        return
 
-    # ====================================================
-    # 🟦 Normal Flow (كما كان سابقًا 100٪)
-    # ====================================================
-    if self.synced_from_biotime:
-        self.run_reverse_integration()
-
-    try:
-        summary = self.classify_v4()
-        if summary:
-            self.status = summary.status
-            self.reason_code = summary.reason
-            self.late_minutes = summary.late_minutes
-            self.early_minutes = summary.early_minutes
-            self.overtime_minutes = summary.overtime_minutes
-            self.actual_hours = summary.actual_hours
-            self.official_hours = summary.official_hours
-    except Exception:
-        pass
-
-    super().save(*args, **kwargs)
     # ============================================================
-    # 🔄 Smart Biotime Integration — create_from_biotime()
+    # 🔄 Smart Biotime Integration
     # ============================================================
     @classmethod
     def create_from_biotime(cls, log: BiotimeLog):
         try:
-            emp = Employee.objects.filter(employee_code=log.employee.employee_id).first()
+            emp = Employee.objects.filter(
+                employee_code=log.employee.employee_id
+            ).first()
+
             if not emp:
                 return None
 
             date = log.punch_time.date()
             t = log.punch_time.time()
 
-            record, created = cls.objects.get_or_create(
+            record, _ = cls.objects.get_or_create(
                 employee=emp,
                 date=date,
                 defaults={
@@ -543,20 +646,6 @@ def save(self, *args, **kwargs):
             record.synced_from_biotime = True
             record.biotime_log = log
 
-            from attendance_center.services.reverse_integration_engine import ReverseIntegrationEngine
-            ReverseIntegrationEngine(record).run()
-
-            from attendance_center.services.workday_engine import WorkdayEngine
-            summary = WorkdayEngine(emp, emp.company).classify(record)
-
-            record.status = summary.status
-            record.reason_code = summary.reason
-            record.late_minutes = summary.late_minutes
-            record.early_minutes = summary.early_minutes
-            record.overtime_minutes = summary.overtime_minutes
-            record.actual_hours = summary.actual_hours
-            record.official_hours = summary.official_hours
-
             record.save()
             return record
 
@@ -565,7 +654,7 @@ def save(self, *args, **kwargs):
             return None
 
     # ============================================================
-    # 🔒 DB Safety — One Record Per Employee Per Day
+    # 🔒 DB Safety
     # ============================================================
     class Meta:
         constraints = [

@@ -1,18 +1,50 @@
 # 📂 الملف: notification_center/signals.py
 # 🧠 إشعارات النظام التلقائية (Smart Notification Signals)
-# 🚀 الإصدار V4.1 — متوافق 100% مع الموديل الجديد
+# 🚀 الإصدار V5.0 — Unified + Email Ready + No Duplicate Broadcast Logic
+# ------------------------------------------------------------
+# ✅ توحيد الإشعار عبر services.create_notification
+# ✅ دعم البريد الاختياري من نفس المحرك الرسمي
+# ✅ إزالة التكرار اليدوي لـ Notification.objects.create + WebSocket
+# ✅ Fail-Safe: أي خطأ في الإشعارات لا يكسر إنشاء الشركة أو المستخدم
+# ✅ متوافق مع Notification Model الحالي
+# ------------------------------------------------------------
 
+import logging
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.contrib.auth import get_user_model
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 
-from .models import Notification
 from company_manager.models import Company
+from .services import create_notification
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
-channel_layer = get_channel_layer()
+
+
+# ============================================================
+# 🧩 Helpers
+# ============================================================
+def _email_enabled_for_signals() -> bool:
+    """
+    تفعيل البريد في الـ signals يكون اختياريًا.
+    افتراضيًا:
+    - في DEBUG: بدون بريد لتجنب الإزعاج أثناء التطوير
+    - في الإنتاج: يمكن تفعيله من الإعدادات العامة للبريد
+    """
+    if getattr(settings, "DEBUG", False):
+        return False
+
+    return bool(getattr(settings, "EMAIL_NOTIFICATIONS_ENABLED", True))
+
+
+def _system_staff_users():
+    """
+    جلب مستخدمي النظام الداخلي الذين يستلمون تنبيهات عامة.
+    """
+    return User.objects.filter(is_staff=True)
+
 
 # ============================================================
 # 🏢 1️⃣ إشعار عند إنشاء شركة جديدة
@@ -22,40 +54,29 @@ def notify_company_created(sender, instance, created, **kwargs):
     if not created:
         return
 
-    # ⚠️ إذا ما فيه أي staff → نوقف بدون إشعار
-    admins = User.objects.filter(is_staff=True)
-    if not admins.exists():
-        return
+    try:
+        admins = _system_staff_users()
+        if not admins.exists():
+            logger.info("ℹ️ لا يوجد مستخدمو نظام staff لاستلام إشعار إنشاء الشركة.")
+            return
 
-    title = f"🏢 تم تسجيل شركة جديدة: {instance.name}"
-    message = f"تم إنشاء الشركة ({instance.name}) وإضافتها للنظام بنجاح."
+        title = f"🏢 تم تسجيل شركة جديدة: {instance.name}"
+        message = f"تم إنشاء الشركة ({instance.name}) وإضافتها للنظام بنجاح."
 
-    for admin in admins:
-        # 📨 إنشاء الإشعار
-        Notification.objects.create(
-            recipient=admin,
-            company=instance,
-            title=title,
-            message=message,
-            notification_type="system",
-            severity="success",
-        )
+        for admin in admins:
+            create_notification(
+                recipient=admin,
+                title=title,
+                message=message,
+                notification_type="system",
+                severity="success",
+                send_email=_email_enabled_for_signals(),
+            )
 
-        # 📡 إرسال WebSocket مباشر
-        async_to_sync(channel_layer.group_send)(
-            f"user_{admin.id}",
-            {
-                "type": "send_notification",
-                "data": {
-                    "type": "new",
-                    "notification": {
-                        "title": title,
-                        "message": message,
-                        "severity": "success",
-                    },
-                },
-            },
-        )
+        logger.info(f"✅ تم إرسال إشعارات إنشاء الشركة: {instance.name}")
+
+    except Exception as e:
+        logger.warning(f"⚠️ فشل Signal إشعار إنشاء الشركة (غير حرج): {e}")
 
 
 # ============================================================
@@ -66,36 +87,32 @@ def notify_user_created(sender, instance, created, **kwargs):
     if not created:
         return
 
-    admins = User.objects.filter(is_staff=True)
-    if not admins.exists():
-        return
+    try:
+        admins = _system_staff_users()
+        if not admins.exists():
+            logger.info("ℹ️ لا يوجد مستخدمو نظام staff لاستلام إشعار إنشاء المستخدم.")
+            return
 
-    title = f"👤 مستخدم جديد: {instance.username}"
-    message = (
-        f"تم تسجيل المستخدم "
-        f"{instance.get_full_name() or instance.username} بنجاح."
-    )
+        display_name = instance.get_full_name() or instance.username
 
-    for admin in admins:
-        Notification.objects.create(
-            recipient=admin,
-            title=title,
-            message=message,
-            notification_type="user",
-            severity="info",
-        )
+        title = f"👤 مستخدم جديد: {instance.username}"
+        message = f"تم تسجيل المستخدم {display_name} بنجاح."
 
-        async_to_sync(channel_layer.group_send)(
-            f"user_{admin.id}",
-            {
-                "type": "send_notification",
-                "data": {
-                    "type": "new",
-                    "notification": {
-                        "title": title,
-                        "message": message,
-                        "severity": "info",
-                    },
-                },
-            },
-        )
+        for admin in admins:
+            # تجنب إرسال إشعار للمستخدم نفسه لو كان staff وتم إنشاؤه الآن
+            if admin.id == instance.id:
+                continue
+
+            create_notification(
+                recipient=admin,
+                title=title,
+                message=message,
+                notification_type="user",
+                severity="info",
+                send_email=_email_enabled_for_signals(),
+            )
+
+        logger.info(f"✅ تم إرسال إشعارات إنشاء المستخدم: {instance.username}")
+
+    except Exception as e:
+        logger.warning(f"⚠️ فشل Signal إشعار إنشاء المستخدم (غير حرج): {e}")

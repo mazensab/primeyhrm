@@ -27,17 +27,14 @@ from attendance_center.models import AttendanceRecord
 # 📊 Services (Single Source of Truth)
 # ============================================================
 from .services import (
-    payroll_summary_v8,
     calculate_payroll_run,
     mark_payroll_run_paid,
     reset_payroll_run,
-    create_payroll_journal_entry,
 )
 
 # ============================================================
 # 🖨️ Printing Engine
 # ============================================================
-from printing_engine.services.payroll_slip_engine import PayrollSlipPrintEngine
 
 # ============================================================
 # 🧾 0️⃣ Payroll List

@@ -1,28 +1,29 @@
 # ================================================================
-# 🧠 Workday Engine V5.1 — Enterprise Ultra Pro (MINUTE ACCURATE)
-# Primey HR Cloud — Attendance Center
-# Phase F.5.5 — Schedule Type Behavior
+#🧠 Workday Engine V6.4 — FULL_TIME Expansion (Stable)
+#PART_TIME Stable
+#FULL_TIME Overlap + Overtime + Late + Early
+#No Double Counting
+#Idempotent
 # ================================================================
 
-from datetime import datetime, time, timedelta
-from functools import lru_cache
-
+from datetime import datetime, timedelta
 from django.db import transaction
 
-from attendance_center.models import (
-    AttendancePolicy,
-    EmployeeAttendancePolicy,
-)
+from attendance_center.services.services import WorkScheduleResolver
+from attendance_center.services.holiday_resolver import HolidayResolver
+
+from django.db import transaction
+from django.utils import timezone
+
+from attendance_center.models import CompanyAttendanceSetting
 
 from attendance_center.services.services import WorkScheduleResolver
-from attendance_center.services.holiday_resolver import HolidayResolver  # ✅ NEW
 
 
 # ===================================================================
-# 🧩 WorkdaySummary — كائن ملخّص يوم العمل
+# 🧩 WorkdaySummary
 # ===================================================================
 class WorkdaySummary:
-    """كائن جاهز للرواتب والتحليلات."""
 
     def __init__(
         self,
@@ -67,340 +68,500 @@ class WorkdaySummary:
 # ===================================================================
 class WorkdayEngine:
 
+    STATUS_MAP = {
+        "PRESENT": "present",
+        "LATE": "late",
+        "ABSENT": "absent",
+        "HOLIDAY": "holiday",
+        "WEEKEND": "weekend",
+        "OVERTIME": "present",
+        "UNKNOWN": "unknown",
+        "NOT_STARTED": "not_started",
+        "TERMINATED": "terminated",
+
+    }
+
     def __init__(self, employee, company):
         self.employee = employee
         self.company = company
 
     # ================================================================
-    # 🟦 1) Policy Resolution
+    # 🟦 Helpers
     # ================================================================
-    @lru_cache(maxsize=128)
-    def get_active_policy(self):
-        override = EmployeeAttendancePolicy.objects.filter(
-            employee=self.employee,
-            company_policy__company=self.company
-        ).select_related("company_policy").first()
-
-        if override:
-            return override.company_policy
-
-        return AttendancePolicy.objects.filter(company=self.company).first()
-
-    # ================================================================
-    # 🟦 2) Day Type (Weekend / Workday)
-    # ================================================================
-    def get_day_type(self, day, weekend_days: str):
-        weekday = day.weekday()
-        weekend_codes = (weekend_days or "").split(",")
-
-        mapping = {
-            "mon": 0,
-            "tue": 1,
-            "wed": 2,
-            "thu": 3,
-            "fri": 4,
-            "sat": 5,
-            "sun": 6,
-        }
-
-        weekend_indexes = [mapping[x] for x in weekend_codes if x in mapping]
-        return "WEEKEND" if weekday in weekend_indexes else "WORKDAY"
-
-    # ================================================================
-    # 🧩 3) Resolve Periods
-    # ================================================================
-    def _resolve_periods(self, schedule, base_date):
-        if not schedule or not base_date:
-            return []
-
-        periods = []
-        day_start = datetime.combine(base_date, time.min)
-        day_end = day_start + timedelta(days=1)
-
-        def build_period(start: time, end: time):
-            if not start or not end:
-                return None
-
-            start_dt = datetime.combine(base_date, start)
-            end_dt = datetime.combine(base_date, end)
-
-            if end_dt <= start_dt:
-                end_dt += timedelta(days=1)
-
-            start_dt = max(start_dt, day_start)
-            end_dt = min(end_dt, day_end)
-
-            if start_dt >= end_dt:
-                return None
-
-            return start_dt, end_dt
-
-        for p in (
-            build_period(schedule.period1_start, schedule.period1_end),
-            build_period(schedule.period2_start, schedule.period2_end),
-        ):
-            if p:
-                periods.append(p)
-
-        periods.sort(key=lambda p: p[0])
-        return periods
-
-    # ================================================================
-    # 🧮 Helpers
-    # ================================================================
-    def _safe_diff_minutes(self, later: datetime, earlier: datetime):
+    def _safe_diff_minutes(self, later, earlier):
         if not later or not earlier:
             return 0
-        return max(int((later - earlier).total_seconds() // 60), 0)
-
-    def _resolve_grace_minutes(self, policy):
-        try:
-            return max(int(policy.grace_minutes or 0), 0) if policy else 0
-        except Exception:
+        if later <= earlier:
             return 0
+        return int((later - earlier).total_seconds() // 60)
+
+    def _build_out_datetime(self, record, fallback_time):
+        in_dt = datetime.combine(record.date, record.check_in)
+
+        if record.check_out:
+            out_dt = datetime.combine(record.date, record.check_out)
+            if out_dt <= in_dt:
+                out_dt += timedelta(days=1)
+        else:
+            out_dt = datetime.combine(record.date, fallback_time)
+
+        return in_dt, out_dt
 
     # ================================================================
-    # 🟩 4) Core Classification — FINAL DECISION TREE
+    # 🟩 Core Classification
     # ================================================================
     def classify(self, record):
+        # ============================================================
+        # 🟣 Work Start Date Guard — Ignore Before Commencement
+        # ============================================================
+        work_start = getattr(self.employee, "work_start_date", None)
+
+        if work_start:
+            if record.date < work_start:
+                return WorkdaySummary(
+                    "NOT_STARTED",
+                    "before_work_start",
+                    0, 0, 0, 0, 0,
+                    None
+                )
+        # ============================================================
+        # 🔴 End Date Guard — After Termination
+        # ============================================================
+        end_date = getattr(self.employee, "end_date", None)
+
+        if end_date:
+            if record.date > end_date:
+                return WorkdaySummary(
+                    "TERMINATED",
+                    "after_end_date",
+                    0, 0, 0, 0, 0,
+                    None
+                )
+        
+
 
         schedule = WorkScheduleResolver.resolve(self.employee)
-        schedule_source = getattr(schedule, "name", None)
-        schedule_type = getattr(schedule, "schedule_type", "FULL_TIME")
+        if not schedule:
+            return WorkdaySummary("ABSENT", "no_schedule", 0, 0, 0, 0, 0, None)
 
-        policy = self.get_active_policy()
-        grace_minutes = self._resolve_grace_minutes(policy)
-
-        weekend_days = (
-            schedule.weekend_days
-            if schedule and schedule.weekend_days
-            else (policy.weekend_days if policy else "fri,sat")
-        )
+        schedule_source = schedule.name
+        schedule_type = schedule.schedule_type
 
         # ------------------------------------------------------------
-        # 🟥 1) APPROVED LEAVE (Highest Priority)
+        # 1️⃣ Approved Leave
         # ------------------------------------------------------------
         if getattr(record, "is_leave", False):
             return WorkdaySummary(
-                "HOLIDAY", "approved_leave",
-                0, 0, 0, 0, 0, schedule_source
-            )
-
-        # ------------------------------------------------------------
-        # 🟥 2) OFFICIAL HOLIDAY
-        # ------------------------------------------------------------
-        if HolidayResolver.is_holiday(record.date, self.company):
-            return WorkdaySummary(
-                "HOLIDAY", "official_holiday",
-                0, 0, 0, 0, 0, schedule_source
-            )
-
-        # ------------------------------------------------------------
-        # 🟥 3) WEEKEND
-        # ------------------------------------------------------------
-        if self.get_day_type(record.date, weekend_days) == "WEEKEND":
-            return WorkdaySummary(
-                "WEEKEND", "weekly_off",
-                0, 0, 0, 0, 0, schedule_source
-            )
-
-        periods = self._resolve_periods(schedule, record.date)
-
-        # ------------------------------------------------------------
-        # 🟥 4) NO SCHEDULE
-        # ------------------------------------------------------------
-        if not periods:
-            if record.check_in and record.check_out:
-                in_dt = datetime.combine(record.date, record.check_in)
-                out_dt = datetime.combine(record.date, record.check_out)
-                if out_dt <= in_dt:
-                    out_dt += timedelta(days=1)
-
-                actual = self._safe_diff_minutes(out_dt, in_dt)
-                return WorkdaySummary(
-                    "PRESENT", "no_schedule_fallback",
-                    0, 0, 0,
-                    actual, actual,
-                    schedule_source or "NO_SCHEDULE"
-                )
-
-            return WorkdaySummary(
-                "ABSENT", "no_schedule_no_attendance",
-                0, 0, 0, 0, 0,
-                schedule_source or "NO_SCHEDULE"
-            )
-
-        # ------------------------------------------------------------
-        # 🟥 5) NO CHECK-IN / OUT
-        # ------------------------------------------------------------
-        if not record.check_in and not record.check_out:
-            return WorkdaySummary(
-                "ABSENT", "no_checkin",
+                "HOLIDAY",
+                "approved_leave",
                 0, 0, 0, 0, 0,
                 schedule_source
             )
 
         # ------------------------------------------------------------
-        # 🧮 Official Minutes
+        # 2️⃣ Official Holiday
         # ------------------------------------------------------------
-        official_minutes = sum(
-            int((end - start).total_seconds() // 60)
-            for start, end in periods
-        )
+        holiday = HolidayResolver.resolve(record.date, self.company)
+        if holiday:
 
-        in_dt = datetime.combine(record.date, record.check_in) if record.check_in else None
-        out_dt = datetime.combine(record.date, record.check_out) if record.check_out else None
-
-        if in_dt and out_dt and out_dt <= in_dt:
-            out_dt += timedelta(days=1)
-
-        overlap_minutes = 0
-        if in_dt and out_dt:
-            for p_start, p_end in periods:
-                latest_start = max(in_dt, p_start)
-                earliest_end = min(out_dt, p_end)
-                if latest_start < earliest_end:
-                    overlap_minutes += int(
-                        (earliest_end - latest_start).total_seconds() // 60
-                    )
-
-        first_start = periods[0][0]
-        last_end = periods[-1][1]
-
-        late = early = overtime = 0
-
-        if in_dt:
-            grace_in = first_start + timedelta(minutes=grace_minutes)
-            if in_dt > grace_in:
-                late = self._safe_diff_minutes(in_dt, grace_in)
-
-        if out_dt:
-            grace_out = last_end - timedelta(minutes=grace_minutes)
-            if out_dt < grace_out:
-                early = self._safe_diff_minutes(grace_out, out_dt)
-            if out_dt > last_end:
-                overtime = self._safe_diff_minutes(out_dt, last_end)
-
-        actual_minutes = overlap_minutes + overtime
-
-        # ============================================================
-        # 🟦 Phase F.5.5 — Schedule Type Behavior
-        # ============================================================
-
-        if schedule_type == "FLEXIBLE":
-            if actual_minutes > 0:
+            if not record.check_in:
                 return WorkdaySummary(
-                    "PRESENT", "flexible_attendance",
-                    0, 0, 0,
-                    actual_minutes,
-                    official_minutes,
+                    "HOLIDAY",
+                    "official_holiday",
+                    0, 0, 0, 0, 0,
                     schedule_source
                 )
+
+            in_dt = datetime.combine(record.date, record.check_in)
+
+            if not record.check_out:
+                return WorkdaySummary(
+                    "HOLIDAY",
+                    "holiday_open_shift",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            out_dt = datetime.combine(record.date, record.check_out)
+            if out_dt <= in_dt:
+                out_dt += timedelta(days=1)
+
+            minutes = self._safe_diff_minutes(out_dt, in_dt)
+
             return WorkdaySummary(
-                "ABSENT", "flexible_no_attendance",
-                0, 0, 0, 0,
+                "PRESENT",
+                "holiday_overtime",
+                0, 0,
+                minutes,
+                minutes,
+                0,
+                schedule_source
+            )
+
+        # ------------------------------------------------------------
+        # 3️⃣ Weekend
+        # ------------------------------------------------------------
+        if schedule.is_weekend(record.date):
+
+            if not record.check_in:
+                return WorkdaySummary(
+                    "WEEKEND",
+                    "weekly_off",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            in_dt = datetime.combine(record.date, record.check_in)
+
+            if not record.check_out:
+                return WorkdaySummary(
+                    "WEEKEND",
+                    "weekend_open_shift",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            out_dt = datetime.combine(record.date, record.check_out)
+            if out_dt <= in_dt:
+                out_dt += timedelta(days=1)
+
+            minutes = self._safe_diff_minutes(out_dt, in_dt)
+
+            return WorkdaySummary(
+                "WEEKEND",
+                "weekend_overtime",
+                0, 0,
+                minutes,
+                minutes,
+                0,
+                schedule_source
+            )
+
+        # ------------------------------------------------------------
+        # 🟢 FULL_TIME
+        # ------------------------------------------------------------
+        if schedule_type == "FULL_TIME":
+
+            start_time = schedule.period1_start
+            end_time = schedule.period1_end
+
+            # --------------------------------------------------------
+            # 🔒 No Check-In Lifecycle Handling
+            # --------------------------------------------------------
+            if not record.check_in:
+
+                policy = (
+                    CompanyAttendanceSetting.objects
+                    .filter(company=self.company)
+                    .first()
+                )
+
+                # 🟡 Phase 2 — Threshold Conversion
+                if policy:
+                    now = timezone.localtime()
+
+                    start_dt = datetime.combine(record.date, start_time)
+                    start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
+
+                    threshold_dt = start_dt + timedelta(
+                        minutes=policy.absence_after_minutes
+                    )
+
+                    if now >= threshold_dt:
+                        return WorkdaySummary(
+                            "ABSENT",
+                            "no_checkin_threshold",
+                            0, 0, 0, 0, 0,
+                            schedule_source
+                        )
+
+                # 🟢 Phase 1 — Lifecycle Pending
+                if policy and not policy.auto_absent_if_no_checkin:
+                    return WorkdaySummary(
+                        "UNKNOWN",
+                        "lifecycle_pending",
+                        0, 0, 0, 0, 0,
+                        schedule_source
+                    )
+
+                return WorkdaySummary(
+                    "ABSENT",
+                    "no_checkin",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            if not start_time or not end_time:
+                return WorkdaySummary(
+                    "ABSENT",
+                    "invalid_schedule",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            in_dt, out_dt = self._build_out_datetime(record, end_time)
+
+            start_dt = datetime.combine(record.date, start_time)
+            end_dt = datetime.combine(record.date, end_time)
+
+            total_actual = self._safe_diff_minutes(
+                min(out_dt, end_dt),
+                max(in_dt, start_dt)
+            )
+
+            late_minutes = 0
+            if in_dt > start_dt:
+                late_minutes = self._safe_diff_minutes(in_dt, start_dt)
+
+            # 🔹 Apply Grace (From WorkSchedule — Phase F.5.4)
+            grace = getattr(schedule, "grace_minutes", 0) or 0
+
+            if late_minutes > 0 and late_minutes <= grace:
+                late_minutes = 0
+
+            early_minutes = 0
+            if record.check_out and out_dt < end_dt:
+                early_minutes = self._safe_diff_minutes(end_dt, out_dt)
+
+            total_overtime = 0
+            if record.check_out and out_dt > end_dt:
+                total_overtime = self._safe_diff_minutes(out_dt, end_dt)
+
+            if total_actual == 0 and total_overtime == 0:
+                return WorkdaySummary(
+                    "ABSENT",
+                    "no_overlap",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            official_minutes = self._safe_diff_minutes(end_dt, start_dt)
+
+            return WorkdaySummary(
+                "PRESENT",
+                "full_time_work",
+                late_minutes,
+                early_minutes,
+                total_overtime,
+                total_actual,
                 official_minutes,
                 schedule_source
             )
+        
+        # ------------------------------------------------------------
+        # 🟡 PART_TIME (Correct Overlap Calculation)
+        # ------------------------------------------------------------
+        if schedule_type == "PART_TIME":
 
-        if schedule_type == "HOURLY":
-            target = getattr(schedule, "target_daily_hours", None)
-            target_minutes = int(target * 60) if target else official_minutes
-
-            if actual_minutes > 0:
+            if not record.check_in:
                 return WorkdaySummary(
-                    "PRESENT", "hourly_attendance",
-                    0, 0, 0,
-                    actual_minutes,
-                    target_minutes,
+                    "ABSENT",
+                    "no_checkin",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            p1_start = schedule.period1_start
+            p1_end   = schedule.period1_end
+            p2_start = schedule.period2_start
+            p2_end   = schedule.period2_end
+
+            in_dt = datetime.combine(record.date, record.check_in)
+            out_dt = (
+                datetime.combine(record.date, record.check_out)
+                if record.check_out
+                else None
+            )
+
+            total_actual = 0
+            total_official = 0
+            late_minutes = 0
+            early_minutes = 0
+
+            def calculate_period_overlap(start_time, end_time):
+                nonlocal total_actual, total_official, late_minutes, early_minutes
+
+                if not start_time or not end_time:
+                    return
+
+                s = datetime.combine(record.date, start_time)
+                e = datetime.combine(record.date, end_time)
+
+                total_official += self._safe_diff_minutes(e, s)
+
+                if not out_dt:
+                    return
+
+                # Overlap logic (safe)
+                overlap_start = max(in_dt, s)
+                overlap_end = min(out_dt, e)
+
+                if overlap_end > overlap_start:
+                    total_actual += self._safe_diff_minutes(
+                        overlap_end,
+                        overlap_start
+                    )
+
+                if in_dt > s:
+                    late_minutes += self._safe_diff_minutes(in_dt, s)
+
+                if out_dt < e:
+                    early_minutes += self._safe_diff_minutes(e, out_dt)
+
+            # ✅ Apply for both periods (خارج الدالة)
+            calculate_period_overlap(p1_start, p1_end)
+            calculate_period_overlap(p2_start, p2_end)
+
+            # 🔴 No overlap guard (PART_TIME ONLY) — خارج الدالة
+            if total_actual == 0:
+                return WorkdaySummary(
+                    "ABSENT",
+                    "no_overlap",
+                    0, 0, 0, 0, total_official,
                     schedule_source
                 )
 
             return WorkdaySummary(
-                "ABSENT", "hourly_no_attendance",
-                0, 0, 0, 0,
+                "PRESENT",
+                "part_time_work",
+                late_minutes,
+                early_minutes,
+                0,
+                total_actual,
+                total_official,
+                schedule_source
+            )
+
+        # ------------------------------------------------------------
+        # 🟢 HOURLY
+        # ------------------------------------------------------------
+        if schedule_type == "HOURLY":
+
+            if not record.check_in or not record.check_out:
+                return WorkdaySummary(
+                    "ABSENT",
+                    "no_checkin",
+                    0, 0, 0, 0, 0,
+                    schedule_source
+                )
+
+            in_dt = datetime.combine(record.date, record.check_in)
+            out_dt = datetime.combine(record.date, record.check_out)
+
+            if out_dt <= in_dt:
+                out_dt += timedelta(days=1)
+
+            actual_minutes = self._safe_diff_minutes(out_dt, in_dt)
+
+            target_hours = float(schedule.target_daily_hours or 0)
+            target_minutes = int(target_hours * 60)
+
+            overtime_minutes = 0
+            if actual_minutes > target_minutes:
+                overtime_minutes = actual_minutes - target_minutes
+
+            return WorkdaySummary(
+                "PRESENT",
+                "hourly_work",
+                0,
+                0,
+                overtime_minutes,
+                actual_minutes,
                 target_minutes,
                 schedule_source
             )
 
-        # ============================================================
-        # FULL_TIME — Original Behavior (UNCHANGED)
-        # ============================================================
-        if actual_minutes <= 0:
-            return WorkdaySummary(
-                "ABSENT", "no_effective_work",
-                0, 0, 0, 0,
-                official_minutes,
-                schedule_source
-            )
 
-        if late > 0:
-            return WorkdaySummary(
-                "LATE", "late_in",
-                late, 0, overtime,
-                actual_minutes,
-                official_minutes,
-                schedule_source
-            )
-
-        if early > 0:
-            return WorkdaySummary(
-                "EARLY_LEAVE", "early_leave",
-                0, early, overtime,
-                actual_minutes,
-                official_minutes,
-                schedule_source
-            )
-
+        # ------------------------------------------------------------
+        # Default fallback
+        # ------------------------------------------------------------
         return WorkdaySummary(
-            "PRESENT", "normal",
-            0, 0, overtime,
-            actual_minutes,
-            official_minutes,
+            "PRESENT",
+            "normal",
+            0, 0, 0, 0, 0,
             schedule_source
         )
 
     # ================================================================
-    # 🟦 5) apply() — SAFE + IDEMPOTENT + TRANSACTIONAL
+    # 🟦 Apply (Idempotent + Lifecycle Safe)
     # ================================================================
-    def apply(self, record):
+    @classmethod
+    def apply(cls, record, force=False):
 
-        summary = self.classify(record)
+        if not record or not record.employee:
+            return None
+        # ========================================================
+        # 🔒 Finalization Guard (Phase F.6 — V1)
+        # ========================================================
+        if getattr(record, "is_finalized", False) and not force:
+            return None
+
+
+        engine = cls(record.employee, record.employee.company)
+        summary = engine.classify(record)
+
+        # ------------------------------------------------------------
+        # 🔒 Lifecycle Safe Mode (Engine Level)
+        # ------------------------------------------------------------
+        try:
+            policy = (
+                CompanyAttendanceSetting.objects
+                .filter(company=record.employee.company)
+                .first()
+            )
+
+            if (
+                policy
+                and not policy.auto_absent_if_no_checkin
+                and summary.status == "ABSENT"
+                and summary.reason == "no_checkin"
+                and not record.check_in
+                and not record.check_out
+            ):
+                summary.status = "UNKNOWN"
+                summary.reason = "lifecycle_pending"
+                summary.late_minutes = 0
+                summary.early_minutes = 0
+                summary.overtime_minutes = 0
+                summary.actual_minutes = 0
+                summary.official_minutes = 0
+
+        except Exception:
+            pass
+
+        mapped_status = cls.STATUS_MAP.get(summary.status, "present")
+
+        # 🔴 Late Override — Engine is Source of Trut
+        if mapped_status == "present" and summary.late_minutes > 0:
+            summary.status = "LATE"
+            mapped_status = "late"
+
+        actual_hours = round(summary.actual_minutes / 60, 2)
+        official_hours = round(summary.official_minutes / 60, 2)
+
+        field_map = {
+            "status": mapped_status,
+            "reason_code": summary.reason,
+            "late_minutes": summary.late_minutes,
+            "early_minutes": summary.early_minutes,
+            "overtime_minutes": summary.overtime_minutes,
+            "actual_hours": actual_hours,
+            "official_hours": official_hours,
+        }
 
         update_fields = []
         changed = False
 
-        for field, value in {
-            "status": summary.status,
-            "actual_minutes": summary.actual_minutes,
-            "official_minutes": summary.official_minutes,
-            "late_minutes": summary.late_minutes,
-            "early_minutes": summary.early_minutes,
-            "overtime_minutes": summary.overtime_minutes,
-        }.items():
+        for field, value in field_map.items():
             if hasattr(record, field) and getattr(record, field) != value:
                 setattr(record, field, value)
                 update_fields.append(field)
-                changed = True
-
-        if hasattr(record, "actual_hours"):
-            hours = summary.minutes_to_hours(summary.actual_minutes)
-            if record.actual_hours != hours:
-                record.actual_hours = hours
-                update_fields.append("actual_hours")
-                changed = True
-
-        if hasattr(record, "official_hours"):
-            hours = summary.minutes_to_hours(summary.official_minutes)
-            if record.official_hours != hours:
-                record.official_hours = hours
-                update_fields.append("official_hours")
                 changed = True
 
         if not changed:
             return summary
 
         with transaction.atomic():
-            record.save(update_fields=update_fields)
+            record.save(update_fields=update_fields, skip_engine=True)
 
         return summary

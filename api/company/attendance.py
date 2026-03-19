@@ -16,7 +16,27 @@ from django.utils import timezone
 from django.db.models import Q
 from django.core.exceptions import ValidationError   # ✅ NEW
 from attendance_center.serializers.constants import ATTENDANCE_STATUS_AR
+from attendance_center.services.workday_engine import WorkdayEngine
+from datetime import datetime, timedelta
+from django.db import models
+from whatsapp_center.services import send_attendance_status_whatsapp_notifications
 
+from attendance_center.models import (
+    AttendanceRecord,
+    WorkSchedule,
+)
+# ============================================================
+# 🔗 Cross App Imports (FIX 500 Errors)
+# ============================================================
+
+from company_manager.models import CompanyUser
+from employee_center.models import Employee
+from biotime_center.models import BiotimeLog
+
+from biotime_center.sync_service import sync_logs
+from attendance_center.services.sync_biotime_to_attendance import (
+    sync_biotime_logs_to_attendance,
+)
 
 from attendance_center.models import (
     AttendanceRecord,
@@ -27,28 +47,12 @@ from attendance_center.models import (
 from attendance_center.serializers.constants import ATTENDANCE_STATUS_AR
 
 # ============================================================
-# 🏢 Company Attendance Policy (SAFE OPTIONAL IMPORT)
+# 🏢 Company Attendance Setting (NEW CLEAN MODEL)
 # ============================================================
 
-try:
-    from attendance_center.models import AttendancePolicy
-    POLICY_ENABLED = True
-except ImportError:
-    AttendancePolicy = None
-    POLICY_ENABLED = False
+from attendance_center.models import CompanyAttendanceSetting
 
-
-from attendance_center.services.sync_biotime_to_attendance import (
-    sync_biotime_logs_to_attendance,
-)
-
-from biotime_center.sync_service import sync_logs
-from biotime_center.models import BiotimeLog
-
-from company_manager.models import CompanyUser
-from employee_center.models import Employee
-
-logger = logging.getLogger(__name__)
+POLICY_ENABLED = True  # أصبح دائمًا مفعل لأن الموديل موجود رسميًا
 
 
 # ============================================================
@@ -69,94 +73,175 @@ def _resolve_company(request):
 # 🏢 Company Attendance Policy — Company Level (READ / UPDATE)
 # ============================================================
 
+from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_http_methods
+from django.core.exceptions import ValidationError
+from django.db import transaction
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ============================================================
+# 📊 company attendance policy
+# ============================================================
+
 @login_required
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["GET", "PUT", "PATCH"])
 def company_attendance_policy(request):
     """
-    Company Level Attendance Policy
-    - Weekly Off (weekend_days)
-    - Grace Minutes
-    SAFE:
-    - لا يكسر النظام لو الموديل غير موجود
-    """
+    Company Level Attendance Setting
 
-    if not POLICY_ENABLED:
-        return JsonResponse({
-            "status": "disabled",
-            "message": "Company Attendance Policy غير مفعلة بعد."
-        }, status=200)
+    READ:
+        - grace_minutes
+        - late_after_minutes
+        - absence_after_minutes
+        - auto_absent_if_no_checkin
+
+    UPDATE:
+        - same fields only
+
+    SAFE:
+        - Multi-Tenant Safe
+        - Production Ready
+    """
 
     company = _resolve_company(request)
     if not company:
         return JsonResponse({"error": "NO_COMPANY"}, status=403)
 
-    policy, _ = AttendancePolicy.objects.get_or_create(
+    # 🔹 Clean Model — No weekend here
+    policy, _ = CompanyAttendanceSetting.objects.get_or_create(
         company=company,
         defaults={
-            "weekend_days": "fri,sat",
             "grace_minutes": 15,
+            "late_after_minutes": 30,
+            "absence_after_minutes": 180,
+            "auto_absent_if_no_checkin": True,
         }
     )
 
-    # =========================
+    # =========================================================
     # 📄 READ
-    # =========================
+    # =========================================================
     if request.method == "GET":
         return JsonResponse({
             "status": "success",
             "policy": {
-                "weekend_days": policy.weekend_days,
-                "weekend_days_ar": (
-                    policy.get_weekend_days_ar_display()
-                    if hasattr(policy, "get_weekend_days_ar_display")
-                    else policy.weekend_days
-                ),
                 "grace_minutes": policy.grace_minutes,
+                "late_after_minutes": policy.late_after_minutes,
+                "absence_after_minutes": policy.absence_after_minutes,
+                "auto_absent_if_no_checkin": policy.auto_absent_if_no_checkin,
+                "overtime_enabled": policy.overtime_enabled,
             }
         })
 
-    # =========================
+    # =========================================================
     # ✏️ UPDATE
-    # =========================
+    # =========================================================
     try:
-        body = json.loads(request.body or "{}")
+        body = json.loads(request.body.decode("utf-8") or "{}")
+
+        if not isinstance(body, dict):
+            return JsonResponse({
+                "status": "error",
+                "message": "بيانات غير صالحة."
+            }, status=400)
 
         updated_fields = []
 
-        if "weekend_days" in body:
-            policy.weekend_days = body["weekend_days"]
-            updated_fields.append("weekend_days")
-
+        # -------------------------
+        # Grace Minutes
+        # -------------------------
         if "grace_minutes" in body:
-            policy.grace_minutes = body["grace_minutes"]
-            updated_fields.append("grace_minutes")
+            try:
+                grace = int(body["grace_minutes"])
+                if grace < 0:
+                    raise ValueError
+                policy.grace_minutes = grace
+                updated_fields.append("grace_minutes")
+            except (ValueError, TypeError):
+                return JsonResponse({
+                    "status": "error",
+                    "message": "Grace Minutes يجب أن يكون رقم صحيح موجب."
+                }, status=400)
+
+        # -------------------------
+        # Late Threshold
+        # -------------------------
+        if "late_after_minutes" in body:
+            try:
+                value = int(body["late_after_minutes"])
+                if value < 0:
+                    raise ValueError
+                policy.late_after_minutes = value
+                updated_fields.append("late_after_minutes")
+            except (ValueError, TypeError):
+                return JsonResponse({
+                    "status": "error",
+                    "message": "Late After Minutes غير صالح."
+                }, status=400)
+
+        # -------------------------
+        # Absence Threshold
+        # -------------------------
+        if "absence_after_minutes" in body:
+            try:
+                value = int(body["absence_after_minutes"])
+                if value < 0:
+                    raise ValueError
+                policy.absence_after_minutes = value
+                updated_fields.append("absence_after_minutes")
+            except (ValueError, TypeError):
+                return JsonResponse({
+                    "status": "error",
+                    "message": "Absence After Minutes غير صالح."
+                }, status=400)
+
+        # -------------------------
+        # Auto Absent Flag
+        # -------------------------
+        if "auto_absent_if_no_checkin" in body:
+            policy.auto_absent_if_no_checkin = bool(
+                body["auto_absent_if_no_checkin"]
+            )
+            updated_fields.append("auto_absent_if_no_checkin")
+        # -------------------------
+        # Overtime Enabled Flag
+        # -------------------------
+        if "overtime_enabled" in body:
+            policy.overtime_enabled = bool(
+                body["overtime_enabled"]
+            )
+            updated_fields.append("overtime_enabled")
 
         if updated_fields:
             policy.save(update_fields=updated_fields)
 
         logger.info(
-            "CompanyAttendancePolicy updated | company=%s | fields=%s",
+            "CompanyAttendanceSetting updated | company=%s | fields=%s",
             company.id,
             updated_fields,
         )
 
+        # 🔥 IMPORTANT: Always return fresh policy for frontend sync
         return JsonResponse({
             "status": "success",
-            "updated_fields": updated_fields,
+            "policy": {
+                "grace_minutes": policy.grace_minutes,
+                "late_after_minutes": policy.late_after_minutes,
+                "absence_after_minutes": policy.absence_after_minutes,
+                "auto_absent_if_no_checkin": policy.auto_absent_if_no_checkin,
+                "overtime_enabled": policy.overtime_enabled,
+            }
         })
-
-    except ValidationError as ve:
-        return JsonResponse({
-            "status": "error",
-            "message": str(ve),
-        }, status=400)
-
-    except Exception as exc:
-        logger.exception("❌ Failed updating CompanyAttendancePolicy")
+    
+    except Exception:
+        logger.exception("❌ Failed updating CompanyAttendanceSetting")
         return JsonResponse({
             "status": "error",
             "message": "فشل تحديث سياسة الحضور.",
-            "exception": str(exc),
         }, status=500)
 
 # ============================================================
@@ -339,10 +424,10 @@ def attendance_unmapped_logs(request):
             "message": "فشل تحميل السجلات غير المربوطة.",
             "exception": str(exc),
         }, status=500)
-from datetime import timedelta
+
 
 # ============================================================
-# 📊 Attendance Reports — Preview (READ ONLY + CORRECT HOURS)
+# 📊 Attendance Reports — Preview V2 (ENGINE BASED + MERGED SCHEDULE)
 # ============================================================
 
 @login_required
@@ -361,58 +446,154 @@ def attendance_reports_preview(request):
 
         if from_date:
             filters &= Q(date__gte=from_date)
+
         if to_date:
             filters &= Q(date__lte=to_date)
+
         if status and status != "all":
             filters &= Q(status=status)
 
         qs = (
             AttendanceRecord.objects
             .filter(filters)
-            .select_related("employee", "biotime_log")
-            .order_by("-date")[:1000]
+            .filter(
+                Q(employee__work_start_date__isnull=True) |
+                Q(date__gte=models.F("employee__work_start_date"))
+            )
+            .select_related(
+                "employee",
+                "employee__default_work_schedule",
+                "biotime_log",
+            )
+                .order_by("-date")[:1000]
+            
         )
 
         rows = []
+        today = timezone.localdate()
 
         for r in qs:
             biotime = r.biotime_log
+            schedule = getattr(r.employee, "default_work_schedule", None)
 
-            # ===============================
-            # ⏱️ CORRECT TIME CALCULATION
-            # (TimeField SAFE)
-            # ===============================
-            work_hours = "00:00"
+            # =====================================================
+            # 🕓 Schedule Mapping
+            # =====================================================
+            schedule_type = None
+            schedule_label = None
+            period_display = None
 
-            if r.check_in and r.check_out:
-                try:
-                    in_minutes = r.check_in.hour * 60 + r.check_in.minute
-                    out_minutes = r.check_out.hour * 60 + r.check_out.minute
+            if schedule:
+                schedule_type = schedule.schedule_type
 
-                    total_minutes = max(0, out_minutes - in_minutes)
+                if schedule.schedule_type == "FULL_TIME":
+                    schedule_label = "دوام كامل"
+                    if schedule.period1_start and schedule.period1_end:
+                        period_display = (
+                            f"{schedule.period1_start.strftime('%H:%M')} "
+                            f"→ {schedule.period1_end.strftime('%H:%M')}"
+                        )
 
-                    hours = total_minutes // 60
-                    minutes = total_minutes % 60
+                elif schedule.schedule_type == "PART_TIME":
+                    schedule_label = "فترتين"
+                    periods = []
 
-                    work_hours = f"{hours:02d}:{minutes:02d}"
-                except Exception:
-                    work_hours = "00:00"
+                    if schedule.period1_start and schedule.period1_end:
+                        periods.append(
+                            f"{schedule.period1_start.strftime('%H:%M')} "
+                            f"→ {schedule.period1_end.strftime('%H:%M')}"
+                        )
 
+                    if schedule.period2_start and schedule.period2_end:
+                        periods.append(
+                            f"{schedule.period2_start.strftime('%H:%M')} "
+                            f"→ {schedule.period2_end.strftime('%H:%M')}"
+                        )
+
+                    period_display = "\n".join(periods) if periods else None
+
+                elif schedule.schedule_type == "HOURLY":
+                    schedule_label = "بالساعات"
+                    if schedule.target_daily_hours:
+                        period_display = (
+                            f"{schedule.target_daily_hours} ساعات مطلوبة"
+                        )
+
+                else:
+                    schedule_label = schedule.schedule_type
+
+            # =====================================================
+            # 🧠 Engine Results (Source of Truth)
+            # =====================================================
+            actual_hours = r.actual_hours if r.actual_hours is not None else 0
+            late_minutes = r.late_minutes if r.late_minutes else 0
+            overtime_minutes = r.overtime_minutes if r.overtime_minutes else 0
+
+            # =====================================================
+            # 🧠 Smart Display Status Layer (REPORT ONLY)
+            # =====================================================
+            display_status = r.status
+            display_status_ar = ATTENDANCE_STATUS_AR.get(r.status, r.status)
+
+            # ⚫ Terminated Employee (SAFE — Supports different Employee schemas)
+            if r.employee.status and str(r.employee.status).upper() == "TERMINATED":
+                display_status = "terminated"
+                display_status_ar = "منتهي خدمة"
+
+            # 🟣 Weekend
+            elif schedule and schedule.is_weekend(r.date):
+                display_status = "weekend"
+                display_status_ar = "عطلة"
+
+            # ⏳ Before Start (Today Only)
+            elif (
+                r.date == today
+                and not r.check_in
+                and not r.is_finalized
+                and schedule
+                and schedule.period1_start
+            ):
+                now_time = timezone.localtime().time()
+                if now_time < schedule.period1_start:
+                    display_status = "before_start"
+                    display_status_ar = "قبل المباشرة"
+
+            # =====================================================
+            # 📦 Append Row
+            # =====================================================
             rows.append({
+                # 👤 Employee
                 "employee": r.employee.full_name,
+                "employee_id": r.employee.id,
+                "photo_url": r.employee.photo_url,
+
+                # 📅 Date
                 "date": r.date,
 
-                "status": r.status,
+                # 🔹 Status (Smart Layer)
+                "status": display_status,
+                "status_ar": display_status_ar,
 
+                # 🕓 Schedule
+                "schedule_type": schedule_type,
+                "schedule_label": schedule_label,
+                "period_display": period_display,
+
+                # ⏰ Times
                 "check_in": r.check_in,
                 "check_out": r.check_out,
 
-                # ✅ SOURCE OF TRUTH
-                "work_hours": work_hours,
+                # 🧮 Engine Calculations
+                "actual_hours": actual_hours,
+                "late_minutes": late_minutes,
+                "overtime_minutes": overtime_minutes,
 
-                "device_name": biotime.terminal_alias if biotime else None,
-                "device_sn": biotime.device_sn if biotime else None,
-                "location": getattr(biotime, "device_ip", None) if biotime else None,
+                # 🌍 Location
+                "location": (
+                    biotime.device_ip
+                    if biotime and getattr(biotime, "device_ip", None)
+                    else None
+                ),
             })
 
         return JsonResponse({
@@ -421,7 +602,7 @@ def attendance_reports_preview(request):
             "rows": rows,
         })
 
-    except Exception as exc:
+    except Exception:
         logger.exception("❌ Attendance report failed")
         return JsonResponse({
             "status": "error",
@@ -570,9 +751,139 @@ def employee_attendance_preview(request, employee_id):
             "message": "فشل تحميل حركات الموظف.",
             "exception": str(exc),
         }, status=500)
+# ============================================================
+# 🗓 Employee Schedule Preview (SMART — For Manual Entry UI)
+# ============================================================
+
+@login_required
+@require_http_methods(["GET"])
+def employee_schedule_preview(request):
+    """
+    Returns employee schedule snapshot for a specific date.
+
+    Query Params:
+        - employee_id
+        - date (YYYY-MM-DD)
+
+    Response:
+    {
+        schedule_type,
+        periods: [],
+        is_weekend,
+        target_daily_hours
+    }
+    """
+
+    from django.http import JsonResponse
+    from django.utils.dateparse import parse_date
+
+    company = _resolve_company(request)
+    if not company:
+        return JsonResponse({"error": "NO_COMPANY"}, status=403)
+
+    employee_id = request.GET.get("employee_id")
+    date_str = request.GET.get("date")
+
+    if not employee_id or not date_str:
+        return JsonResponse({
+            "status": "error",
+            "message": "employee_id و date مطلوبة.",
+        }, status=400)
+
+    # ========================================================
+    # 🔧 Clean Date (fix trailing slash issue)
+    # ========================================================
+    date_str = date_str.strip().rstrip("/")
+
+    work_date = parse_date(date_str)
+    if not work_date:
+        return JsonResponse({
+            "status": "error",
+            "message": "تاريخ غير صالح.",
+        }, status=400)
+
+    # ========================================================
+    # 👤 Get Employee
+    # ========================================================
+    employee = (
+        Employee.objects
+        .select_related("default_work_schedule")
+        .filter(id=employee_id, company=company)
+        .first()
+    )
+
+    if not employee:
+        return JsonResponse({
+            "status": "error",
+            "message": "الموظف غير موجود.",
+        }, status=404)
+
+    schedule = employee.default_work_schedule
+
+    if not schedule:
+        return JsonResponse({
+            "status": "success",
+            "schedule_type": None,
+            "periods": [],
+            "is_weekend": False,
+            "target_daily_hours": None,
+        })
+
+    # ========================================================
+    # 🕒 Build Periods
+    # ========================================================
+    periods = []
+
+    if schedule.schedule_type == "FULL_TIME":
+        if schedule.period1_start and schedule.period1_end:
+            periods.append({
+                "start": schedule.period1_start.strftime("%H:%M"),
+                "end": schedule.period1_end.strftime("%H:%M"),
+            })
+
+    elif schedule.schedule_type == "PART_TIME":
+        if schedule.period1_start and schedule.period1_end:
+            periods.append({
+                "start": schedule.period1_start.strftime("%H:%M"),
+                "end": schedule.period1_end.strftime("%H:%M"),
+            })
+
+        if schedule.period2_start and schedule.period2_end:
+            periods.append({
+                "start": schedule.period2_start.strftime("%H:%M"),
+                "end": schedule.period2_end.strftime("%H:%M"),
+            })
+
+    elif schedule.schedule_type == "HOURLY":
+        periods = []  # hourly has no fixed periods
+
+    # ========================================================
+    # 🟣 Weekend Detection (Safe)
+    # ========================================================
+    weekday_code = work_date.strftime("%a").lower()
+
+    weekend_raw = schedule.weekend_days or ""
+    weekend_days = weekend_raw.lower() if isinstance(weekend_raw, str) else ""
+
+    is_weekend = weekday_code in weekend_days
+
+    # ========================================================
+    # ✅ Final Response
+    # ========================================================
+    return JsonResponse({
+        "status": "success",
+        "schedule_type": schedule.schedule_type,
+        "periods": periods,
+        "is_weekend": is_weekend,
+        "target_daily_hours": (
+            str(schedule.target_daily_hours)
+            if getattr(schedule, "target_daily_hours", None)
+            else None
+        ),
+    })
 
 # ============================================================
-# 🕒 WorkSchedule CRUD APIs — Phase F.5.1 (Hardened)
+# 🕒 WorkSchedule CRUD APIs — Phase F.5.1 (Hardened + Update Safe)
 # ============================================================
 
 @login_required
@@ -580,18 +891,20 @@ def employee_attendance_preview(request, employee_id):
 def work_schedules(request):
     """
     GET  → List schedules
-    POST → Create schedule
+    POST → Create OR Update schedule
     """
 
     company = _resolve_company(request)
     if not company:
         return JsonResponse({"error": "NO_COMPANY"}, status=403)
 
-    # =========================
+    # ============================================================
     # 📄 LIST
-    # =========================
+    # ============================================================
     if request.method == "GET":
-        schedules = WorkSchedule.objects.filter(company=company).order_by("name")
+        schedules = WorkSchedule.objects.filter(
+            company=company
+        ).order_by("name")
 
         payload = [{
             "id": s.id,
@@ -601,13 +914,8 @@ def work_schedules(request):
             "period1_end": s.period1_end,
             "period2_start": s.period2_start,
             "period2_end": s.period2_end,
-
-            # 🔹 Raw (Backward compatible)
             "weekend_days": s.weekend_days,
-
-            # 🔹 Arabic display for UI
             "weekend_days_ar": s.get_weekend_days_ar_display(),
-
             "target_daily_hours": s.target_daily_hours,
             "allow_night_overlap": s.allow_night_overlap,
             "early_arrival_minutes": s.early_arrival_minutes,
@@ -615,11 +923,14 @@ def work_schedules(request):
             "is_active": s.is_active,
         } for s in schedules]
 
-        return JsonResponse({"status": "success", "schedules": payload})
+        return JsonResponse({
+            "status": "success",
+            "schedules": payload
+        })
 
-    # =========================
-    # ➕ CREATE
-    # =========================
+    # ============================================================
+    # ➕ CREATE / ✏️ UPDATE
+    # ============================================================
     try:
         body = json.loads(request.body or "{}")
 
@@ -627,6 +938,58 @@ def work_schedules(request):
         if not name:
             return JsonResponse({"error": "NAME_REQUIRED"}, status=400)
 
+        schedule_id = body.get("id")
+
+        # ========================================================
+        # ✏️ UPDATE MODE
+        # ========================================================
+        if schedule_id:
+            schedule = WorkSchedule.objects.filter(
+                id=schedule_id,
+                company=company
+            ).first()
+
+            if not schedule:
+                return JsonResponse({"error": "NOT_FOUND"}, status=404)
+
+            editable_fields = [
+                "name",
+                "schedule_type",
+                "period1_start",
+                "period1_end",
+                "period2_start",
+                "period2_end",
+                "weekend_days",
+                "target_daily_hours",
+                "allow_night_overlap",
+                "early_arrival_minutes",
+                "early_exit_minutes",
+            ]
+
+            updated_fields = []
+
+            for field in editable_fields:
+                if field in body:
+                    setattr(schedule, field, body.get(field))
+                    updated_fields.append(field)
+
+            schedule.save(update_fields=updated_fields)
+
+            logger.info(
+                "WorkSchedule updated | id=%s | company=%s",
+                schedule.id,
+                company.id
+            )
+
+            return JsonResponse({
+                "status": "success",
+                "mode": "updated",
+                "id": schedule.id
+            })
+
+        # ========================================================
+        # ➕ CREATE MODE
+        # ========================================================
         try:
             schedule = WorkSchedule.objects.create(
                 company=company,
@@ -636,7 +999,7 @@ def work_schedules(request):
                 period1_end=body.get("period1_end"),
                 period2_start=body.get("period2_start"),
                 period2_end=body.get("period2_end"),
-                weekend_days=body.get("weekend_days", "fri,sat"),
+                weekend_days=body.get("weekend_days", ""),
                 target_daily_hours=body.get("target_daily_hours"),
                 allow_night_overlap=body.get("allow_night_overlap", True),
                 early_arrival_minutes=body.get("early_arrival_minutes", 0),
@@ -649,17 +1012,25 @@ def work_schedules(request):
                 "message": str(ve),
             }, status=400)
 
-        logger.info("WorkSchedule created | id=%s | company=%s", schedule.id, company.id)
-        return JsonResponse({"status": "success", "id": schedule.id})
+        logger.info(
+            "WorkSchedule created | id=%s | company=%s",
+            schedule.id,
+            company.id
+        )
+
+        return JsonResponse({
+            "status": "success",
+            "mode": "created",
+            "id": schedule.id
+        })
 
     except Exception as exc:
-        logger.exception("❌ Failed creating WorkSchedule")
+        logger.exception("❌ Failed saving WorkSchedule")
         return JsonResponse({
             "status": "error",
-            "message": "فشل إنشاء جدول الدوام.",
+            "message": "فشل حفظ جدول الدوام.",
             "exception": str(exc),
         }, status=500)
-
 
 @login_required
 @require_http_methods(["PUT", "DELETE"])
@@ -894,5 +1265,353 @@ def employee_assign_work_schedule(request):
         return JsonResponse({
             "status": "error",
             "message": "حدث خطأ أثناء ربط جدول الدوام.",
+            "exception": str(exc),
+        }, status=500)
+    
+# ============================================================
+# 🟦 Manual Attendance Entry — Phase M1 (Safe + Finalization Aware)
+# ============================================================
+
+@login_required
+@require_http_methods(["POST"])
+def attendance_manual_entry(request):
+    """
+    Manual Attendance Entry (Single Employee)
+
+    Payload:
+    {
+        "employee_id": 12,
+        "date": "2026-02-18",
+        "check_in": "09:05",      # optional
+        "check_out": "17:10"      # optional
+    }
+
+    Features:
+    - Multi-tenant safe
+    - Respects Finalization
+    - Uses WorkdayEngine as source of truth
+    - Allows check-in only / check-out only
+    """
+
+    
+    from django.utils.dateparse import parse_date, parse_time
+
+    company = _resolve_company(request)
+    if not company:
+        return JsonResponse({"error": "NO_COMPANY"}, status=403)
+
+    try:
+        body = json.loads(request.body or "{}")
+
+        employee_id = body.get("employee_id")
+        date_str = body.get("date")
+        check_in_str = body.get("check_in")
+        check_out_str = body.get("check_out")
+
+        if not employee_id or not date_str:
+            return JsonResponse({
+                "status": "error",
+                "message": "employee_id و date مطلوبة.",
+            }, status=400)
+
+        # =========================
+        # 🔒 Resolve Employee (Company Scoped)
+        # =========================
+        employee = (
+            Employee.objects
+            .filter(id=employee_id, company=company)
+            .first()
+        )
+
+        if not employee:
+            return JsonResponse({
+                "status": "error",
+                "message": "الموظف غير موجود.",
+            }, status=404)
+
+        work_date = parse_date(date_str)
+        if not work_date:
+            return JsonResponse({
+                "status": "error",
+                "message": "تاريخ غير صالح.",
+            }, status=400)
+
+        # منع التاريخ المستقبلي
+        if work_date > timezone.localdate():
+            return JsonResponse({
+                "status": "error",
+                "message": "لا يمكن إدخال حركة بتاريخ مستقبلي.",
+            }, status=400)
+
+        # =========================
+        # 📝 Get or Create Record
+        # =========================
+        record, _ = AttendanceRecord.objects.get_or_create(
+            employee=employee,
+            date=work_date,
+        )
+
+        # =========================
+        # ⏱ Parse Times
+        # =========================
+        if check_in_str:
+            t = parse_time(check_in_str)
+            if not t:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "وقت دخول غير صالح.",
+                }, status=400)
+            record.check_in = t
+
+        if check_out_str:
+            t = parse_time(check_out_str)
+            if not t:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "وقت خروج غير صالح.",
+                }, status=400)
+            record.check_out = t
+
+        # =========================
+        # 🔓 Handle Finalization
+        # =========================
+        was_finalized = record.is_finalized
+
+        if was_finalized:
+            record.is_finalized = False
+
+        # حفظ أولي بدون تشغيل Engine
+        record.save(skip_engine=True)
+
+        # =========================
+        # 🧠 Apply Engine (Force Mode)
+        # =========================
+        WorkdayEngine.apply(record, force=True)
+
+        # =========================
+        # 📲 WhatsApp Attendance Hook
+        # يرسل فقط عند late / absent
+        # =========================
+        try:
+            send_attendance_status_whatsapp_notifications(
+                attendance_record=record,
+                company=company,
+                send_to_employee=True,
+                send_to_user=True,
+            )
+        except Exception:
+            logger.exception(
+                "⚠ Attendance WhatsApp hook failed (manual_entry) | record_id=%s",
+                record.id,
+            )
+
+        # =========================
+        # 🔒 Re-Finalize if needed
+        # =========================
+        if was_finalized:
+            record.is_finalized = True
+            record.finalized_at = timezone.now()
+            record.save(
+                update_fields=["is_finalized", "finalized_at"],
+                skip_engine=True,
+            )
+        logger.info(
+            "Manual attendance entry | employee=%s | date=%s | finalized=%s",
+            employee.id,
+            work_date,
+            was_finalized,
+        )
+
+        return JsonResponse({
+            "status": "success",
+            "employee_id": employee.id,
+            "date": work_date,
+            "check_in": record.check_in,
+            "check_out": record.check_out,
+            "actual_hours": record.actual_hours,
+            "late_minutes": record.late_minutes,
+            "overtime_minutes": record.overtime_minutes,
+            "is_finalized": record.is_finalized,
+        })
+
+    except Exception as exc:
+        logger.exception("❌ Manual attendance entry failed")
+        return JsonResponse({
+            "status": "error",
+            "message": "فشل إدخال الحركة اليدوية.",
+            "exception": str(exc),
+        }, status=500)
+
+@login_required
+@require_http_methods(["POST"])
+def attendance_manual_action(request):
+
+    company = _resolve_company(request)
+    if not company:
+        return JsonResponse({"error": "NO_COMPANY"}, status=403)
+
+    try:
+        body = json.loads(request.body or "{}")
+
+        mode = body.get("mode", "commit")
+        employee_ids = body.get("employee_ids", [])
+        date_str = body.get("date")
+        check_in_raw = body.get("check_in")
+        check_out_raw = body.get("check_out")
+        force_reopen = bool(body.get("force_reopen", False))
+
+        if not date_str:
+            return JsonResponse({
+                "status": "error",
+                "message": "التاريخ مطلوب."
+            }, status=400)
+
+        work_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+
+        # =====================================================
+        # 🔎 Resolve Employees
+        # =====================================================
+        if employee_ids == ["all"]:
+            employees = Employee.objects.filter(company=company)
+        else:
+            employees = Employee.objects.filter(
+                company=company,
+                id__in=employee_ids
+            )
+
+        if not employees.exists():
+            return JsonResponse({
+                "status": "error",
+                "message": "لا يوجد موظفين مطابقين."
+            }, status=404)
+
+        preview_rows = []
+        updated = 0
+
+        # =====================================================
+        # 🔄 Loop Employees
+        # =====================================================
+        for emp in employees:
+
+            schedule = getattr(emp, "default_work_schedule", None)
+            schedule_type = schedule.schedule_type if schedule else None
+
+            record = AttendanceRecord.objects.filter(
+                employee=emp,
+                date=work_date
+            ).first()
+
+            existing_in = record.check_in if record else None
+            existing_out = record.check_out if record else None
+
+            # ===============================
+            # 🟡 PREVIEW
+            # ===============================
+            if mode == "preview":
+                preview_rows.append({
+                    "employee_id": emp.id,
+                    "employee_name": emp.full_name,
+                    "schedule_type": schedule_type,
+                    "existing_check_in": existing_in,
+                    "existing_check_out": existing_out,
+                })
+                continue
+
+            # ===============================
+            # 🟢 COMMIT
+            # ===============================
+
+            record, _ = AttendanceRecord.objects.get_or_create(
+                employee=emp,
+                date=work_date,
+            )
+
+            # 🔓 Reopen If Needed
+            if hasattr(record, "is_finalized"):
+                if record.is_finalized and force_reopen:
+                    record.is_finalized = False
+                    if hasattr(record, "finalized_at"):
+                        record.finalized_at = None
+
+            # -------------------------------------------------
+            # 🟢 HOURLY (Use check-in/out like FULL_TIME)
+            # -------------------------------------------------
+            if schedule_type == "HOURLY":
+
+                if check_in_raw:
+                    record.check_in = datetime.strptime(
+                        check_in_raw, "%H:%M"
+                    ).time()
+
+                if check_out_raw:
+                    record.check_out = datetime.strptime(
+                        check_out_raw, "%H:%M"
+                    ).time()
+
+            # -------------------------------------------------
+            # 🟢 FULL_TIME + FLEXIBLE
+            # -------------------------------------------------
+            else:
+                if check_in_raw:
+                    record.check_in = datetime.strptime(
+                        check_in_raw, "%H:%M"
+                    ).time()
+
+                if check_out_raw:
+                    record.check_out = datetime.strptime(
+                        check_out_raw, "%H:%M"
+                    ).time()
+
+            record.save(skip_engine=True)
+
+            # 🔁 Apply Engine (Force Mode — Idempotent Safe)
+            try:
+                WorkdayEngine.apply(record, force=True)
+            except Exception:
+                logger.exception(
+                    "❌ Manual Engine Apply Failed | record_id=%s",
+                    record.id
+                )
+            else:
+                # =========================
+                # 📲 WhatsApp Attendance Hook
+                # يرسل فقط عند late / absent
+                # =========================
+                try:
+                    send_attendance_status_whatsapp_notifications(
+                        attendance_record=record,
+                        company=company,
+                        send_to_employee=True,
+                        send_to_user=True,
+                    )
+                except Exception:
+                    logger.exception(
+                        "⚠ Attendance WhatsApp hook failed (manual_action) | record_id=%s",
+                        record.id,
+                    )
+
+            updated += 1
+        # ===============================
+        # 🔁 Return
+        # ===============================
+        if mode == "preview":
+            return JsonResponse({
+                "status": "success",
+                "mode": "preview",
+                "count": len(preview_rows),
+                "rows": preview_rows,
+            })
+
+        return JsonResponse({
+            "status": "success",
+            "mode": "commit",
+            "updated_records": updated,
+        })
+
+    except Exception as exc:
+        logger.exception("❌ Manual Attendance Action Failed")
+        return JsonResponse({
+            "status": "error",
+            "message": "فشل تنفيذ الحركة اليدوية.",
             "exception": str(exc),
         }, status=500)

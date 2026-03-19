@@ -1,26 +1,57 @@
 # ============================================================
 # 🔐 Primey HR Cloud — Logout API
-# V4 — HARD LOGOUT (FINAL)
+# AUTH Ω FINAL — Enterprise Hard Logout
 # ============================================================
 
 from django.contrib.auth import logout
-from django.http import JsonResponse
-from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse, HttpResponse
+from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_protect
+from auth_center.models import ActiveUserSession
 
-
-@csrf_exempt
-@require_POST
+@csrf_protect
+@require_http_methods(["POST", "OPTIONS"])
 def logout_api(request):
     """
     POST /api/auth/logout/
 
-    HARD LOGOUT:
-    - logout(request)
-    - session.flush()
-    - delete sessionid cookie
+    ENTERPRISE LOGOUT FLOW
+    ----------------------
+    ✔ destroy django session
+    ✔ flush session storage
+    ✔ delete cookies
+    ✔ SPA safe
+    ✔ multi-tab safe
+    ✔ middleware safe
     """
 
+    # --------------------------------------------------------
+    # 🟡 CORS PREFLIGHT
+    # --------------------------------------------------------
+    if request.method == "OPTIONS":
+        response = HttpResponse(status=200)
+        response["Access-Control-Allow-Credentials"] = "true"
+        response["Access-Control-Allow-Headers"] = "Content-Type"
+        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        return response
+    # --------------------------------------------------------
+    # 🔐 Ω+ SESSION DEACTIVATION (PATCH LAYER)
+    # --------------------------------------------------------
+    try:
+        session_key = request.session.session_key
+
+        if session_key:
+            ActiveUserSession.objects.filter(
+                session_key=session_key,
+                is_active=True,
+            ).update(
+                is_active=False
+            )
+    except Exception:
+        pass
+    # --------------------------------------------------------
+    # 🔐 DJANGO LOGOUT
+    # --------------------------------------------------------
     logout(request)
 
     try:
@@ -28,11 +59,32 @@ def logout_api(request):
     except Exception:
         pass
 
+    # --------------------------------------------------------
+    # ✅ RESPONSE
+    # --------------------------------------------------------
     response = JsonResponse(
-        {"success": True, "message": "تم تسجيل الخروج بنجاح"},
-        status=200
+        {
+            "success": True,
+            "message": "Logout successful",
+        },
+        status=200,
     )
 
-    response.delete_cookie("sessionid", path="/")
+    # --------------------------------------------------------
+    # 🍪 HARD COOKIE DELETE
+    # --------------------------------------------------------
+    response.delete_cookie(
+        "sessionid",
+        path="/",
+        samesite="Lax",
+    )
+
+    response.delete_cookie(
+        "csrftoken",
+        path="/",
+        samesite="Lax",
+    )
+
+    response["Access-Control-Allow-Credentials"] = "true"
 
     return response

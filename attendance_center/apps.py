@@ -1,7 +1,7 @@
 # ================================================================
 # 🕒 Attendance Center — App Config
-# 🔥 Auto Sync Scheduler Engine — SAFE BOOT LOADER
-# Phase H.7.1 — Production Safe
+# 🔥 Scheduler Boot Loader (Stable Local + Production)
+# Version: H.9 — Clean & Deterministic
 # ================================================================
 
 from django.apps import AppConfig
@@ -17,51 +17,24 @@ class AttendanceCenterConfig(AppConfig):
     name = "attendance_center"
     verbose_name = "Attendance Center"
 
-    def ready(self):
-        """
-        🛡️ SAFE APScheduler Boot
-        - يعمل مرة واحدة فقط
-        - لا DB Access أثناء init
-        - لا Circular Imports
-        - متوافق مع runserver / autoreload
-        """
+def ready(self):
 
-        # ------------------------------------------------------------
-        # 1️⃣ Global Feature Flag
-        # ------------------------------------------------------------
-        if not getattr(settings, "SCHEDULER_AUTOSTART", False):
-            logger.info(
-                "⏸️ Attendance APScheduler disabled "
-                "(SCHEDULER_AUTOSTART=False)"
-            )
-            return
+    if not getattr(settings, "SCHEDULER_AUTOSTART", False):
+        logger.info("⏸️ Attendance Scheduler disabled")
+        return
 
-        # ------------------------------------------------------------
-        # 2️⃣ Prevent double-run (runserver / autoreload)
-        # ------------------------------------------------------------
-        if os.environ.get("RUN_MAIN") != "true":
-            return
+    try:
+        from attendance_center.services.biotime_attendance_scheduler import (
+            start_biotime_attendance_scheduler
+        )
 
-        # ------------------------------------------------------------
-        # 3️⃣ Lazy Import (NO module-level import)
-        # ------------------------------------------------------------
-        try:
-            from attendance_center.scheduler import start_auto_sync_scheduler
-        except Exception as exc:
-            logger.error(
-                "❌ Failed to import Attendance Scheduler engine",
-                exc_info=exc,
-            )
-            return
+        start_biotime_attendance_scheduler()
 
-        # ------------------------------------------------------------
-        # 4️⃣ Start Scheduler (SAFE)
-        # ------------------------------------------------------------
-        try:
-            start_auto_sync_scheduler()
-            logger.info("✅ Attendance APScheduler started successfully")
-        except Exception as exc:
-            logger.exception(
-                "❌ Attendance APScheduler failed to start",
-                exc_info=exc,
-            )
+        logger.info("🚀 Attendance Scheduler started successfully")
+
+    except Exception as exc:
+        logger.exception(
+            "❌ Attendance Scheduler failed to start",
+            exc_info=exc,
+        )
+

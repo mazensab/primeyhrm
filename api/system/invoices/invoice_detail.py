@@ -1,103 +1,73 @@
-# ============================================================
-# 📄 api/system/invoices/invoice_detail.py
-# ⚙️ Version: V1.0 Ultra Stable
-# Primey HR Cloud | System Invoice Detail
-# ============================================================
+# ================================================================
+# PRIMEY HR CLOUD
+# System Invoice Detail API
+# ================================================================
 
 from django.http import JsonResponse
-from django.views.decorators.http import require_GET
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import get_object_or_404
+from django.views.decorators.http import require_GET
 
-from billing_center.models import Invoice
-from company_manager.permissions import system_permission_required
+from billing_center.models import Invoice, Payment
 
-
-# ============================================================
-# 🔁 Response Helpers
-# ============================================================
-
-def success(data):
-    return JsonResponse(
-        data,
-        status=200,
-        json_dumps_params={"ensure_ascii": False},
-    )
-
-
-# ============================================================
-# 🧾 SYSTEM — Invoice Detail
-# ============================================================
 
 @require_GET
 @login_required
-@system_permission_required("SYSTEM_ADMIN")
-def system_invoice_detail(request, invoice_id):
-    """
-    ============================================================
-    🧾 System Invoice Detail API
-    ------------------------------------------------------------
-    ✔ Single invoice
-    ✔ Subscription snapshot
-    ✔ Plan info
-    ✔ Company info
-    ✔ Payments ready (future)
-    ✔ Read-only
-    ✔ Impersonation safe
-    ============================================================
-    """
+def system_invoice_detail(request, invoice_number):
 
-    invoice = get_object_or_404(
-        Invoice.objects.select_related(
-            "company",
-            "subscription",
-            "subscription__plan",
-        ),
-        id=invoice_id
+    try:
+        invoice = (
+            Invoice.objects
+            .select_related("company", "subscription__plan")
+            .get(invoice_number=invoice_number)
+        )
+
+    except Invoice.DoesNotExist:
+        return JsonResponse(
+            {"error": "Invoice not found"},
+            status=404
+        )
+
+    payment = (
+        Payment.objects
+        .filter(invoice=invoice)
+        .order_by("-paid_at", "-id")
+        .first()
     )
 
-    subscription = invoice.subscription
-    plan = subscription.plan if subscription else None
+    subtotal = invoice.subtotal_amount or 0
+    discount = invoice.discount_amount or 0
+    total = invoice.total_amount or 0
+    vat = total - subtotal + discount
 
     data = {
-        # ---------------- Invoice ----------------
         "id": invoice.id,
-        "number": invoice.number,
+        "invoice_number": invoice.invoice_number,
         "status": invoice.status,
-        "total_amount": float(invoice.total_amount),
-        "currency": invoice.currency,
-        "issued_at": (
-            invoice.issued_at.isoformat()
-            if invoice.issued_at
-            else None
+
+        "company_name": (
+            invoice.company.name
+            if invoice.company
+            else "-"
         ),
 
-        # ---------------- Company ----------------
-        "company": {
-            "id": invoice.company_id,
-            "name": invoice.company.name if invoice.company else None,
-        },
+        "plan_name": (
+            invoice.subscription.plan.name
+            if invoice.subscription and invoice.subscription.plan
+            else "-"
+        ),
 
-        # ---------------- Subscription Snapshot ----------------
-        "subscription": {
-            "id": subscription.id if subscription else None,
-            "starts_at": (
-                subscription.starts_at.isoformat()
-                if subscription and subscription.starts_at
-                else None
-            ),
-            "ends_at": (
-                subscription.ends_at.isoformat()
-                if subscription and subscription.ends_at
-                else None
-            ),
-            "plan": {
-                "id": plan.id if plan else None,
-                "name": plan.name if plan else None,
-                "price": float(plan.price) if plan else None,
-                "duration": plan.duration if plan else None,
-            } if plan else None,
-        },
+        "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else None,
+        "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+
+        "subtotal": str(subtotal),
+        "discount": str(discount),
+        "vat": str(vat),
+        "total": str(total),
+
+        "payment_method": payment.method if payment else None,
+        "paid_at": payment.paid_at.isoformat() if payment and payment.paid_at else None,
+
+        "currency": "SAR",
     }
 
-    return success(data)
+    return JsonResponse(data, json_dumps_params={"ensure_ascii": False})

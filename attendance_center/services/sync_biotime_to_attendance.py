@@ -8,138 +8,177 @@
 # ✅ Staging Ready (Unmapped Logs Preserved)
 # ✔ WorkdayEngine Auto Apply (SAFE)
 # ✔ Auto-Recalc Unknown Records (PATCH) 🔒
+# ✔ MT-3 Isolation Patch (BiotimeEmployee FK Resolution) 🔥
 # ✔ No Breaking Changes
+# ✔ WhatsApp Hook for Late / Absent (Non-Blocking)
 # ============================================================
 
+from datetime import datetime, time, timedelta
+import logging
+
 from django.utils import timezone
-from django.db import IntegrityError, transaction
 
 from biotime_center.models import BiotimeLog, BiotimeEmployee
 from attendance_center.models import AttendanceRecord
 from employee_center.models import Employee
 
-# 🧠 Attendance Calculation Engine
 from attendance_center.services.workday_engine import WorkdayEngine
+from attendance_center.services.services import WorkScheduleResolver
+from whatsapp_center.services import send_attendance_status_whatsapp_notifications
 
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# 🧠 0️⃣ AttendanceSyncService (V4.9 Stable)
+# 📲 WhatsApp Attendance Hook Helper
+# يمنع تكرار الإرسال داخل نفس دورة المزامنة
+# ============================================================
+
+def _send_attendance_whatsapp_once(
+    *,
+    record,
+    company,
+    notified_records: set[int],
+) -> bool:
+    """
+    إرسال واتساب مرة واحدة فقط لكل AttendanceRecord داخل نفس sync run
+    وفقط عند late / absent.
+    """
+    try:
+        if not record or not getattr(record, "id", None):
+            return False
+
+        if record.id in notified_records:
+            return False
+
+        result = send_attendance_status_whatsapp_notifications(
+            attendance_record=record,
+            company=company,
+            send_to_employee=True,
+            send_to_user=True,
+        )
+
+        if result and result.get("success") and result.get("sent_count", 0) > 0:
+            notified_records.add(record.id)
+            return True
+
+        # حتى لو لم يتم الإرسال بسبب عدم وجود رقم
+        # أو لأن الحالة ليست late / absent
+        # نمنع إعادة المحاولة داخل نفس الدورة.
+        notified_records.add(record.id)
+        return False
+
+    except Exception:
+        logger.exception(
+            "⚠ Attendance WhatsApp hook failed during sync | record_id=%s",
+            getattr(record, "id", None),
+        )
+        return False
+
+
+# ============================================================
+# 🧠 AttendanceSyncService (V4.9 Stable)
 # ============================================================
 class AttendanceSyncService:
-    """
-    🧠 خدمة مزامنة سجلات Biotime مع Attendance Center
-    - Wrapper جاهز للـ Views / Scheduler
-    - لا يكسر أي منطق داخلي
-    """
 
-    def sync(self, start_date=None, end_date=None):
-        """
-        🔄 تنفيذ المزامنة العامة
-        """
-        return sync_biotime_logs_to_attendance(start_date, end_date)
+    def sync(self, company=None, start_date=None, end_date=None):
+        return sync_biotime_logs_to_attendance(
+            company=company,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
-    def sync_today(self):
-        """
-        🔄 مزامنة سجلات اليوم فقط
-        """
+    def sync_today(self, company=None):
         today = timezone.now().date()
-        return sync_biotime_logs_to_attendance(today, today)
+        return sync_biotime_logs_to_attendance(
+            company=company,
+            start_date=today,
+            end_date=today,
+        )
 
 
 # ============================================================
-# 🧠 Smart Employee Resolver (READ-ONLY SAFE)
+# 🧠 Smart Employee Resolver (MT-3 Multi-Tenant Safe)
 # ============================================================
 
 def resolve_employee_from_log(log):
-    """
-    🔎 محاولة ربط Log بموظف النظام بطريقة آمنة.
-
-    ترتيب البحث (حسب المعمارية الصحيحة):
-
-    1) Employee.biotime_code مباشرة.
-    2) BiotimeEmployee.card_number → Employee.biotime_employee.
-    3) BiotimeEmployee.employee_id → Employee.biotime_employee.
-    4) Fallback أخير: Employee.id (لأغراض الاختبار فقط).
-
-    ⚠️ لا يتم إنشاء أي Auto-Link أو تعديل في قاعدة البيانات.
-    """
 
     raw_code = getattr(log, "employee_code", None)
     if not raw_code:
         return None
 
-    # --------------------------------------------
-    # 🧹 Normalize code
-    # --------------------------------------------
     emp_code = str(raw_code).strip()
     emp_code = emp_code.lstrip("0") or emp_code
 
-    # --------------------------------------------
-    # 🥇 Direct lookup in Employee.biotime_code
-    # --------------------------------------------
-    employee = (
-        Employee.objects
-        .filter(biotime_code=emp_code)
-        .select_related("company")
-        .first()
-    )
-    if employee:
-        return employee
-
-    # --------------------------------------------
-    # 🥈 Fallback via BiotimeEmployee.card_number
-    #     ثم الربط عبر Employee.biotime_employee
-    # --------------------------------------------
+    # =====================================================
+    # 🥇 PRIMARY RESOLUTION
+    # BiotimeEmployee → Employee (Scoped + FK Driven)
+    # =====================================================
     try:
-        biotime_emp = (
+
+        bt_emp = (
             BiotimeEmployee.objects
-            .filter(card_number=emp_code)
-            .only("id")
+            .filter(employee_id__iexact=emp_code)
+            .select_related("company")
             .first()
         )
 
-        if biotime_emp:
+        if bt_emp:
             employee = (
                 Employee.objects
-                .filter(biotime_employee=biotime_emp)
+                .filter(biotime_employee=bt_emp)
                 .select_related("company")
                 .first()
             )
+
+            if employee:
+                return employee
+
+    except Exception:
+        logger.exception("❌ MT-3 Resolver Failed (Primary)")
+
+    # =====================================================
+    # 🥈 CARD NUMBER FALLBACK (Scoped through FK)
+    # =====================================================
+    try:
+
+        bt_emp = (
+            BiotimeEmployee.objects
+            .filter(card_number=emp_code)
+            .first()
+        )
+
+        if bt_emp:
+            employee = (
+                Employee.objects
+                .filter(biotime_employee=bt_emp)
+                .select_related("company")
+                .first()
+            )
+
             if employee:
                 return employee
 
     except Exception:
         logger.exception("❌ Failed resolving employee via card_number fallback")
 
-    # --------------------------------------------
-    # 🥉 Fallback via BiotimeEmployee.employee_id
-    # --------------------------------------------
+    # =====================================================
+    # 🥉 LEGACY FALLBACK (TEST ONLY)
+    # =====================================================
     try:
+
+        employee = (
+            Employee.objects
+            .filter(biotime_code=emp_code)
+            .select_related("company")
+            .first()
+        )
+
+        if employee:
+            return employee
+
         if emp_code.isdigit():
-            biotime_emp = (
-                BiotimeEmployee.objects
-                .filter(employee_id=int(emp_code))
-                .only("id")
-                .first()
-            )
-
-            if biotime_emp:
-                employee = (
-                    Employee.objects
-                    .filter(biotime_employee=biotime_emp)
-                    .select_related("company")
-                    .first()
-                )
-                if employee:
-                    return employee
-
-            # ----------------------------------------
-            # ⚠️ Fallback أخير (اختباري فقط)
-            # ----------------------------------------
             employee = (
                 Employee.objects
                 .filter(id=int(emp_code))
@@ -150,134 +189,124 @@ def resolve_employee_from_log(log):
                 return employee
 
     except Exception:
-        logger.exception("❌ Failed resolving employee via employee_id fallback")
+        logger.exception("❌ Legacy fallback failed")
 
     return None
 
 
 # ============================================================
-# 🔁 1️⃣ المزامنة الأساسية (SMART STAGING + AUTO CALCULATION)
+# 🔁 Sync Logs → Attendance (Multi-Tenant Safe)
 # ============================================================
-def sync_biotime_logs_to_attendance(start_date=None, end_date=None):
-    """
-    🔄 تحويل سجلات BiotimeLog إلى AttendanceRecord.
 
-    قواعد الأمان:
-    - لا يتم استخدام get_or_create إطلاقًا.
-    - يحترم القيد الفريد (employee + date).
-    - لا يلمس سجلات الإجازات أو السجلات اليدوية.
-    - Idempotent.
-    - Unmapped logs تبقى محفوظة (Staging Mode).
-    - يتم احتساب الحضور دائمًا عبر WorkdayEngine (Source of Truth).
-    - يتم إصلاح أي سجلات status=unknown تلقائيًا (PATCH SAFE).
+def sync_biotime_logs_to_attendance(
+    company=None,
+    start_date=None,
+    end_date=None,
+):
     """
+    ✔ Multi-tenant safe
+    ✔ Explicit company required
+    ✔ Incremental generation preserved
+    ✔ WorkdayEngine untouched
+    ✔ Production ready
+    ✔ WhatsApp notifications for late / absent
+    """
+
+    if not company:
+        return {
+            "status": "error",
+            "message": "Company context مطلوب.",
+        }
 
     try:
-        # ------------------------------------------------
-        # 🧠 نجلب فقط السجلات غير المعالجة بعد
-        # ------------------------------------------------
+
+        # =====================================================
+        # 🔎 Fetch Unprocessed Logs (Company Scoped)
+        # =====================================================
         logs = (
             BiotimeLog.objects
-            .filter(processed=False)
+            .filter(company=company, processed=False)
             .order_by("punch_time")
         )
 
+        # =====================================================
+        # 🔥 SAFE RANGE FILTER (Timezone-Aware)
+        # =====================================================
         if start_date and end_date:
+            start_dt = timezone.make_aware(
+                datetime.combine(start_date, time.min)
+            )
+            end_dt = timezone.make_aware(
+                datetime.combine(end_date, time.max)
+            )
+
             logs = logs.filter(
-                punch_time__date__range=[start_date, end_date]
+                punch_time__range=(start_dt, end_dt)
             )
 
         synced_count = 0
         skipped_unmapped = 0
         skipped_leave = 0
         recalculated_unknown = 0
+        whatsapp_sent_count = 0
+        notified_records: set[int] = set()
 
-        # ========================================================
-        # 🔄 Phase A — Sync Logs → Attendance
-        # ========================================================
-        for log in logs:
+        # =====================================================
+        # Phase A — Sync Logs
+        # =====================================================
+        for log in logs.iterator():
 
-            # ------------------------------------------------
-            # 🔍 ربط الموظف
-            # ------------------------------------------------
             emp = resolve_employee_from_log(log)
 
-            # 🟥 غير مربوط
-            if not emp:
+            if not emp or emp.company_id != company.id:
                 skipped_unmapped += 1
                 continue
 
-            work_date = log.punch_time.date()
+            local_dt = timezone.localtime(log.punch_time)
+            work_date = local_dt.date()
 
-            # ------------------------------------------------
-            # 🔎 جلب السجل الموجود
-            # ------------------------------------------------
+            # ⛔ Ignore logs before employee work start
+            if emp.work_start_date and work_date < emp.work_start_date:
+                log.processed = True
+                log.save(update_fields=["processed"])
+                continue
+
+            punch_time_value = local_dt.time()
+
             record = AttendanceRecord.objects.filter(
                 employee=emp,
                 date=work_date,
             ).first()
 
+            if not record:
+                record = AttendanceRecord.objects.create(
+                    employee=emp,
+                    date=work_date,
+                )
+
             record_changed = False
 
-            # ------------------------------------------------
-            # 🟡 إنشاء السجل إن لم يكن موجودًا
-            # ------------------------------------------------
-            if not record:
-                try:
-                    with transaction.atomic():
-                        record = AttendanceRecord.objects.create(
-                            employee=emp,
-                            date=work_date,
-                            synced_from_biotime=True,
-                            biotime_log=log,
-                            status="present",
-                        )
-                        record_changed = True
+            # Check-in
+            if log.punch_state == "0":
+                if not record.check_in or punch_time_value < record.check_in:
+                    record.check_in = punch_time_value
+                    record_changed = True
 
-                except IntegrityError:
-                    record = AttendanceRecord.objects.filter(
-                        employee=emp,
-                        date=work_date,
-                    ).first()
+            # Check-out
+            elif log.punch_state == "1":
+                if not record.check_out or punch_time_value > record.check_out:
+                    record.check_out = punch_time_value
+                    record_changed = True
 
-                    if not record:
-                        logger.warning(
-                            "[BiotimeSync] تعارض أثناء إنشاء AttendanceRecord "
-                            f"(employee_id={emp.id}, date={work_date})"
-                        )
-                        continue
-
-            # ------------------------------------------------
-            # 🚫 تجاهل الإجازات
-            # ------------------------------------------------
-            if record.is_leave:
-                skipped_leave += 1
-                continue
-
-            # ------------------------------------------------
-            # ⏱ دمج أوقات الحضور
-            # ------------------------------------------------
-            punch_time = log.punch_time.time()
-
-            if not record.check_in or punch_time < record.check_in:
-                record.check_in = punch_time
-                record_changed = True
-
-            if not record.check_out or punch_time > record.check_out:
-                record.check_out = punch_time
-                record_changed = True
-
-            # ------------------------------------------------
-            # 🔄 تحديث الربط
-            # ------------------------------------------------
-            if not record.synced_from_biotime or record.biotime_log_id != log.id:
+            # Link Biotime
+            if (
+                not record.synced_from_biotime
+                or record.biotime_log_id != log.id
+            ):
                 record.synced_from_biotime = True
                 record.biotime_log = log
                 record_changed = True
 
-            # ------------------------------------------------
-            # 💾 حفظ التغييرات الأساسية (إن وُجدت)
-            # ------------------------------------------------
             if record_changed:
                 record.save(update_fields=[
                     "check_in",
@@ -286,15 +315,105 @@ def sync_biotime_logs_to_attendance(start_date=None, end_date=None):
                     "biotime_log",
                 ])
 
-            # ------------------------------------------------
-            # 🧮 تشغيل محرك الحساب دائمًا
-            # ------------------------------------------------
+            if not log.processed:
+                log.processed = True
+                log.save(update_fields=["processed"])
+
+            synced_count += 1
+
+        # =====================================================
+        # Phase A.5 — Full Generator From Work Start (Scoped)
+        # =====================================================
+
+        today = timezone.localdate()
+
+        employees = (
+            Employee.objects
+            .filter(company=company)
+            .select_related("company", "default_work_schedule")
+        )
+
+        for emp in employees:
+
+            work_start = getattr(emp, "work_start_date", None)
+            end_date_emp = getattr(emp, "end_date", None)
+
+            if not work_start:
+                continue
+
+            current_date = work_start
+
+            while current_date <= today:
+
+                if end_date_emp and current_date > end_date_emp:
+                    break
+
+                record = AttendanceRecord.objects.filter(
+                    employee=emp,
+                    date=current_date,
+                ).first()
+
+                if not record:
+
+                    schedule = WorkScheduleResolver.resolve(emp)
+
+                    if schedule:
+                        if schedule.is_weekend(current_date):
+                            AttendanceRecord.objects.create(
+                                employee=emp,
+                                date=current_date,
+                                status="weekend",
+                                reason_code="auto_weekend",
+                            )
+                        else:
+                            AttendanceRecord.objects.create(
+                                employee=emp,
+                                date=current_date,
+                                status="unknown",
+                                reason_code="auto_generated_no_logs",
+                            )
+
+                current_date += timedelta(days=1)
+
+        # =====================================================
+        # Phase B — Apply Workday Engine (Scoped)
+        # =====================================================
+        if start_date and end_date:
+            records = AttendanceRecord.objects.filter(
+                employee__company=company,
+                date__range=(start_date, end_date),
+            )
+        else:
+            today = timezone.localdate()
+            yesterday = today - timedelta(days=1)
+
+            records = AttendanceRecord.objects.filter(
+                employee__company=company,
+                date__gte=yesterday,
+                is_finalized=False,
+            )
+
+        for record in records.iterator():
+
+            if record.is_leave:
+                skipped_leave += 1
+                continue
+
             try:
                 engine = WorkdayEngine(
                     record.employee,
-                    record.employee.company,
+                    company,
                 )
                 engine.apply(record)
+
+                record.refresh_from_db()
+
+                if _send_attendance_whatsapp_once(
+                    record=record,
+                    company=company,
+                    notified_records=notified_records,
+                ):
+                    whatsapp_sent_count += 1
 
             except Exception:
                 logger.exception(
@@ -302,45 +421,46 @@ def sync_biotime_logs_to_attendance(start_date=None, end_date=None):
                     f"(employee_id={record.employee_id}, date={record.date})"
                 )
 
-            # ------------------------------------------------
-            # ✅ تعليم السجل كمُعالج
-            # ------------------------------------------------
-            if not log.processed:
-                log.processed = True
-                log.save(update_fields=["processed"])
-
-            synced_count += 1
-
-        # ========================================================
-        # 🔁 Phase B — Auto Recalculate UNKNOWN Records (PATCH)
-        # ========================================================
-        unknown_records = AttendanceRecord.objects.filter(status="unknown")
+        # =====================================================
+        # Phase C — Recalculate UNKNOWN (Scoped)
+        # =====================================================
+        unknown_records = AttendanceRecord.objects.filter(
+            employee__company=company,
+            status="unknown",
+        )
 
         for record in unknown_records.iterator():
-
             try:
                 engine = WorkdayEngine(
                     record.employee,
-                    record.employee.company,
+                    company,
                 )
                 engine.apply(record)
                 recalculated_unknown += 1
 
+                record.refresh_from_db()
+
+                if _send_attendance_whatsapp_once(
+                    record=record,
+                    company=company,
+                    notified_records=notified_records,
+                ):
+                    whatsapp_sent_count += 1
+
             except Exception:
                 logger.exception(
                     "❌ Failed recalculating UNKNOWN record "
-                    f"(record_id={record.id}, employee_id={record.employee_id})"
+                    f"(record_id={record.id})"
                 )
 
-        # ========================================================
-        # 📊 Logging
-        # ========================================================
         logger.info(
             "✅ Biotime → Attendance Sync Completed | "
+            f"company={company.id} | "
             f"synced={synced_count} | "
             f"unmapped={skipped_unmapped} | "
             f"leave_skipped={skipped_leave} | "
-            f"unknown_recalculated={recalculated_unknown}"
+            f"unknown_recalculated={recalculated_unknown} | "
+            f"whatsapp_sent={whatsapp_sent_count}"
         )
 
         return {
@@ -349,30 +469,12 @@ def sync_biotime_logs_to_attendance(start_date=None, end_date=None):
             "skipped_unmapped": skipped_unmapped,
             "skipped_leave": skipped_leave,
             "recalculated_unknown": recalculated_unknown,
-            "message": (
-                f"تمت مزامنة {synced_count} سجل — "
-                f"غير مربوط: {skipped_unmapped} — "
-                f"إعادة احتساب UNKNOWN: {recalculated_unknown}."
-            ),
+            "whatsapp_sent": whatsapp_sent_count,
         }
 
     except Exception as e:
         logger.exception("❌ خطأ أثناء مزامنة سجلات Biotime")
         return {
             "status": "error",
-            "message": f"فشل المزامنة: {e}",
+            "message": str(e),
         }
-
-
-# ============================================================
-# ⚙️ 2️⃣ مزامنة يومية تلقائية (Scheduler Ready)
-# ============================================================
-def auto_daily_sync():
-    """
-    ⚙️ تنفيذ مزامنة تلقائية لسجلات اليوم الحالي.
-    """
-    today = timezone.now().date()
-    return sync_biotime_logs_to_attendance(
-        start_date=today,
-        end_date=today,
-    )

@@ -14,6 +14,7 @@ from datetime import date
 
 from company_manager.permissions import company_permission_required
 from company_manager.models import Company, CompanyUser
+from datetime import datetime
 
 # 🔐 Subscription Enforcement
 from company_manager.decorators.subscription_limits import enforce_employee_limit
@@ -48,8 +49,6 @@ from .forms import (
 )
 
 # 🖨️ Printing
-from printing_engine.services.employee_card_engine import EmployeeCardPrintEngine
-from printing_engine.services.contract_print_engine import ContractPrintEngine
 
 
 # ===============================================================
@@ -602,3 +601,127 @@ def employee_card_pdf(request, company_id, employee_id):
     response = HttpResponse(pdf, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="employee_{employee.id}.pdf"'
     return response
+# ============================================================
+# 🧩 Employee Profile Update API — FINAL (PRODUCTION SAFE)
+# ============================================================
+
+from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
+from django.db import transaction
+from django.utils.dateparse import parse_date
+import json
+
+from employee_center.models import Employee
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def update_employee_profile(request, employee_id):
+    """
+    ✅ Update employee personal/profile information
+    - Uses Employee model directly
+    - No separate Profile model
+    - CSRF safe
+    - Local & Production ready
+    """
+
+    # ---------------------------------------------------------
+    # 🔐 Resolve Company Context (SAFE)
+    # ---------------------------------------------------------
+    company = getattr(request, "company", None)
+    if not company:
+        return JsonResponse(
+            {"message": "User has no company context"},
+            status=403
+        )
+
+    # ---------------------------------------------------------
+    # 🔍 Get Employee
+    # ---------------------------------------------------------
+    try:
+        employee = Employee.objects.select_for_update().get(
+            id=employee_id,
+            company=company
+        )
+    except Employee.DoesNotExist:
+        return JsonResponse(
+            {"message": "Employee not found"},
+            status=404
+        )
+
+    # ---------------------------------------------------------
+    # 📦 Parse Payload
+    # ---------------------------------------------------------
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse(
+            {"message": "Invalid JSON payload"},
+            status=400
+        )
+
+    # ---------------------------------------------------------
+    # 🧠 Allowed Fields
+    # ---------------------------------------------------------
+    allowed_fields = [
+        "full_name",
+        "arabic_name",
+        "national_id",
+        "passport_number",
+        "nationality",
+        "gender",
+        "employment_type",
+        "join_date",
+        "probation_end_date",
+        "end_date",
+    ]
+
+    date_fields = {
+        "join_date",
+        "probation_end_date",
+        "end_date",
+    }
+
+    updated_fields = []
+
+    # ---------------------------------------------------------
+    # ✏️ Apply Updates (SAFE)
+    # ---------------------------------------------------------
+    for field in allowed_fields:
+        if field not in payload or not hasattr(employee, field):
+            continue
+
+        value = payload.get(field)
+
+        # ⛔ تجاهل القيم الفارغة
+        if value in (None, ""):
+            continue
+
+        # 🗓️ Handle Dates Safely
+        if field in date_fields:
+            parsed_date = parse_date(value)
+            if not parsed_date:
+                return JsonResponse(
+                    {"message": f"Invalid date format for {field}"},
+                    status=400
+                )
+            value = parsed_date
+
+        setattr(employee, field, value)
+        updated_fields.append(field)
+
+    # ---------------------------------------------------------
+    # 💾 Save
+    # ---------------------------------------------------------
+    if updated_fields:
+        employee.save(update_fields=updated_fields)
+
+    return JsonResponse(
+        {
+            "status": "updated",
+            "updated_fields": updated_fields,
+        },
+        status=200
+    )

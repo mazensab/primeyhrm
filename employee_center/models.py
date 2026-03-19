@@ -65,25 +65,75 @@ class Employee(models.Model):
     # ============================================================
     # 🔗 الربط الفعلي مع سجل Biotime (Phase C3)
     # ============================================================
-    biotime_employee = models.OneToOneField(
-        "biotime_center.BiotimeEmployee",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="linked_employee",
-        db_index=True,
-        verbose_name="الموظف المرتبط في Biotime",
-        help_text="الربط الفعلي مع سجل الموظف في نظام Biotime بعد التحقق والمزامنة"
-    )
 
     full_name = models.CharField(max_length=255, verbose_name="الاسم الكامل")
     arabic_name = models.CharField(max_length=255, null=True, blank=True)
 
     national_id = models.CharField(max_length=20, verbose_name="رقم الهوية/الإقامة")
     passport_number = models.CharField(max_length=20, null=True, blank=True)
+        # ============================================================
+    # 📌 بيانات الهوية والإقامة
+    # ============================================================
+    national_id_issue_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ إصدار الهوية"
+    )
+
+    national_id_expiry_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ انتهاء الهوية"
+    )
+
+    passport_issue_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ إصدار الجواز"
+    )
+
+    passport_expiry_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ انتهاء الجواز"
+    )
+
+    employee_number = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="رقم الموظف الداخلي"
+    )
+
+    gosi_number = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        verbose_name="رقم التأمينات الاجتماعية"
+    )
+
+    # ============================================================
+    # 🖼 صورة الموظف (Google Drive URL)
+    # ============================================================
+    photo_url = models.URLField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="رابط صورة الموظف",
+        help_text="Google Drive public image URL"
+    )
 
     date_of_birth = models.DateField(null=True, blank=True)
     nationality = models.CharField(max_length=100, null=True, blank=True)
+
+    mobile_number = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        verbose_name="رقم الجوال"
+
+    )
 
     gender = models.CharField(
         max_length=10,
@@ -149,6 +199,14 @@ class Employee(models.Model):
     )
 
     join_date = models.DateField(default=timezone.now)
+    work_start_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ المباشرة",
+        help_text="يبدأ احتساب الحضور من هذا التاريخ"
+
+    )
+
     probation_end_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
 
@@ -171,7 +229,7 @@ class EmploymentInfo(models.Model):
     employee = models.OneToOneField(
         Employee,
         on_delete=models.CASCADE,
-        related_name="employment_info"
+         related_name="employment_info"
     )
 
     job_grade = models.CharField(max_length=50, null=True, blank=True)
@@ -302,6 +360,13 @@ class EmployeeDocument(models.Model):
 
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
+    def clean(self):
+        if self.employee.work_start_date and self.employee.join_date:
+            if self.employee.work_start_date < self.employee.join_date:
+                from django.core.exceptions import ValidationError
+                raise ValidationError(
+                    "تاريخ المباشرة لا يمكن أن يكون قبل تاريخ التعيين."
+                )
     class Meta:
         ordering = ["-uploaded_at"]
 

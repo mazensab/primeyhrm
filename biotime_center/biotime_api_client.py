@@ -101,7 +101,7 @@ class BiotimeAPIClient:
             )
 
             if res.status_code != 200:
-                logger.error("❌ Session Login HTTP Failed: %s", res.text[:500])
+                logger.error("❌ JWT Login Failed. Status=%s", res.status_code)
                 return False
 
             if not self.session.cookies:
@@ -126,11 +126,19 @@ class BiotimeAPIClient:
     # 🔐 3) تسجيل الدخول — JWT TOKEN (Fallback فقط)
     # ============================================================
     def authenticate(self):
+        # 🔁 Reuse Token
+        if self.setting.jwt_token and self.setting.token_expiry:
+            if timezone.now() < self.setting.token_expiry:
+                logger.info("🔁 Reusing existing JWT token (not expired)")
+                return {
+                    "status": "success",
+                    "mode": "jwt",
+                    "token": self.setting.jwt_token,
+                }  
+
         # نحاول Session أولاً
         if self._session_login():
             return {"status": "success", "mode": "session"}
-
-        logger.warning("⚠️ Session login failed — trying JWT fallback")
 
         if not self.biotime_company:
             logger.error("❌ JWT Login aborted: biotime_company is empty")
@@ -156,6 +164,9 @@ class BiotimeAPIClient:
                 json=payload,
                 timeout=15,
             )
+
+            logger.info("🔐 JWT Status Code: %s", res.status_code)
+            logger.info("🔐 JWT Raw Response: %s", res.text[:500])
 
             if res.status_code != 200:
                 logger.error("❌ JWT Login Failed: %s", res.text[:500])
@@ -273,7 +284,7 @@ class BiotimeAPIClient:
 
             headers["Authorization"] = f"JWT {self.setting.jwt_token}"
 
-            return requests.post(
+            return self.session.post(
                 url,
                 json=json,
                 data=data,
@@ -393,14 +404,31 @@ class BiotimeAPIClient:
         logger.info("📡 Fetching Terminals: %s", url)
 
         res = self._get(url, timeout=15)
-        if not res or res.status_code != 200:
-            return None
 
-        data = res.json()
+        if not res:
+            logger.error("❌ _get returned None")
+            return None
+        
+        logger.info("📦 Terminals Status Code: %s", res.status_code)
+        logger.info("📦 Terminals Raw Response: %s", res.text[:500])
+
+        if res.status_code != 200:
+            return None
+        
+        try:
+            data = res.json()
+        except Exception as e:
+            logger.error("❌ JSON Decode Error: %s", str(e))
+            return None
+        
+        logger.info("📦 Parsed JSON: %s", str(data)[:500])
+
         if data.get("code") != 0:
+            logger.error("❌ Biotime returned error code: %s", data)
             return None
-
+        
         return data.get("data", [])
+
 
     # ============================================================
     # 💡 5.1) جلب تفاصيل جهاز واحد

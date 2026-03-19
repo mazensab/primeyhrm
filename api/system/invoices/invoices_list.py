@@ -1,17 +1,13 @@
 # ============================================================
-# 🧾 System Invoices List API — WITH PAYMENT METHOD
-# Primey HR Cloud | FINAL FIX
+# 🧾 System Invoices List API
+# Primey HR Cloud
 # ============================================================
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 from django.contrib.auth.decorators import login_required
-from django.utils.timezone import make_aware
-from datetime import datetime
 
-from billing_center.models import Invoice
-from billing_center.models import PaymentTransaction
-from company_manager.permissions import system_permission_required
+from billing_center.models import Invoice, Payment
 
 
 # ============================================================
@@ -32,13 +28,11 @@ def success(data):
 
 @require_GET
 @login_required
-@system_permission_required("SYSTEM_ADMIN")
 def system_invoices_list(request):
-
     qs = (
         Invoice.objects
-        .select_related("company")
-        .order_by("-issued_at", "-id")
+        .select_related("company", "subscription__plan")
+        .order_by("-issue_date", "-id")
     )
 
     # --------------------------------------------------------
@@ -49,7 +43,7 @@ def system_invoices_list(request):
     status = request.GET.get("status")
 
     if number:
-        qs = qs.filter(number__icontains=number)
+        qs = qs.filter(invoice_number__icontains=number)
 
     if company:
         qs = qs.filter(company__name__icontains=company)
@@ -60,13 +54,25 @@ def system_invoices_list(request):
     # --------------------------------------------------------
     # Pagination
     # --------------------------------------------------------
-    page = int(request.GET.get("page", 1))
-    page_size = int(request.GET.get("page_size", 25))
+    try:
+        page = int(request.GET.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+
+    try:
+        page_size = int(request.GET.get("page_size", 25))
+    except (TypeError, ValueError):
+        page_size = 25
+
+    if page < 1:
+        page = 1
+
+    if page_size < 1:
+        page_size = 25
 
     total = qs.count()
     start = (page - 1) * page_size
     end = start + page_size
-
     qs = qs[start:end]
 
     # --------------------------------------------------------
@@ -75,29 +81,29 @@ def system_invoices_list(request):
     results = []
 
     for inv in qs:
-
         payment = (
-            PaymentTransaction.objects
-            .filter(
-                invoice=inv,
-                status__in=["PAID", "SUCCESS"]
-            )
-            .order_by("-created_at")
+            Payment.objects
+            .filter(invoice=inv)
+            .order_by("-paid_at", "-id")
             .first()
         )
 
         results.append({
             "id": inv.id,
-            "number": inv.number,
+            "invoice_number": inv.invoice_number,
             "company_id": inv.company_id,
             "company_name": inv.company.name if inv.company else None,
+            "plan_name": (
+                inv.subscription.plan.name
+                if inv.subscription and inv.subscription.plan
+                else None
+            ),
             "total_amount": str(inv.total_amount),
-            "currency": inv.currency,
             "status": inv.status,
-            "issued_at": inv.issued_at.isoformat() if inv.issued_at else None,
-
-            # ⭐ FIX HERE
+            "issue_date": inv.issue_date.isoformat() if inv.issue_date else None,
+            "due_date": inv.due_date.isoformat() if inv.due_date else None,
             "payment_method": payment.method if payment else None,
+            "currency": "SAR",
         })
 
     return success({

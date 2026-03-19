@@ -154,3 +154,55 @@ def sync_leave_to_attendance(sender, instance: LeaveRequest, created, **kwargs):
         logger.exception(
             f"[Leave→Attendance ERROR] Leave #{instance.id} sync failed: {e}"
         )
+# ============================================================
+# 🟢 Signal: Auto Create LeaveBalance on Employee Creation
+# Version: V1.0 — Ultra Safe (Patch Only)
+# Primey HR Cloud — Leave Initialization Layer
+# ============================================================
+
+from employee_center.models import Employee
+from leave_center.models import LeaveBalance
+
+
+@receiver(post_save, sender=Employee)
+def auto_create_leave_balance(sender, instance: Employee, created, **kwargs):
+    """
+    🎯 إنشاء رصيد إجازات تلقائي لكل موظف جديد.
+
+    المميزات:
+    ✔ Multi-Tenant Safe (يربط بالشركة تلقائياً)
+    ✔ OneToOne Guard (لا ينشئ رصيد مكرر)
+    ✔ Atomic Safe
+    ✔ لا يؤثر على أي منجز سابق
+    """
+
+    if not created:
+        return
+
+    try:
+        with transaction.atomic():
+            # 🛡️ منع التكرار (في حال وجود رصيد مسبق)
+            if LeaveBalance.objects.filter(employee=instance).exists():
+                return
+
+            LeaveBalance.objects.create(
+                employee=instance,
+                company=instance.company,
+                annual_balance=21,
+                sick_balance=30,
+                maternity_balance=10,
+                marriage_balance=5,
+                death_balance=3,
+                hajj_balance=10,
+                study_balance=15,
+                unpaid_balance=999,
+            )
+
+            logger.info(
+                f"[Leave Init] LeaveBalance auto-created for Employee #{instance.id}"
+            )
+
+    except Exception as e:
+        logger.exception(
+            f"[Leave Init ERROR] Failed to create LeaveBalance for Employee #{instance.id}: {e}"
+        )

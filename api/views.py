@@ -1,6 +1,8 @@
 from django.http import JsonResponse
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.timezone import localdate
+from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import ensure_csrf_cookie
 
 # ====================== MODELS ======================
 from company_manager.models import Company, CompanyUser
@@ -31,12 +33,7 @@ def health_check(request):
 # ============================================================
 def dashboard_overview(request):
     """
-    📊 ملخص سريع لحالة الشركة / النظام:
-        - عدد الشركات
-        - عدد الموظفين
-        - حضور اليوم
-        - سجلات الرواتب
-        - الإجازات المعلقة
+    📊 ملخص سريع لحالة الشركة / النظام
     """
 
     if request.method != "GET":
@@ -139,13 +136,9 @@ def company_detail(request, company_id):
 
 
 # ============================================================
-# 🟦 Team Members API — TeamMembersCard
+# 🟦 Team Members API
 # ============================================================
 def company_team(request):
-    """
-    قائمة مختصرة بأعضاء الفريق (Company Users)
-    """
-
     if request.method != "GET":
         return JsonResponse({"error": "GET only"}, status=405)
 
@@ -171,13 +164,9 @@ def company_team(request):
 
 
 # ============================================================
-# 🟩 Recent Payments API — LatestPayments Card
+# 🟩 Recent Payments API
 # ============================================================
 def recent_payments(request):
-    """
-    آخر 20 سجل رواتب (كمصدر مؤقت للمدفوعات)
-    """
-
     if request.method != "GET":
         return JsonResponse({"error": "GET only"}, status=405)
 
@@ -199,7 +188,7 @@ def recent_payments(request):
                 if record.employee else ""
             ),
             "amount": float(record.net_salary or 0),
-            "status": "success",  # جاهز للربط الفعلي لاحقًا
+            "status": "success",
             "date": record.created_at,
         }
         for record in records
@@ -213,29 +202,15 @@ def recent_payments(request):
         status=200,
     )
 
-from django.http import JsonResponse
-from django.views.decorators.http import require_GET
-from django.views.decorators.csrf import ensure_csrf_cookie
 
-
-# ============================================================================
-# 🔐 WhoAmI — API SAFE (NO REDIRECT / NO ADMIN)
-# ============================================================================
+# ============================================================
+# 🔐 WhoAmI — API SAFE
+# ============================================================
 @require_GET
 def whoami(request):
-    """
-    API ONLY:
-    - لا redirect
-    - لا HTML
-    - JSON فقط
-    - آمن لـ Next.js
-    """
-
     if not request.user.is_authenticated:
         return JsonResponse(
-            {
-                "authenticated": False,
-            },
+            {"authenticated": False},
             status=200,
         )
 
@@ -246,59 +221,25 @@ def whoami(request):
             "username": request.user.username,
             "email": request.user.email,
             "is_superuser": request.user.is_superuser,
-            # لو عندك Role مرتبط بالمستخدم
-            "role": getattr(request.user, "role", None),
         },
         status=200,
     )
 
 
-# ============================================================================
-# 🔐 CSRF — API SAFE (COOKIE INIT)
-# ============================================================================
+# ============================================================
+# 🔐 CSRF — API SAFE (FINAL / PRODUCTION READY)
+# ============================================================
 @require_GET
 @ensure_csrf_cookie
 def csrf(request):
     """
-    Endpoint مخصص لـ Next.js
-    - ينشئ csrftoken cookie
-    - لا يعتمد على admin
-    """
-    return JsonResponse(
-        {
-            "detail": "CSRF cookie set",
-        },
-        status=200,
-    )
-
-# ============================================================
-# 🔐 CSRF API — SAFE / FINAL
-# Primey HR Cloud
-# ============================================================
-
-from django.http import JsonResponse
-from django.middleware.csrf import get_token
-
-
-def csrf(request):
-    """
-    API endpoint to initialize CSRF cookie safely.
-    - No auth required
+    CSRF bootstrap endpoint for Next.js
+    - GET only
+    - No auth
     - No redirect
     - Sets csrftoken cookie
     """
-    token = get_token(request)
-
     return JsonResponse(
-        {
-            "csrfToken": token,
-        },
+        {"status": "ok"},
         status=200,
     )
-
-from django.http import JsonResponse
-from django.views.decorators.csrf import ensure_csrf_cookie
-
-@ensure_csrf_cookie
-def csrf(request):
-    return JsonResponse({"status": "ok"})

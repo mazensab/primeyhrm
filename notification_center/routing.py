@@ -8,14 +8,12 @@
 from django.urls import re_path
 from . import consumers
 
-# ============================================================
-# 🔌 خريطة مسارات WebSocket لتطبيق Notification Center
-# ============================================================
 websocket_urlpatterns = [
-    # 🧠 قناة عامة لكل المستخدمين — تُدار حسب الـ Scope.user
-    re_path(r"^ws/notifications/$", consumers.NotificationConsumer.as_asgi()),
 
-    # 💡 يمكن مستقبلاً إضافة مسارات إضافية مثل:
-    # re_path(r"^ws/assistant/$", consumers.AssistantConsumer.as_asgi()),
-    # re_path(r"^ws/analytics/$", consumers.AnalyticsConsumer.as_asgi()),
+    # 🔔 Primey System Notifications
+    re_path(
+        r"^ws/system/notifications/$",
+        consumers.NotificationConsumer.as_asgi()
+    ),
+
 ]

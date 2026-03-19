@@ -141,7 +141,7 @@ class PolicyService:
 
 
 # ============================================================
-# 🕒 WorkScheduleResolver — Phase F.2 ENABLED
+# 🕒 WorkScheduleResolver — STRICT Employee-Only Mode
 # ============================================================
 
 class WorkScheduleResolver:
@@ -149,70 +149,38 @@ class WorkScheduleResolver:
     @staticmethod
     def resolve(employee: Employee):
         """
-        🔍 يُرجع دائمًا WorkSchedule صالح للحساب.
-        ترتيب الأولوية:
-
-        1) (مستقبلي) Employee Default Schedule
-        2) (مستقبلي) Department Default Schedule
-        3) Company Active WorkSchedule  ✅ Phase F.2
-        4) AttendanceSetting Fallback
-        5) HARD DEFAULT
+        🔒 Strict Mode:
+        يعتمد فقط على جدول الموظف المباشر.
+        لا يوجد fallback.
+        لا يوجد Company Default.
+        لا يوجد AttendanceSetting.
         """
 
-        from attendance_center.models import WorkSchedule, AttendanceSetting
+        from attendance_center.models import WorkSchedule
 
-        company = employee.company
+        if not employee.default_work_schedule_id:
+            raise ValueError(
+                f"[WorkScheduleResolver] Employee {employee.id} "
+                f"does not have a default_work_schedule assigned."
+            )
 
-        # --------------------------------------------------
-        # 🥇 Company Active WorkSchedule (REAL DB SOURCE)
-        # --------------------------------------------------
         schedule = (
             WorkSchedule.objects
-            .filter(company=company, is_active=True)
-            .order_by("id")
+            .filter(
+                id=employee.default_work_schedule_id,
+                company=employee.company,
+                is_active=True
+            )
             .first()
         )
 
-        if schedule:
-            return schedule
-
-        # --------------------------------------------------
-        # 🟡 Attendance Settings Fallback
-        # --------------------------------------------------
-        settings = AttendanceSetting.objects.filter(company=company).first()
-        if settings and settings.work_start and settings.work_end:
-            logger.warning(
-                f"[WorkScheduleResolver] ⚠️ No WorkSchedule found "
-                f"(company_id={company.id}, employee_id={employee.id}) "
-                f"— Using AttendanceSetting fallback"
+        if not schedule:
+            raise ValueError(
+                f"[WorkScheduleResolver] Invalid or inactive schedule "
+                f"for employee {employee.id}."
             )
 
-            return WorkSchedule(
-                name="AUTO-FALLBACK (AttendanceSetting)",
-                period1_start=settings.work_start,
-                period1_end=settings.work_end,
-                period2_start=None,
-                period2_end=None,
-                weekend_days="fri,sat",
-            )
-
-        # --------------------------------------------------
-        # 🔴 HARD DEFAULT
-        # --------------------------------------------------
-        logger.error(
-            f"[WorkScheduleResolver] 🚨 No schedule & no settings found "
-            f"(employee_id={employee.id}) — Using HARD DEFAULT"
-        )
-
-        return WorkSchedule(
-            name="AUTO-FALLBACK (HARD DEFAULT)",
-            period1_start=time(9, 0),
-            period1_end=time(17, 0),
-            period2_start=None,
-            period2_end=None,
-            weekend_days="fri,sat",
-        )
-
+        return schedule
 
 # ============================================================
 # 📊 KPI SERVICE
