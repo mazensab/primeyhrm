@@ -59,6 +59,14 @@ type LookupPayload =
   | LookupNotFoundPayload
   | LookupErrorPayload
 
+function getLookupErrorMessage(data: LookupPayload): string {
+  if ("message" in data && typeof data.message === "string" && data.message.trim()) {
+    return data.message
+  }
+
+  return "حدث خطأ أثناء التحقق من عملية الدفع."
+}
+
 export default function TapPaymentSuccessPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -169,13 +177,17 @@ export default function TapPaymentSuccessPage() {
 
         if (response.status === 404 && data.status === "not_found") {
           setLoading(false)
-          setErrorState(data.message || "لم يتم العثور على فاتورة مرتبطة بهذه العملية.")
+          setErrorState(
+            "message" in data && typeof data.message === "string" && data.message.trim()
+              ? data.message
+              : "لم يتم العثور على فاتورة مرتبطة بهذه العملية."
+          )
           setMessage("لم يتمكن النظام من ربط tap_id بفاتورة حتى الآن.")
           return
         }
 
         setLoading(false)
-        setErrorState(data.message || "حدث خطأ أثناء التحقق من عملية الدفع.")
+        setErrorState(getLookupErrorMessage(data))
         setMessage("تعذر إكمال التحقق من الدفع.")
       } catch (error) {
         console.error("Tap success lookup error:", error)
@@ -231,8 +243,8 @@ export default function TapPaymentSuccessPage() {
               {loading
                 ? "جاري التحقق من الدفع"
                 : errorState
-                ? "تعذر إكمال التحقق"
-                : "تم الدفع بنجاح"}
+                  ? "تعذر إكمال التحقق"
+                  : "تم الدفع بنجاح"}
             </CardTitle>
 
             <p className="text-sm text-muted-foreground">

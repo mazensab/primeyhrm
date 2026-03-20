@@ -41,12 +41,9 @@ def env_int(key: str, default: int = 0) -> int:
 # ⚙️ SECURITY & HOSTS
 # ============================================================
 
-SECRET_KEY = env(
-    "DJANGO_SECRET_KEY",
-    "django-insecure-w$^!m!d12n$mg0cy9drt($p#6rxj(8u8*n7y36xi*7=!=9ko1^"
-)
+SECRET_KEY = env("DJANGO_SECRET_KEY", "")
 
-DEBUG = env_bool("DJANGO_DEBUG", True)  # ✅ MUST be False with HTTPS
+DEBUG = env_bool("DJANGO_DEBUG", False)
 
 ALLOWED_HOSTS = [
     "localhost",
@@ -56,6 +53,15 @@ ALLOWED_HOSTS = [
     ".primeyride.com",
 ]
 
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", not DEBUG)
+SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 31536000 if not DEBUG else 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", not DEBUG)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", not DEBUG)
+SECURE_CONTENT_TYPE_NOSNIFF = env_bool("SECURE_CONTENT_TYPE_NOSNIFF", True)
+SECURE_BROWSER_XSS_FILTER = env_bool("SECURE_BROWSER_XSS_FILTER", True)
+X_FRAME_OPTIONS = env("X_FRAME_OPTIONS", "DENY")
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # ============================================================
 # 🌐 FRONTEND (Next.js)
 # ============================================================
@@ -63,6 +69,8 @@ ALLOWED_HOSTS = [
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "http://localhost:3000")
 FRONTEND_LOGIN_URL = f"{FRONTEND_BASE_URL}/login"
 FRONTEND_HOME_URL = f"{FRONTEND_BASE_URL}/"
+
+
 
 # ============================================================
 # 💳 TAMARA SETTINGS
@@ -354,7 +362,7 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 
 # Secure فقط في HTTPS (الإنتاج)
-SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", False)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", not DEBUG)
 
 # -----------------------------
 # CSRF Cookie
@@ -366,7 +374,7 @@ CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
 
 # Secure فقط في HTTPS (الإنتاج)
-CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", False)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", not DEBUG)
 
 # -----------------------------
 # CSRF Behavior

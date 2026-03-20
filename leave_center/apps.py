@@ -57,6 +57,7 @@ class LeaveCenterConfig(AppConfig):
         # ⛔ Block Scheduler During Admin Commands
         # ============================================================
         if any(cmd in sys.argv for cmd in (
+            "check",
             "migrate",
             "makemigrations",
             "collectstatic",

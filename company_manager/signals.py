@@ -1,12 +1,16 @@
 # ===============================================================
 # 🔔 Company Manager — SAFE Signals (NO BILLING)
-# Ultra Stable V29.1 — Biotime Auto Sync Enabled
+# Ultra Stable V29.2 — Biotime Auto Sync + Default System Company
 # ===============================================================
 print("🔥 company_manager.signals LOADED")
 
-from django.db.models.signals import post_save
-from django.dispatch import receiver
 import logging
+
+from django.apps import apps
+from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.db.models.signals import post_migrate, post_save
+from django.dispatch import receiver
 
 from .models import (
     Company,
@@ -78,6 +82,61 @@ def seed_company_master_data(company):
             company=company,
             name=name,
         )
+
+
+# ===============================================================
+# 🏢 Default System Company — SAFE POST MIGRATE
+# ===============================================================
+@receiver(post_migrate)
+def ensure_default_system_company(sender, **kwargs):
+    """
+    إنشاء الشركة الافتراضية لسوبر أدمن النظام بطريقة آمنة
+    - لا يعمل أثناء AppConfig.ready()
+    - يعمل بعد اكتمال المايجريشن فقط
+    - آمن ولا يكرر
+    """
+
+    try:
+        # شغّل فقط عندما يكون التطبيق الحالي هو company_manager
+        if sender.name != "company_manager":
+            return
+
+        User = get_user_model()
+
+        # نتأكد أن موديل Company جاهز من registry
+        CompanyModel = apps.get_model("company_manager", "Company")
+
+        super_admin = User.objects.filter(is_superuser=True).order_by("id").first()
+        if not super_admin:
+            logger.info("ℹ️ No superuser found yet; skip default system company creation.")
+            return
+
+        existing_company = CompanyModel.objects.filter(owner=super_admin).first()
+        if existing_company:
+            logger.info(
+                "ℹ️ Default system company already exists for superuser id=%s | company_id=%s",
+                super_admin.id,
+                existing_company.id,
+            )
+            return
+
+        # إذا لم توجد أي شركة لهذا السوبر أدمن، ننشئها
+        with transaction.atomic():
+            company = CompanyModel.objects.create(
+                owner=super_admin,
+                name="Default System Company",
+                commercial_number="0000000000",
+                is_active=True,
+            )
+
+        logger.info(
+            "✅ Default system company created successfully | superuser_id=%s | company_id=%s",
+            super_admin.id,
+            company.id,
+        )
+
+    except Exception:
+        logger.exception("❌ Failed to ensure default system company after migrations")
 
 
 # ===============================================================

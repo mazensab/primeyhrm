@@ -58,6 +58,32 @@ interface PendingDraft {
   admin_email?: string | null
 }
 
+interface RawPendingDraft {
+  draft_id?: number | string | null
+  id?: number | string | null
+  company_name?: string | null
+  plan_name?: string | null
+  plan?: {
+    name?: string | null
+  } | null
+  subscription_plan_name?: string | null
+  duration?: string | null
+  payment_method?: string | null
+  status?: string | null
+  total_amount?: number | string | null
+  pricing?: {
+    total?: number | string | null
+  } | null
+  total?: number | string | null
+  created_at?: string | null
+  admin_name?: string | null
+  admin_email?: string | null
+  admin?: {
+    name?: string | null
+    email?: string | null
+  } | null
+}
+
 export default function SystemPaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
@@ -122,7 +148,7 @@ export default function SystemPaymentsPage() {
 
             const data = await res.json()
 
-            const rawDrafts = Array.isArray(data)
+            const rawDrafts: RawPendingDraft[] = Array.isArray(data)
               ? data
               : Array.isArray(data?.drafts)
                 ? data.drafts
@@ -131,7 +157,7 @@ export default function SystemPaymentsPage() {
                   : []
 
             const normalized: PendingDraft[] = rawDrafts
-              .map((item: any) => ({
+              .map((item: RawPendingDraft): PendingDraft => ({
                 draft_id: Number(item?.draft_id ?? item?.id ?? 0),
                 company_name: item?.company_name || "-",
                 plan_name:
@@ -153,7 +179,7 @@ export default function SystemPaymentsPage() {
                 admin_email: item?.admin_email || item?.admin?.email || null,
               }))
               .filter(
-                (item) =>
+                (item: PendingDraft) =>
                   item.draft_id > 0 &&
                   item.status !== "PAID" &&
                   (item.payment_method === "BANK_TRANSFER" ||

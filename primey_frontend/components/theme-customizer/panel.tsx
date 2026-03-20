@@ -52,22 +52,23 @@ export function ThemeCustomizerPanel() {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent
-        dir={isArabic ? "rtl" : "ltr"}
         align={isMobile ? "center" : isArabic ? "start" : "end"}
         className={`w-80 p-4 shadow-xl ${
           isArabic ? "ml-4 lg:ml-0" : "mr-4 lg:mr-0"
         }`}
       >
-        <div className="grid space-y-4">
-          <PresetSelector />
-          <ThemeScaleSelector />
-          <ThemeRadiusSelector />
-          <ColorModeSelector />
-          <ContentLayoutSelector />
-          <SidebarModeSelector />
-        </div>
+        <div dir={isArabic ? "rtl" : "ltr"} className="space-y-4">
+          <div className="grid space-y-4">
+            <PresetSelector />
+            <ThemeScaleSelector />
+            <ThemeRadiusSelector />
+            <ColorModeSelector />
+            <ContentLayoutSelector />
+            <SidebarModeSelector />
+          </div>
 
-        <ResetThemeButton />
+          <ResetThemeButton />
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -1,7 +1,9 @@
 # company_manager/apps.py
 from django.apps import AppConfig
-from django.contrib.auth import get_user_model
-from django.db.utils import OperationalError, ProgrammingError
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class CompanyManagerConfig(AppConfig):
@@ -10,37 +12,16 @@ class CompanyManagerConfig(AppConfig):
 
     def ready(self):
         """
-        🔥 Auto-create default company for System Owner (Super Admin)
-        يعمل فقط بعد المايجريشن — ويتفادى أخطاء غياب الجداول
+        ✅ تحميل Signals فقط
+        ممنوع تنفيذ أي استعلامات قاعدة بيانات داخل ready()
+        لتفادي RuntimeWarning أثناء أوامر Django والإقلاع.
         """
 
         try:
-            User = get_user_model()
-            from .models import Company
-
-            # ابحث عن أول سوبر أدمن
-            super_admin = User.objects.filter(is_superuser=True).first()
-
-            # إذا فيه سوبر أدمن وما عنده أي شركة → أنشئ شركة تلقائية
-            if super_admin and not Company.objects.exists():
-                Company.objects.create(
-                    owner=super_admin,
-                    name="Default System Company",
-                    commercial_number="0000000000",
-                )
-
-        except (OperationalError, ProgrammingError):
-            # هذا يعني أن الجداول لم تُنشأ بعد — تجاهل
-            pass
-
-        # =====================================================
-        # ✅ تحميل Signals (مهم جدًا لتفعيل الربط التلقائي)
-        # =====================================================
-        try:
             import company_manager.signals  # noqa: F401
+            logger.info("🔥 company_manager.signals LOADED")
         except Exception as exc:
-            # لا نكسر التشغيل — فقط تسجيل الخطأ
-            import logging
-            logging.getLogger(__name__).exception(
-                "❌ Failed loading company_manager.signals: %s", exc
+            logger.exception(
+                "❌ Failed loading company_manager.signals: %s",
+                exc,
             )
