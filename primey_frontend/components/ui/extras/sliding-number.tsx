@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useId } from "react";
-import { MotionValue, motion, useSpring, useTransform, motionValue } from "motion/react";
+import {
+  MotionValue,
+  motion,
+  motionValue,
+  useSpring,
+  useTransform,
+  type Transition,
+} from "motion/react";
 import useMeasure from "react-use-measure";
 
-const TRANSITION = {
+const TRANSITION: Transition = {
   type: "spring",
   stiffness: 280,
   damping: 18,
-  mass: 0.3
+  mass: 0.3,
 };
 
 function Digit({ value, place }: { value: number; place: number }) {
@@ -36,6 +43,7 @@ function Number({ mv, number }: { mv: MotionValue<number>; number: number }) {
 
   const y = useTransform(mv, (latest) => {
     if (!bounds.height) return 0;
+
     const placeValue = latest % 10;
     const offset = (10 + number - placeValue) % 10;
     let memo = offset * bounds.height;
@@ -47,7 +55,6 @@ function Number({ mv, number }: { mv: MotionValue<number>; number: number }) {
     return memo;
   });
 
-  // don't render the animated number until we know the height
   if (!bounds.height) {
     return (
       <span ref={ref} className="invisible absolute">
@@ -58,11 +65,12 @@ function Number({ mv, number }: { mv: MotionValue<number>; number: number }) {
 
   return (
     <motion.span
+      ref={ref}
       style={{ y }}
       layoutId={`${uniqueId}-${number}`}
       className="absolute inset-0 flex items-center justify-center"
       transition={TRANSITION}
-      ref={ref}>
+    >
       {number}
     </motion.span>
   );
@@ -77,14 +85,17 @@ type SlidingNumberProps = {
 export function SlidingNumber({
   value,
   padStart = false,
-  decimalSeparator = "."
+  decimalSeparator = ".",
 }: SlidingNumberProps) {
   const absValue = Math.abs(value);
   const [integerPart, decimalPart] = absValue.toString().split(".");
   const integerValue = parseInt(integerPart, 10);
-  const paddedInteger = padStart && integerValue < 10 ? `0${integerPart}` : integerPart;
+  const paddedInteger =
+    padStart && integerValue < 10 ? `0${integerPart}` : integerPart;
   const integerDigits = paddedInteger.split("");
-  const integerPlaces = integerDigits.map((_, i) => Math.pow(10, integerDigits.length - i - 1));
+  const integerPlaces = integerDigits.map((_, i) =>
+    Math.pow(10, integerDigits.length - i - 1)
+  );
 
   return (
     <div className="flex items-center">
