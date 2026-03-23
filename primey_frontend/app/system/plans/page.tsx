@@ -93,6 +93,16 @@ const SYSTEM_APPS = [
 ] as const
 
 // ======================================================
+// API Endpoints
+// ======================================================
+
+const API_ENDPOINTS = {
+  plansAdmin: "/api/system/plans/admin/",
+  createPlan: "/api/system/plans/create/",
+  updatePlan: (id: number) => `/api/system/plans/${id}/update/`,
+} as const
+
+// ======================================================
 // Types
 // ======================================================
 
@@ -152,6 +162,7 @@ const translations = {
     saveChanges: "حفظ التعديلات",
     create: "إنشاء",
     noApps: "لا توجد تطبيقات",
+    noPlans: "لا توجد خطط حالياً",
     loadFailed: "تعذر تحميل الخطط",
     createSuccess: "تم إنشاء الخطة بنجاح",
     createFailed: "فشل إنشاء الخطة",
@@ -192,6 +203,7 @@ const translations = {
     saveChanges: "Save Changes",
     create: "Create",
     noApps: "No applications",
+    noPlans: "No plans available",
     loadFailed: "Failed to load plans",
     createSuccess: "Plan created successfully",
     createFailed: "Failed to create plan",
@@ -295,8 +307,12 @@ export default function PlansPage() {
     try {
       setLoading(true)
 
-      const res = await fetch("http://localhost:8000/api/system/plans/admin/", {
+      const res = await fetch(API_ENDPOINTS.plansAdmin, {
+        method: "GET",
         credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
       })
 
       if (!res.ok) {
@@ -305,7 +321,13 @@ export default function PlansPage() {
 
       const data = await res.json()
 
-      const mapped = (data.plans || []).map((p: Plan) => ({
+      const plansList = Array.isArray(data?.plans)
+        ? data.plans
+        : Array.isArray(data)
+          ? data
+          : []
+
+      const mapped = plansList.map((p: Plan) => ({
         ...p,
         companies_count: p.companies_count ?? 0,
         apps: Array.isArray(p.apps) ? p.apps : [],
@@ -387,20 +409,18 @@ export default function PlansPage() {
     try {
       const csrf = getCookie("csrftoken")
 
-      const res = await fetch(
-        `http://localhost:8000/api/system/plans/${plan.id}/update/`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrf || "",
-          },
-          body: JSON.stringify({
-            is_active: !plan.is_active,
-          }),
-        }
-      )
+      const res = await fetch(API_ENDPOINTS.updatePlan(plan.id), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrf || "",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          is_active: !plan.is_active,
+        }),
+      })
 
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`)
@@ -444,12 +464,13 @@ export default function PlansPage() {
 
       const csrf = getCookie("csrftoken")
 
-      const res = await fetch("http://localhost:8000/api/system/plans/create/", {
+      const res = await fetch(API_ENDPOINTS.createPlan, {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
           "X-CSRFToken": csrf || "",
+          Accept: "application/json",
         },
         body: JSON.stringify({
           ...form,
@@ -491,29 +512,30 @@ export default function PlansPage() {
 
       const csrf = getCookie("csrftoken")
 
-      const res = await fetch(
-        `http://localhost:8000/api/system/plans/${selectedPlan.id}/update/`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrf || "",
-          },
-          body: JSON.stringify({
-            price_monthly: Number(form.price_monthly),
-            price_yearly: Number(form.price_yearly),
-            max_employees: Number(form.max_employees),
-            is_active: selectedPlan.is_active,
-          }),
-        }
-      )
+      const res = await fetch(API_ENDPOINTS.updatePlan(selectedPlan.id), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrf || "",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          price_monthly: Number(form.price_monthly),
+          price_yearly: Number(form.price_yearly),
+          max_employees: Number(form.max_employees),
+          is_active: selectedPlan.is_active,
+        }),
+      })
 
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`)
       }
 
       setOpenEdit(false)
+      setSelectedPlan(null)
+      setForm(emptyForm)
+
       await fetchPlans()
       toast.success(t.updateSuccess)
     } catch (err) {
@@ -660,136 +682,147 @@ export default function PlansPage() {
           </Dialog>
         </div>
 
+        {/* Empty State */}
+        {!plans.length ? (
+          <Card>
+            <CardContent className="flex min-h-[220px] items-center justify-center">
+              <p className="text-sm text-muted-foreground">{t.noPlans}</p>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {/* Plans Grid */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {plans.map((plan) => (
-            <Card key={plan.id} className="h-full">
-              <CardHeader className="space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <CardTitle className="text-lg">{plan.name}</CardTitle>
+        {plans.length ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {plans.map((plan) => (
+              <Card key={plan.id} className="h-full">
+                <CardHeader className="space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <CardTitle className="text-lg">{plan.name}</CardTitle>
 
-                  {plan.is_active ? (
-                    <Badge>{t.active}</Badge>
-                  ) : (
-                    <Badge variant="destructive">{t.disabled}</Badge>
-                  )}
-                </div>
-              </CardHeader>
-
-              <CardContent className="space-y-5">
-                {/* Monthly Price */}
-                <div className="flex flex-wrap items-center gap-2 text-2xl font-bold">
-                  <Image
-                    src="/currency/sar.svg"
-                    alt="SAR"
-                    width={22}
-                    height={22}
-                    className="shrink-0"
-                  />
-
-                  <span>{formatEnglishNumber(plan.price_monthly ?? 0)}</span>
-
-                  <span className="text-sm font-normal text-muted-foreground">
-                    {t.perMonth}
-                  </span>
-                </div>
-
-                {/* Yearly Price */}
-                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  <Image
-                    src="/currency/sar.svg"
-                    alt="SAR"
-                    width={16}
-                    height={16}
-                    className="shrink-0"
-                  />
-
-                  <span>{formatEnglishNumber(plan.price_yearly ?? 0)}</span>
-                  <span>{t.perYear}</span>
-                </div>
-
-                {/* Description */}
-                {plan.description ? (
-                  <div className="text-sm leading-6 text-muted-foreground">
-                    {plan.description}
-                  </div>
-                ) : null}
-
-                {/* Limits */}
-                <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
-                  <div className="rounded-lg border p-3">
-                    <div className="text-muted-foreground">{t.companiesLimit}</div>
-                    <div className="mt-1 font-semibold">
-                      {formatEnglishNumber(plan.max_companies)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border p-3">
-                    <div className="text-muted-foreground">{t.employeesLimit}</div>
-                    <div className="mt-1 font-semibold">
-                      {formatEnglishNumber(plan.max_employees)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border p-3">
-                    <div className="text-muted-foreground">{t.companiesUsing}</div>
-                    <div className="mt-1 font-semibold">
-                      {formatEnglishNumber(plan.companies_count ?? 0)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Apps */}
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">{t.applications}</div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {plan.apps?.length ? (
-                      plan.apps.map((app, index) => (
-                        <Badge key={`${plan.id}-${app}-${index}`} variant="secondary">
-                          {appLabels[app as keyof typeof appLabels] ?? app}
-                        </Badge>
-                      ))
+                    {plan.is_active ? (
+                      <Badge>{t.active}</Badge>
                     ) : (
-                      <span className="text-sm text-muted-foreground">{t.noApps}</span>
+                      <Badge variant="destructive">{t.disabled}</Badge>
                     )}
                   </div>
-                </div>
+                </CardHeader>
 
-                {/* Actions */}
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => togglePlan(plan)}
-                    className="w-full"
-                  >
-                    {plan.is_active ? t.disable : t.enable}
-                  </Button>
+                <CardContent className="space-y-5">
+                  {/* Monthly Price */}
+                  <div className="flex flex-wrap items-center gap-2 text-2xl font-bold">
+                    <Image
+                      src="/currency/sar.svg"
+                      alt="SAR"
+                      width={22}
+                      height={22}
+                      className="shrink-0"
+                    />
 
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => {
-                      setSelectedPlan(plan)
-                      setForm({
-                        name: plan.name,
-                        description: plan.description || "",
-                        price_monthly: String(plan.price_monthly ?? ""),
-                        price_yearly: String(plan.price_yearly ?? ""),
-                        max_companies: String(plan.max_companies),
-                        max_employees: String(plan.max_employees),
-                        apps: Array.isArray(plan.apps) ? plan.apps : [],
-                      })
-                      setOpenEdit(true)
-                    }}
-                  >
-                    {t.edit}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                    <span>{formatEnglishNumber(plan.price_monthly ?? 0)}</span>
+
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {t.perMonth}
+                    </span>
+                  </div>
+
+                  {/* Yearly Price */}
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <Image
+                      src="/currency/sar.svg"
+                      alt="SAR"
+                      width={16}
+                      height={16}
+                      className="shrink-0"
+                    />
+
+                    <span>{formatEnglishNumber(plan.price_yearly ?? 0)}</span>
+                    <span>{t.perYear}</span>
+                  </div>
+
+                  {/* Description */}
+                  {plan.description ? (
+                    <div className="text-sm leading-6 text-muted-foreground">
+                      {plan.description}
+                    </div>
+                  ) : null}
+
+                  {/* Limits */}
+                  <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+                    <div className="rounded-lg border p-3">
+                      <div className="text-muted-foreground">{t.companiesLimit}</div>
+                      <div className="mt-1 font-semibold">
+                        {formatEnglishNumber(plan.max_companies)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border p-3">
+                      <div className="text-muted-foreground">{t.employeesLimit}</div>
+                      <div className="mt-1 font-semibold">
+                        {formatEnglishNumber(plan.max_employees)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border p-3">
+                      <div className="text-muted-foreground">{t.companiesUsing}</div>
+                      <div className="mt-1 font-semibold">
+                        {formatEnglishNumber(plan.companies_count ?? 0)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Apps */}
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">{t.applications}</div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {plan.apps?.length ? (
+                        plan.apps.map((app, index) => (
+                          <Badge key={`${plan.id}-${app}-${index}`} variant="secondary">
+                            {appLabels[app as keyof typeof appLabels] ?? app}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-sm text-muted-foreground">{t.noApps}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => togglePlan(plan)}
+                      className="w-full"
+                    >
+                      {plan.is_active ? t.disable : t.enable}
+                    </Button>
+
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        setSelectedPlan(plan)
+                        setForm({
+                          name: plan.name,
+                          description: plan.description || "",
+                          price_monthly: String(plan.price_monthly ?? ""),
+                          price_yearly: String(plan.price_yearly ?? ""),
+                          max_companies: String(plan.max_companies),
+                          max_employees: String(plan.max_employees),
+                          apps: Array.isArray(plan.apps) ? plan.apps : [],
+                        })
+                        setOpenEdit(true)
+                      }}
+                    >
+                      {t.edit}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : null}
 
         {/* Edit Modal */}
         <Dialog
