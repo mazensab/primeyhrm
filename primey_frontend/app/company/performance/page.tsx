@@ -566,6 +566,8 @@ const messages = {
   },
 } as const
 
+type MessageDictionary = (typeof messages)[Locale]
+
 function detectLocale(): Locale {
   if (typeof document === "undefined") return "ar"
   const lang = (document.documentElement.lang || "ar").toLowerCase()
@@ -641,7 +643,7 @@ function getStatusBadgeVariant(status?: string) {
   }
 }
 
-function getStatusLabel(status: string | undefined, localeText: (typeof messages)["ar"]) {
+function getStatusLabel(status: string | undefined, localeText: MessageDictionary) {
   switch (status) {
     case "SELF_PENDING":
       return localeText.statusSelfPending
@@ -656,7 +658,7 @@ function getStatusLabel(status: string | undefined, localeText: (typeof messages
   }
 }
 
-function getPeriodLabel(period: string | undefined, localeText: (typeof messages)["ar"]) {
+function getPeriodLabel(period: string | undefined, localeText: MessageDictionary) {
   switch (period) {
     case "YEARLY":
       return localeText.yearly
@@ -672,6 +674,7 @@ function getPeriodLabel(period: string | undefined, localeText: (typeof messages
 function buildSuggestedPeriodLabel(period?: string) {
   const now = new Date()
   const year = now.getFullYear()
+
   switch (period) {
     case "YEARLY":
       return `Annual ${year}`
