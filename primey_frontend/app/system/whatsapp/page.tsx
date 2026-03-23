@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Activity,
+  AlertCircle,
   ArrowUpRight,
   BellRing,
   Bot,
@@ -14,6 +15,7 @@ import {
   Loader2,
   MessageCircle,
   MessageSquareText,
+  Power,
   RefreshCw,
   Send,
   Settings2,
@@ -201,6 +203,18 @@ const translations = {
     logsCardDesc: "تتبع الرسائل، الحالات، والفشل ومحاولات الإرسال.",
     templatesCardDesc: "إدارة قوالب التنبيهات والإشعارات الجاهزة للإرسال.",
     broadcastsCardDesc: "إرسال الحملات والتنبيهات إلى عدة مستلمين من لوحة النظام.",
+    unknown: "غير معروف",
+    statusToggle: "الحالة",
+    sentStatus: "تم الإرسال",
+    deliveredStatus: "تم التسليم",
+    readStatus: "تمت القراءة",
+    failedStatus: "فشل",
+    pendingStatus: "قيد الانتظار",
+    approvedStatus: "معتمد",
+    rejectedStatus: "مرفوض",
+    draftStatus: "مسودة",
+    runningStatus: "قيد التنفيذ",
+    completedStatus: "مكتمل",
   },
   en: {
     centerBadge: "System WhatsApp Center",
@@ -263,6 +277,18 @@ const translations = {
     logsCardDesc: "Track messages, statuses, failures, and sending attempts.",
     templatesCardDesc: "Manage ready-made notification and alert templates.",
     broadcastsCardDesc: "Send campaigns and alerts to multiple recipients from the system panel.",
+    unknown: "Unknown",
+    statusToggle: "Status",
+    sentStatus: "Sent",
+    deliveredStatus: "Delivered",
+    readStatus: "Read",
+    failedStatus: "Failed",
+    pendingStatus: "Pending",
+    approvedStatus: "Approved",
+    rejectedStatus: "Rejected",
+    draftStatus: "Draft",
+    runningStatus: "Running",
+    completedStatus: "Completed",
   },
 } as const
 
@@ -309,7 +335,14 @@ function formatDate(value: string | null | undefined, locale: Locale) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    numberingSystem: "latn",
   }).format(date)
+}
+
+function formatNumber(value: number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    useGrouping: false,
+  }).format(Number(value ?? 0))
 }
 
 function statusLabel(status: string | undefined, locale: Locale) {
@@ -329,18 +362,60 @@ function statusLabel(status: string | undefined, locale: Locale) {
   }
 
   if (labels[value]) return labels[value][locale]
-  return status || (locale === "ar" ? "غير معروف" : "Unknown")
+  return locale === "ar" ? "غير معروف" : "Unknown"
 }
 
-function statusVariant(
-  status?: string
-): "default" | "secondary" | "destructive" | "outline" {
+function getStatusTone(status?: string) {
   const value = (status || "").toUpperCase()
 
-  if (["FAILED", "REJECTED"].includes(value)) return "destructive"
-  if (["SENT", "DELIVERED", "READ", "APPROVED", "COMPLETED"].includes(value)) return "default"
-  if (["PENDING", "DRAFT", "RUNNING"].includes(value)) return "secondary"
-  return "outline"
+  if (["SENT", "DELIVERED", "READ", "APPROVED", "COMPLETED"].includes(value)) {
+    return {
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      icon: CheckCircle2,
+    }
+  }
+
+  if (["FAILED", "REJECTED"].includes(value)) {
+    return {
+      className: "border-red-200 bg-red-50 text-red-700",
+      icon: AlertCircle,
+    }
+  }
+
+  if (["PENDING", "DRAFT", "RUNNING"].includes(value)) {
+    return {
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+      icon: Clock3,
+    }
+  }
+
+  return {
+    className: "border-slate-200 bg-slate-50 text-slate-700",
+    icon: Power,
+  }
+}
+
+function WhatsAppStatusBadge({
+  status,
+  locale,
+}: {
+  status?: string
+  locale: Locale
+}) {
+  const tone = getStatusTone(status)
+  const Icon = tone.icon
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        tone.className,
+      ].join(" ")}
+    >
+      <Icon className="me-1 h-3.5 w-3.5" />
+      {statusLabel(status, locale)}
+    </span>
+  )
 }
 
 async function safeFetchJson<T>(path: string): Promise<T | null> {
@@ -564,7 +639,7 @@ export default function SystemWhatsAppPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border bg-background/80 p-4 shadow-sm backdrop-blur">
                   <p className="text-xs text-muted-foreground">{t.phoneNumberId}</p>
-                  <p className="mt-1 truncate text-sm font-semibold">
+                  <p className="mt-1 truncate text-sm font-semibold" dir="ltr">
                     {state.status?.phone_number_id ||
                       state.settings?.config?.phone_number_id ||
                       t.notConfigured}
@@ -599,7 +674,7 @@ export default function SystemWhatsAppPage() {
               <ShieldCheck className="h-4 w-4 text-primary" />
             </div>
             <p className="mt-3 text-2xl font-bold">{isActive ? t.active : t.inactive}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
               {t.lastCheck}: {formatDate(state.status?.last_check_at, locale)}
             </p>
           </div>
@@ -609,9 +684,11 @@ export default function SystemWhatsAppPage() {
               <span className="text-sm text-muted-foreground">{t.approvedTemplates}</span>
               <FileText className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-3 text-2xl font-bold">{metrics.approvedTemplates}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t.outOf} {metrics.totalTemplates}
+            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+              {formatNumber(metrics.approvedTemplates)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+              {t.outOf} {formatNumber(metrics.totalTemplates)}
             </p>
           </div>
 
@@ -620,9 +697,11 @@ export default function SystemWhatsAppPage() {
               <span className="text-sm text-muted-foreground">{t.sentMessages}</span>
               <Send className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-3 text-2xl font-bold">{metrics.sentLogs}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t.failed}: {metrics.failedLogs}
+            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+              {formatNumber(metrics.sentLogs)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+              {t.failed}: {formatNumber(metrics.failedLogs)}
             </p>
           </div>
 
@@ -631,7 +710,9 @@ export default function SystemWhatsAppPage() {
               <span className="text-sm text-muted-foreground">{t.broadcasts}</span>
               <Target className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-3 text-2xl font-bold">{metrics.totalBroadcasts}</p>
+            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+              {formatNumber(metrics.totalBroadcasts)}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">{t.systemLevelReady}</p>
           </div>
         </CardContent>
@@ -745,7 +826,9 @@ export default function SystemWhatsAppPage() {
                 <TrendingUp className="h-5 w-5 text-primary" />
                 <div>
                   <p className="text-sm text-muted-foreground">{t.pendingTemplates}</p>
-                  <p className="font-semibold">{state.status?.pending_templates ?? 0}</p>
+                  <p className="font-semibold tabular-nums" dir="ltr">
+                    {formatNumber(state.status?.pending_templates ?? 0)}
+                  </p>
                 </div>
               </div>
             </div>
@@ -755,8 +838,8 @@ export default function SystemWhatsAppPage() {
                 <MessageCircle className="h-5 w-5 text-primary" />
                 <div>
                   <p className="text-sm text-muted-foreground">{t.failedMessages}</p>
-                  <p className="font-semibold">
-                    {state.status?.failed_messages ?? metrics.failedLogs}
+                  <p className="font-semibold tabular-nums" dir="ltr">
+                    {formatNumber(state.status?.failed_messages ?? metrics.failedLogs)}
                   </p>
                 </div>
               </div>
@@ -797,20 +880,18 @@ export default function SystemWhatsAppPage() {
                   <div className="flex flex-col gap-3 rounded-2xl border p-4 md:flex-row md:items-center md:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={statusVariant(item.status)}>
-                          {statusLabel(item.status, locale)}
-                        </Badge>
+                        <WhatsAppStatusBadge status={item.status} locale={locale} />
                         <Badge variant="outline">{item.message_type || t.message}</Badge>
                         {item.template_name ? (
                           <Badge variant="secondary">{item.template_name}</Badge>
                         ) : null}
                       </div>
 
-                      <p className="mt-3 truncate text-sm font-semibold">
+                      <p className="mt-3 truncate text-sm font-semibold" dir="ltr">
                         {item.recipient_phone || t.noRecipient}
                       </p>
 
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
                         {formatDate(item.created_at, locale)}
                       </p>
 
@@ -819,7 +900,7 @@ export default function SystemWhatsAppPage() {
                       ) : null}
                     </div>
 
-                    <div className="shrink-0 text-xs text-muted-foreground">
+                    <div className="shrink-0 text-xs text-muted-foreground" dir="ltr">
                       {item.provider_message_id || "—"}
                     </div>
                   </div>
@@ -863,14 +944,12 @@ export default function SystemWhatsAppPage() {
                         <p className="truncate font-semibold">
                           {template.name || t.untitledTemplate}
                         </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
+                        <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
                           {template.language || "—"} • {template.category || "—"}
                         </p>
                       </div>
 
-                      <Badge variant={statusVariant(template.status)}>
-                        {statusLabel(template.status, locale)}
-                      </Badge>
+                      <WhatsAppStatusBadge status={template.status} locale={locale} />
                     </div>
                   </div>
                 ))
@@ -905,16 +984,14 @@ export default function SystemWhatsAppPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate font-semibold">
-                          {broadcast.title || `Broadcast #${broadcast.id}`}
+                          {broadcast.title || `Broadcast #${formatNumber(broadcast.id)}`}
                         </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {t.recipients}: {broadcast.recipient_count ?? 0} • {t.sent}: {broadcast.sent_count ?? 0}
+                        <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+                          {t.recipients}: {formatNumber(broadcast.recipient_count ?? 0)} • {t.sent}: {formatNumber(broadcast.sent_count ?? 0)}
                         </p>
                       </div>
 
-                      <Badge variant={statusVariant(broadcast.status)}>
-                        {statusLabel(broadcast.status, locale)}
-                      </Badge>
+                      <WhatsAppStatusBadge status={broadcast.status} locale={locale} />
                     </div>
                   </div>
                 ))

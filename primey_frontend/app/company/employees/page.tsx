@@ -1,48 +1,53 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import {
-  Search,
-  Printer,
-  FileSpreadsheet,
-  Users,
-  UserCheck,
-  UserX,
-  Building2,
+  Activity,
   Briefcase,
-  RefreshCw,
-  Loader2,
-  Mail,
-  Phone,
-  BadgeCheck,
-  Eye,
-  UserPlus,
-  Shield,
-  Crown,
-  UserCog,
+  Building2,
+  CalendarDays,
   Check,
-  Plus,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  Eye,
+  FileDown,
+  FileSpreadsheet,
+  Filter,
   GitBranch,
   Layers3,
-  Clock3,
+  Loader2,
+  Mail,
   Pencil,
+  Phone,
+  Plane,
+  Plus,
+  Printer,
+  RefreshCw,
+  Search,
+  Shield,
   Sparkles,
-  Filter,
-  CalendarDays,
-  ChevronRight,
+  UserCheck,
+  UserCog,
+  UserPlus,
+  UserX,
+  Users,
+  XCircle,
+  Crown,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card"
 import {
   Select,
@@ -74,6 +79,8 @@ import { cn } from "@/lib/utils"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
+type Lang = "ar" | "en"
+type Direction = "rtl" | "ltr"
 type EmployeeStatus = "ACTIVE" | "INACTIVE" | "ON_LEAVE"
 type CompanyRole = "OWNER" | "ADMIN" | "HR" | "MANAGER" | "EMPLOYEE"
 type UserStatus = "ACTIVE" | "INACTIVE"
@@ -136,7 +143,6 @@ interface EmployeesApiResponse {
 interface CompanyRoleOption {
   code: CompanyRole
   label: string
-  description?: string
 }
 
 interface LookupItem {
@@ -196,38 +202,459 @@ interface GenericApiResponse {
   errors?: Record<string, string>
 }
 
-const COMPANY_ROLE_OPTIONS: CompanyRoleOption[] = [
-  { code: "ADMIN", label: "Admin" },
-  { code: "HR", label: "HR" },
-  { code: "MANAGER", label: "Manager" },
-  { code: "EMPLOYEE", label: "Employee" },
-]
+const translations = {
+  ar: {
+    pageTitle: "الموظفون",
+    pageDescription:
+      "إدارة الموظفين داخل الشركة مع البحث والفلاتر وربط الأقسام والفروع وجداول الدوام.",
+    addEmployee: "إضافة موظف",
+    refresh: "تحديث",
+    pdf: "PDF",
+    excel: "Excel",
 
-const WEEKEND_DAY_OPTIONS = [
-  { value: "fri", label: "Friday / الجمعة" },
-  { value: "sat", label: "Saturday / السبت" },
-  { value: "sun", label: "Sunday / الأحد" },
-  { value: "mon", label: "Monday / الاثنين" },
-  { value: "tue", label: "Tuesday / الثلاثاء" },
-  { value: "wed", label: "Wednesday / الأربعاء" },
-  { value: "thu", label: "Thursday / الخميس" },
-]
+    fullName: "الاسم الكامل",
+    username: "اسم المستخدم",
+    email: "البريد الإلكتروني",
+    phone: "الجوال",
+    role: "الدور",
+    userStatus: "الحالة",
+    department: "القسم",
+    jobTitle: "المسمى الوظيفي",
+    workSchedule: "جدول الدوام",
+    branches: "الفروع",
+
+    exampleFullName: "مثال: أحمد الحربي",
+    exampleUsername: "مثال: ahmed.hr",
+    exampleEmail: "example@company.com",
+    examplePhone: "+9665xxxxxxxx",
+
+    addCompanyUser: "إضافة مستخدم شركة",
+    addCompanyUserDescription:
+      "سيتم إنشاء مستخدم شركة فعلي وربطه بالدور المحدد داخل الشركة.",
+    selectRole: "اختر الدور",
+    selectStatus: "اختر الحالة",
+    selectDepartment: "اختر القسم",
+    selectJobTitle: "اختر المسمى الوظيفي",
+    selectWorkSchedule: "اختر جدول الدوام",
+    selectBranches: "اختر فرعًا أو أكثر",
+    loadingDepartments: "جارٍ تحميل الأقسام...",
+    loadingJobTitles: "جارٍ تحميل المسميات...",
+    loadingSchedules: "جارٍ تحميل الجداول...",
+    loadingBranches: "جارٍ تحميل الفروع...",
+    noBranchesAvailable: "لا توجد فروع متاحة",
+    roleSummary: "ملخص الدور",
+    quickPreview: "معاينة سريعة",
+    binding: "الربط",
+    companyBinding: "شركة",
+    cancel: "إلغاء",
+    creating: "جارٍ الإنشاء...",
+    saveUser: "حفظ المستخدم",
+
+    totalEmployees: "إجمالي الموظفين",
+    activeEmployees: "الموظفون النشطون",
+    inactiveEmployees: "الموظفون غير النشطين",
+    departmentsCount: "الأقسام",
+    allEmployeesDesc: "جميع الموظفين داخل الشركة",
+    activeEmployeesDesc: "الحسابات النشطة حالياً",
+    inactiveEmployeesDesc: "الحسابات أو الملفات غير النشطة",
+    departmentsCountDesc: "عدد الأقسام الحالية",
+
+    filtersTitle: "البحث والتصفية",
+    filtersDescription: "ابحث وصفِّ الموظفين حسب الاسم والحالة والقسم والفرع",
+    searchPlaceholder:
+      "ابحث بالاسم، اليوزر، البريد، الجوال، الرقم الوظيفي، القسم، الوظيفة...",
+    filterStatus: "الحالة",
+    filterDepartment: "القسم",
+    filterBranch: "الفرع",
+    allStatuses: "كل الحالات",
+    allDepartments: "كل الأقسام",
+    allBranches: "كل الفروع",
+    reset: "إعادة تعيين",
+    filtersReset: "تمت إعادة تعيين الفلاتر",
+
+    employeesList: "قائمة الموظفين",
+    totalResults: "إجمالي النتائج",
+    loadingEmployees: "جارٍ تحميل الموظفين...",
+    noResults: "لا توجد نتائج",
+    noResultsDescription: "لا توجد بيانات مطابقة للفلاتر الحالية",
+
+    employee: "الموظف",
+    employeeNo: "الرقم الوظيفي",
+    employeeBranches: "الفروع",
+    joinDate: "تاريخ الانضمام",
+    view: "عرض",
+    actions: "الإجراءات",
+
+    branchCardTitle: "الفروع",
+    branchCardSubtitle: "عرض وإضافة فروع الشركة",
+    noBranches: "لا توجد فروع حالياً",
+    addBranchTitle: "إضافة فرع جديد",
+    addBranchDescription: "سيتم إنشاء فرع جديد داخل الشركة الحالية",
+    addBranchPlaceholder: "مثال: الفرع الرئيسي",
+
+    departmentCardTitle: "الأقسام",
+    departmentCardSubtitle: "عرض وإضافة أقسام الشركة",
+    noDepartments: "لا توجد أقسام حالياً",
+    addDepartmentTitle: "إضافة قسم جديد",
+    addDepartmentDescription: "سيتم إنشاء قسم جديد داخل الشركة الحالية",
+    addDepartmentPlaceholder: "مثال: الموارد البشرية",
+
+    jobTitleCardTitle: "الوظائف",
+    jobTitleCardSubtitle: "عرض وإضافة المسميات الوظيفية",
+    noJobTitles: "لا توجد وظائف حالياً",
+    addJobTitleTitle: "إضافة وظيفة جديدة",
+    addJobTitleDescription: "سيتم إنشاء مسمى وظيفي جديد داخل الشركة الحالية",
+    addJobTitlePlaceholder: "مثال: محاسب أول",
+
+    add: "إضافة",
+    save: "حفظ",
+    loading: "جارٍ التحميل...",
+    name: "الاسم",
+    id: "المعرف",
+    activeLabel: "نشط",
+    inactiveLabel: "غير نشط",
+
+    workSchedulesTitle: "فترات العمل",
+    workSchedulesSubtitle: "عرض وإضافة وتعديل جداول الدوام الحالية",
+    addWorkSchedule: "إضافة فترة عمل",
+    editWorkSchedule: "إضافة / تعديل فترة عمل",
+    editWorkScheduleDescription:
+      "يمكنك إنشاء فترة جديدة أو تعديل فترة موجودة حسب نوع الدوام",
+    workScheduleName: "اسم الفترة",
+    workScheduleNamePlaceholder: "مثال: الفترة الصباحية",
+    workScheduleType: "نوع الفترة",
+    weekendDay: "يوم الإجازة",
+    firstPeriodFrom: "الفترة الأولى من",
+    firstPeriodTo: "الفترة الأولى إلى",
+    secondPeriodFrom: "الفترة الثانية من",
+    secondPeriodTo: "الفترة الثانية إلى",
+    targetHours: "عدد الساعات",
+    targetHoursPlaceholder: "مثال: 8",
+    saveWorkSchedule: "حفظ الفترة",
+    loadingWorkSchedules: "جارٍ تحميل الفترات...",
+    noWorkSchedules: "لا توجد فترات عمل حالياً",
+    noWorkSchedulesDescription:
+      "يمكنك إضافة فترة عمل جديدة مباشرة من هذا القسم",
+    type: "النوع",
+    firstPeriod: "الفترة الأولى",
+    secondPeriod: "الفترة الثانية",
+    vacation: "الإجازة",
+    hours: "الساعات",
+    action: "إجراء",
+    viewEdit: "عرض/تعديل",
+
+    quickSummary: "ملخص سريع",
+    goToCompanyProfile: "الانتقال إلى Company Profile",
+
+    owner: "المالك",
+    admin: "مدير النظام",
+    hr: "الموارد البشرية",
+    manager: "مدير",
+    employeeRole: "موظف",
+
+    statusActive: "نشط",
+    statusInactive: "غير نشط",
+    statusOnLeave: "في إجازة",
+
+    fullTime: "دوام فترة واحدة",
+    partTime: "دوام فترتين",
+    hourly: "دوام بالساعات",
+
+    fullNameRequired: "الاسم الكامل مطلوب",
+    usernameRequired: "اسم المستخدم مطلوب",
+    usernameLength: "اسم المستخدم يجب أن يكون 3 أحرف على الأقل",
+    emailInvalid: "يرجى إدخال بريد إلكتروني صحيح",
+    companyUserCreated: "تم إنشاء مستخدم الشركة بنجاح",
+    temporaryPassword: "كلمة المرور المؤقتة",
+    createCompanyUserFailed: "فشل إنشاء مستخدم الشركة",
+
+    branchNameRequired: "اسم الفرع مطلوب",
+    branchCreated: "تم إنشاء الفرع بنجاح",
+    branchCreateFailed: "فشل إنشاء الفرع",
+
+    departmentNameRequired: "اسم القسم مطلوب",
+    departmentCreated: "تم إنشاء القسم بنجاح",
+    departmentCreateFailed: "فشل إنشاء القسم",
+
+    jobTitleNameRequired: "اسم الوظيفة مطلوب",
+    jobTitleCreated: "تم إنشاء الوظيفة بنجاح",
+    jobTitleCreateFailed: "فشل إنشاء الوظيفة",
+
+    workScheduleNameRequired: "اسم فترة العمل مطلوب",
+    weekendDayRequired: "يوم الإجازة مطلوب",
+    firstPeriodRequired: "أوقات الفترة الأولى مطلوبة",
+    secondPeriodRequired: "أوقات الفترة الثانية مطلوبة",
+    targetHoursRequired: "عدد الساعات مطلوب",
+    workScheduleCreated: "تم إنشاء فترة العمل بنجاح",
+    workScheduleUpdated: "تم تعديل فترة العمل بنجاح",
+    workScheduleSaveFailed: "فشل حفظ فترة العمل",
+
+    employeesFallbackEmpty: "تم عرض بيانات تجريبية لأن قائمة الموظفين فارغة",
+    employeesFallbackError: "تعذر جلب البيانات الحقيقية، تم عرض بيانات تجريبية",
+    lookupsLoadFailed: "فشل تحميل القوائم المساعدة",
+    workScheduleAssignFailed: "تم إنشاء الموظف لكن فشل ربط جدول الدوام",
+    printOpened: "تم فتح نافذة الطباعة",
+    excelExportSuccess: "تم تصدير ملف الموظفين بنجاح",
+    excelExportFail: "فشل تصدير ملف Excel",
+    itemNameLabel: "الاسم",
+    saveLoading: "جارٍ الحفظ...",
+    directAddHint: "يمكنك إضافة عنصر جديد مباشرة من هذا القسم",
+  },
+  en: {
+    pageTitle: "Employees",
+    pageDescription:
+      "Manage company employees with search, filters, departments, branches, and work schedules.",
+    addEmployee: "Add Employee",
+    refresh: "Refresh",
+    pdf: "PDF",
+    excel: "Excel",
+
+    fullName: "Full Name",
+    username: "Username",
+    email: "Email",
+    phone: "Phone",
+    role: "Role",
+    userStatus: "Status",
+    department: "Department",
+    jobTitle: "Job Title",
+    workSchedule: "Work Schedule",
+    branches: "Branches",
+
+    exampleFullName: "Example: Ahmed Alharbi",
+    exampleUsername: "Example: ahmed.hr",
+    exampleEmail: "example@company.com",
+    examplePhone: "+9665xxxxxxxx",
+
+    addCompanyUser: "Add Company User",
+    addCompanyUserDescription:
+      "This will create a real company user and assign the selected company role.",
+    selectRole: "Select role",
+    selectStatus: "Select status",
+    selectDepartment: "Select department",
+    selectJobTitle: "Select job title",
+    selectWorkSchedule: "Select work schedule",
+    selectBranches: "Select one or more branches",
+    loadingDepartments: "Loading departments...",
+    loadingJobTitles: "Loading job titles...",
+    loadingSchedules: "Loading schedules...",
+    loadingBranches: "Loading branches...",
+    noBranchesAvailable: "No branches available",
+    roleSummary: "Role Summary",
+    quickPreview: "Quick Preview",
+    binding: "Binding",
+    companyBinding: "Company",
+    cancel: "Cancel",
+    creating: "Creating...",
+    saveUser: "Save User",
+
+    totalEmployees: "Total Employees",
+    activeEmployees: "Active Employees",
+    inactiveEmployees: "Inactive Employees",
+    departmentsCount: "Departments",
+    allEmployeesDesc: "All employees inside the company",
+    activeEmployeesDesc: "Currently active accounts",
+    inactiveEmployeesDesc: "Inactive accounts or files",
+    departmentsCountDesc: "Current departments count",
+
+    filtersTitle: "Search & Filter",
+    filtersDescription: "Search and filter employees by name, status, department, and branch",
+    searchPlaceholder:
+      "Search by name, username, email, phone, employee no., department, job title...",
+    filterStatus: "Status",
+    filterDepartment: "Department",
+    filterBranch: "Branch",
+    allStatuses: "All Statuses",
+    allDepartments: "All Departments",
+    allBranches: "All Branches",
+    reset: "Reset",
+    filtersReset: "Filters reset successfully",
+
+    employeesList: "Employees List",
+    totalResults: "Total results",
+    loadingEmployees: "Loading employees...",
+    noResults: "No Results",
+    noResultsDescription: "No data matched the current filters",
+
+    employee: "Employee",
+    employeeNo: "Employee No.",
+    employeeBranches: "Branches",
+    joinDate: "Join Date",
+    view: "View",
+    actions: "Actions",
+
+    branchCardTitle: "Branches",
+    branchCardSubtitle: "View and add company branches",
+    noBranches: "No branches available",
+    addBranchTitle: "Add New Branch",
+    addBranchDescription: "A new branch will be created inside the current company",
+    addBranchPlaceholder: "Example: Main Branch",
+
+    departmentCardTitle: "Departments",
+    departmentCardSubtitle: "View and add company departments",
+    noDepartments: "No departments available",
+    addDepartmentTitle: "Add New Department",
+    addDepartmentDescription:
+      "A new department will be created inside the current company",
+    addDepartmentPlaceholder: "Example: Human Resources",
+
+    jobTitleCardTitle: "Job Titles",
+    jobTitleCardSubtitle: "View and add job titles",
+    noJobTitles: "No job titles available",
+    addJobTitleTitle: "Add New Job Title",
+    addJobTitleDescription:
+      "A new job title will be created inside the current company",
+    addJobTitlePlaceholder: "Example: Senior Accountant",
+
+    add: "Add",
+    save: "Save",
+    loading: "Loading...",
+    name: "Name",
+    id: "ID",
+    activeLabel: "Active",
+    inactiveLabel: "Inactive",
+
+    workSchedulesTitle: "Work Schedules",
+    workSchedulesSubtitle: "View, add, and edit current work schedules",
+    addWorkSchedule: "Add Work Schedule",
+    editWorkSchedule: "Add / Edit Work Schedule",
+    editWorkScheduleDescription:
+      "Create a new schedule or update an existing one based on work type",
+    workScheduleName: "Schedule Name",
+    workScheduleNamePlaceholder: "Example: Morning Shift",
+    workScheduleType: "Schedule Type",
+    weekendDay: "Weekend Day",
+    firstPeriodFrom: "First Period From",
+    firstPeriodTo: "First Period To",
+    secondPeriodFrom: "Second Period From",
+    secondPeriodTo: "Second Period To",
+    targetHours: "Hours",
+    targetHoursPlaceholder: "Example: 8",
+    saveWorkSchedule: "Save Schedule",
+    loadingWorkSchedules: "Loading schedules...",
+    noWorkSchedules: "No work schedules available",
+    noWorkSchedulesDescription:
+      "You can add a new work schedule directly from this section",
+    type: "Type",
+    firstPeriod: "First Period",
+    secondPeriod: "Second Period",
+    vacation: "Weekend",
+    hours: "Hours",
+    action: "Action",
+    viewEdit: "View / Edit",
+
+    quickSummary: "Quick Summary",
+    goToCompanyProfile: "Go to Company Profile",
+
+    owner: "Owner",
+    admin: "Admin",
+    hr: "HR",
+    manager: "Manager",
+    employeeRole: "Employee",
+
+    statusActive: "Active",
+    statusInactive: "Inactive",
+    statusOnLeave: "On Leave",
+
+    fullTime: "Single Shift",
+    partTime: "Two Shifts",
+    hourly: "Hourly",
+
+    fullNameRequired: "Full name is required",
+    usernameRequired: "Username is required",
+    usernameLength: "Username must be at least 3 characters",
+    emailInvalid: "Please enter a valid email address",
+    companyUserCreated: "Company user created successfully",
+    temporaryPassword: "Temporary password",
+    createCompanyUserFailed: "Failed to create company user",
+
+    branchNameRequired: "Branch name is required",
+    branchCreated: "Branch created successfully",
+    branchCreateFailed: "Failed to create branch",
+
+    departmentNameRequired: "Department name is required",
+    departmentCreated: "Department created successfully",
+    departmentCreateFailed: "Failed to create department",
+
+    jobTitleNameRequired: "Job title name is required",
+    jobTitleCreated: "Job title created successfully",
+    jobTitleCreateFailed: "Failed to create job title",
+
+    workScheduleNameRequired: "Work schedule name is required",
+    weekendDayRequired: "Weekend day is required",
+    firstPeriodRequired: "First period times are required",
+    secondPeriodRequired: "Second period times are required",
+    targetHoursRequired: "Target hours are required",
+    workScheduleCreated: "Work schedule created successfully",
+    workScheduleUpdated: "Work schedule updated successfully",
+    workScheduleSaveFailed: "Failed to save work schedule",
+
+    employeesFallbackEmpty:
+      "Showing demo data because the employees list is empty",
+    employeesFallbackError:
+      "Unable to load live data, showing demo employees instead",
+    lookupsLoadFailed: "Failed to load lookup lists",
+    workScheduleAssignFailed:
+      "Employee created, but assigning work schedule failed",
+    printOpened: "Print window opened",
+    excelExportSuccess: "Employees exported successfully",
+    excelExportFail: "Excel export failed",
+    itemNameLabel: "Name",
+    saveLoading: "Saving...",
+    directAddHint: "You can add a new item directly from this section",
+  },
+} as const
+
+const COMPANY_ROLE_OPTIONS_BY_LANG = {
+  ar: [
+    { code: "ADMIN", label: "مدير النظام" },
+    { code: "HR", label: "الموارد البشرية" },
+    { code: "MANAGER", label: "مدير" },
+    { code: "EMPLOYEE", label: "موظف" },
+  ] satisfies CompanyRoleOption[],
+  en: [
+    { code: "ADMIN", label: "Admin" },
+    { code: "HR", label: "HR" },
+    { code: "MANAGER", label: "Manager" },
+    { code: "EMPLOYEE", label: "Employee" },
+  ] satisfies CompanyRoleOption[],
+}
+
+const WEEKEND_DAY_OPTIONS = {
+  ar: [
+    { value: "fri", label: "الجمعة" },
+    { value: "sat", label: "السبت" },
+    { value: "sun", label: "الأحد" },
+    { value: "mon", label: "الاثنين" },
+    { value: "tue", label: "الثلاثاء" },
+    { value: "wed", label: "الأربعاء" },
+    { value: "thu", label: "الخميس" },
+  ],
+  en: [
+    { value: "fri", label: "Friday" },
+    { value: "sat", label: "Saturday" },
+    { value: "sun", label: "Sunday" },
+    { value: "mon", label: "Monday" },
+    { value: "tue", label: "Tuesday" },
+    { value: "wed", label: "Wednesday" },
+    { value: "thu", label: "Thursday" },
+  ],
+} as const
 
 const FALLBACK_EMPLOYEES: EmployeeRow[] = [
   {
     id: 1,
     employee_code: "EMP-1001",
     employee_number: "EMP-1001",
-    full_name: "أحمد محمد",
+    full_name: "Ahmed Mohammed",
     email: "ahmed@company.com",
     phone: "+966500000001",
     avatar: "",
     username: "ahmed",
     role: "HR",
-    department: "الموارد البشرية",
+    department: "Human Resources",
     job_title: "HR Manager",
-    branch: "المدينة",
-    branches: [{ id: 1, name: "المدينة" }],
+    branch: "Madinah",
+    branches: [{ id: 1, name: "Madinah" }],
     status: "ACTIVE",
     join_date: "2025-01-10",
   },
@@ -235,16 +662,16 @@ const FALLBACK_EMPLOYEES: EmployeeRow[] = [
     id: 2,
     employee_code: "EMP-1002",
     employee_number: "EMP-1002",
-    full_name: "سارة علي",
+    full_name: "Sara Ali",
     email: "sara@company.com",
     phone: "+966500000002",
     avatar: "",
     username: "sara",
     role: "EMPLOYEE",
-    department: "الرواتب",
+    department: "Payroll",
     job_title: "Payroll Specialist",
-    branch: "الرياض",
-    branches: [{ id: 2, name: "الرياض" }],
+    branch: "Riyadh",
+    branches: [{ id: 2, name: "Riyadh" }],
     status: "ACTIVE",
     join_date: "2025-02-14",
   },
@@ -252,16 +679,16 @@ const FALLBACK_EMPLOYEES: EmployeeRow[] = [
     id: 3,
     employee_code: "EMP-1003",
     employee_number: "EMP-1003",
-    full_name: "خالد حسن",
+    full_name: "Khaled Hassan",
     email: "khaled@company.com",
     phone: "+966500000003",
     avatar: "",
     username: "khaled",
     role: "MANAGER",
-    department: "التشغيل",
+    department: "Operations",
     job_title: "Operations Supervisor",
-    branch: "جدة",
-    branches: [{ id: 3, name: "جدة" }],
+    branch: "Jeddah",
+    branches: [{ id: 3, name: "Jeddah" }],
     status: "INACTIVE",
     join_date: "2024-11-03",
   },
@@ -269,51 +696,85 @@ const FALLBACK_EMPLOYEES: EmployeeRow[] = [
     id: 4,
     employee_code: "EMP-1004",
     employee_number: "EMP-1004",
-    full_name: "ريم عبدالله",
+    full_name: "Reem Abdullah",
     email: "reem@company.com",
     phone: "+966500000004",
     avatar: "",
     username: "reem",
     role: "EMPLOYEE",
-    department: "المبيعات",
+    department: "Sales",
     job_title: "Sales Executive",
-    branch: "الدمام",
-    branches: [{ id: 4, name: "الدمام" }],
-    status: "INACTIVE",
+    branch: "Dammam",
+    branches: [{ id: 4, name: "Dammam" }],
+    status: "ON_LEAVE",
     join_date: "2024-08-20",
   },
 ]
+
+function getDocumentLang(): Lang {
+  if (typeof document === "undefined") return "ar"
+
+  const lang =
+    document.documentElement.lang ||
+    document.body.getAttribute("lang") ||
+    "ar"
+
+  return lang.toLowerCase().startsWith("en") ? "en" : "ar"
+}
+
+function getDocumentDir(): Direction {
+  if (typeof document === "undefined") return "rtl"
+
+  const dir =
+    document.documentElement.dir ||
+    document.body.getAttribute("dir") ||
+    (getDocumentLang() === "ar" ? "rtl" : "ltr")
+
+  return dir.toLowerCase() === "ltr" ? "ltr" : "rtl"
+}
+
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return ""
+
+  const cookie = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`))
+
+  return cookie ? decodeURIComponent(cookie.split("=")[1]) : ""
+}
+
+function formatEnglishNumber(value: number | string | null | undefined) {
+  const numericValue = Number(value || 0)
+  return new Intl.NumberFormat("en-US", {
+    useGrouping: false,
+    maximumFractionDigits: 2,
+  }).format(Number.isNaN(numericValue) ? 0 : numericValue)
+}
+
+function formatDateLabel(value?: string | null) {
+  if (!value || value === "-") return "—"
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return String(value).slice(0, 10).replace(/-/g, "/")
+  }
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}/${month}/${day}`
+}
+
+function formatTimeLabel(value?: string | null) {
+  if (!value) return "--"
+  return String(value).slice(0, 5)
+}
 
 function getInitials(name: string) {
   const parts = name.trim().split(" ").filter(Boolean)
   if (parts.length === 0) return "EM"
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
   return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase()
-}
-
-function getStatusBadge(status: EmployeeStatus) {
-  switch (status) {
-    case "ACTIVE":
-      return (
-        <Badge className="rounded-full border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-emerald-700 shadow-none hover:bg-emerald-500/10 dark:text-emerald-300">
-          Active
-        </Badge>
-      )
-    case "INACTIVE":
-      return (
-        <Badge className="rounded-full border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-rose-700 shadow-none hover:bg-rose-500/10 dark:text-rose-300">
-          Inactive
-        </Badge>
-      )
-    case "ON_LEAVE":
-      return (
-        <Badge className="rounded-full border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-amber-700 shadow-none hover:bg-amber-500/10 dark:text-amber-300">
-          On Leave
-        </Badge>
-      )
-    default:
-      return <Badge variant="secondary">{status}</Badge>
-  }
 }
 
 function normalizeStatus(status?: string): EmployeeStatus {
@@ -351,34 +812,36 @@ function normalizeEmployeeRow(row: EmployeeApiRaw): EmployeeRow {
   }
 }
 
-function getCookie(name: string): string {
-  if (typeof document === "undefined") return ""
-
-  const cookie = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith(`${name}=`))
-
-  return cookie ? decodeURIComponent(cookie.split("=")[1]) : ""
-}
-
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
-function getRoleLabel(role: CompanyRole) {
-  switch (role) {
+function escapeHtml(value: string) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
+function getRoleLabel(role: string, lang: Lang) {
+  const normalized = String(role || "").toUpperCase() as CompanyRole
+  const t = translations[lang]
+
+  switch (normalized) {
     case "OWNER":
-      return "Owner"
+      return t.owner
     case "ADMIN":
-      return "Admin"
+      return t.admin
     case "HR":
-      return "HR"
+      return t.hr
     case "MANAGER":
-      return "Manager"
+      return t.manager
     case "EMPLOYEE":
-      return "Employee"
+      return t.employeeRole
     default:
-      return role
+      return role || "--"
   }
 }
 
@@ -402,28 +865,30 @@ function getRoleIcon(role: CompanyRole) {
 function getRoleBadgeClass(role: CompanyRole) {
   switch (role) {
     case "OWNER":
-      return "border-yellow-500/20 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300"
+      return "border-yellow-200 bg-yellow-50 text-yellow-700"
     case "ADMIN":
-      return "border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+      return "border-blue-200 bg-blue-50 text-blue-700"
     case "HR":
-      return "border-violet-500/20 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+      return "border-violet-200 bg-violet-50 text-violet-700"
     case "MANAGER":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+      return "border-amber-200 bg-amber-50 text-amber-700"
     case "EMPLOYEE":
-      return "border-slate-500/20 bg-slate-500/10 text-slate-700 dark:text-slate-300"
+      return "border-zinc-200 bg-zinc-50 text-zinc-700"
     default:
-      return "border-border"
+      return "border-zinc-200 bg-zinc-50 text-zinc-700"
   }
 }
 
-function getScheduleTypeLabel(value?: string | null) {
+function getScheduleTypeLabel(value: string | null | undefined, lang: Lang) {
+  const t = translations[lang]
+
   switch (value) {
     case "FULL_TIME":
-      return "دوام فترة واحدة"
+      return t.fullTime
     case "PART_TIME":
-      return "دوام فترتين"
+      return t.partTime
     case "HOURLY":
-      return "دوام بالساعات"
+      return t.hourly
     default:
       return value || "--"
   }
@@ -431,29 +896,86 @@ function getScheduleTypeLabel(value?: string | null) {
 
 function formatHoursLabel(value?: string | number | null) {
   if (value === null || value === undefined || value === "") return "--"
-  return String(value)
+  return formatEnglishNumber(value)
 }
 
-function downloadExcelFile(rows: EmployeeRow[]) {
+function getLookupActiveLabel(isActive: boolean | undefined, lang: Lang) {
+  return isActive === false
+    ? translations[lang].inactiveLabel
+    : translations[lang].activeLabel
+}
+
+type StatusMeta = {
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  className: string
+}
+
+function getStatusMeta(status: EmployeeStatus, lang: Lang): StatusMeta {
+  const t = translations[lang]
+
+  switch (status) {
+    case "ACTIVE":
+      return {
+        label: t.statusActive,
+        icon: CheckCircle2,
+        className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      }
+    case "INACTIVE":
+      return {
+        label: t.statusInactive,
+        icon: XCircle,
+        className: "border-red-200 bg-red-50 text-red-700",
+      }
+    case "ON_LEAVE":
+      return {
+        label: t.statusOnLeave,
+        icon: Plane,
+        className: "border-amber-200 bg-amber-50 text-amber-700",
+      }
+    default:
+      return {
+        label: String(status),
+        icon: Activity,
+        className: "border-zinc-200 bg-zinc-50 text-zinc-700",
+      }
+  }
+}
+
+function StatusBadge({
+  status,
+  lang,
+}: {
+  status: EmployeeStatus
+  lang: Lang
+}) {
+  const meta = getStatusMeta(status, lang)
+  const Icon = meta.icon
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        meta.className
+      )}
+      dir={lang === "ar" ? "rtl" : "ltr"}
+    >
+      <Icon className="me-1 h-3.5 w-3.5" />
+      {meta.label}
+    </span>
+  )
+}
+
+function downloadExcelFile(rows: EmployeeRow[], lang: Lang) {
   try {
+    const t = translations[lang]
+
     const html = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office"
             xmlns:x="urn:schemas-microsoft-com:office:excel"
             xmlns="http://www.w3.org/TR/REC-html40">
         <head>
           <meta charset="utf-8" />
-          <!--[if gte mso 9]>
-          <xml>
-            <x:ExcelWorkbook>
-              <x:ExcelWorksheets>
-                <x:ExcelWorksheet>
-                  <x:Name>Employees</x:Name>
-                  <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
-                </x:ExcelWorksheet>
-              </x:ExcelWorksheets>
-            </x:ExcelWorkbook>
-          </xml>
-          <![endif]-->
         </head>
         <body>
           <table border="1">
@@ -475,18 +997,18 @@ function downloadExcelFile(rows: EmployeeRow[]) {
               .map(
                 (row) => `
                 <tr>
-                  <td>${row.id}</td>
-                  <td>${row.employee_code}</td>
-                  <td>${row.full_name}</td>
-                  <td>${row.username || ""}</td>
-                  <td>${row.email}</td>
-                  <td>${row.phone}</td>
-                  <td>${row.role || ""}</td>
-                  <td>${row.department}</td>
-                  <td>${row.job_title}</td>
-                  <td>${row.branch}</td>
-                  <td>${row.status}</td>
-                  <td>${row.join_date}</td>
+                  <td>${escapeHtml(String(row.id))}</td>
+                  <td>${escapeHtml(row.employee_code)}</td>
+                  <td>${escapeHtml(row.full_name)}</td>
+                  <td>${escapeHtml(row.username || "")}</td>
+                  <td>${escapeHtml(row.email)}</td>
+                  <td>${escapeHtml(row.phone)}</td>
+                  <td>${escapeHtml(row.role || "")}</td>
+                  <td>${escapeHtml(row.department)}</td>
+                  <td>${escapeHtml(row.job_title)}</td>
+                  <td>${escapeHtml(row.branch)}</td>
+                  <td>${escapeHtml(row.status)}</td>
+                  <td>${escapeHtml(formatDateLabel(row.join_date))}</td>
                 </tr>
               `
               )
@@ -509,10 +1031,10 @@ function downloadExcelFile(rows: EmployeeRow[]) {
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
 
-    toast.success("تم تصدير ملف الموظفين بنجاح")
+    toast.success(t.excelExportSuccess)
   } catch (error) {
     console.error("Excel export error:", error)
-    toast.error("فشل تصدير ملف Excel")
+    toast.error(translations[lang].excelExportFail)
   }
 }
 
@@ -535,14 +1057,38 @@ function extractLookupItems(
   return []
 }
 
-function formatTimeLabel(value?: string | null) {
-  if (!value) return "--"
-  return String(value).slice(0, 5)
-}
+function StatCard({
+  title,
+  value,
+  description,
+  icon,
+  valueClassName,
+}: {
+  title: string
+  value: number
+  description: string
+  icon: React.ComponentType<{ className?: string }>
+  valueClassName?: string
+}) {
+  const Icon = icon
 
-function formatDateLabel(value?: string | null) {
-  if (!value || value === "-") return "-"
-  return String(value).slice(0, 10)
+  return (
+    <Card className="border-border/60">
+      <CardContent className="flex items-center justify-between p-5">
+        <div className="space-y-1">
+          <p className="text-sm text-muted-foreground">{title}</p>
+          <p className={cn("text-3xl font-semibold tabular-nums", valueClassName)}>
+            {formatEnglishNumber(value)}
+          </p>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+
+        <div className="rounded-2xl border bg-muted/40 p-3">
+          <Icon className="h-5 w-5" />
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 function MasterDataCard({
@@ -564,11 +1110,12 @@ function MasterDataCard({
   onCreate,
   creating,
   itemIcon,
+  lang,
 }: {
   title: string
   subtitle: string
   count: number
-  icon: React.ReactNode
+  icon: ReactNode
   items: LookupItem[]
   loading: boolean
   emptyText: string
@@ -582,49 +1129,47 @@ function MasterDataCard({
   onCreateValueChange: (value: string) => void
   onCreate: () => void
   creating: boolean
-  itemIcon: React.ReactNode
+  itemIcon: ReactNode
+  lang: Lang
 }) {
+  const t = translations[lang]
+
   return (
-    <Card className="overflow-hidden rounded-[28px] border-border/60 bg-background shadow-sm transition-all hover:shadow-md">
-      <CardHeader className="border-b border-border/50 bg-muted/20 pb-4">
+    <Card className="border-border/60">
+      <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-border/60 bg-background shadow-sm">
-              {icon}
-            </div>
+            <div className="rounded-2xl border bg-muted/40 p-3">{icon}</div>
             <div>
-              <CardTitle className="text-base font-semibold">{title}</CardTitle>
-              <CardDescription className="mt-1 text-xs sm:text-sm">
-                {subtitle}
-              </CardDescription>
+              <CardTitle className="text-base">{title}</CardTitle>
+              <CardDescription>{subtitle}</CardDescription>
             </div>
           </div>
 
-          <Badge
-            variant="secondary"
-            className="rounded-full px-3 py-1 text-xs font-medium"
-          >
-            {count}
+          <Badge variant="secondary" dir="ltr">
+            {formatEnglishNumber(count)}
           </Badge>
         </div>
+      </CardHeader>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
           <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogTrigger asChild>
-              <Button className="h-10 rounded-xl gap-2">
+              <Button className="gap-2">
                 <Plus className="h-4 w-4" />
-                إضافة
+                {t.add}
               </Button>
             </DialogTrigger>
 
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="sm:max-w-md" dir={lang === "ar" ? "rtl" : "ltr"}>
               <DialogHeader>
                 <DialogTitle>{createTitle}</DialogTitle>
                 <DialogDescription>{createDescription}</DialogDescription>
               </DialogHeader>
 
               <div className="space-y-2 py-2">
-                <label className="text-sm font-medium">الاسم</label>
+                <label className="text-sm font-medium">{t.itemNameLabel}</label>
                 <Input
                   value={createValue}
                   onChange={(e) => onCreateValueChange(e.target.value)}
@@ -633,23 +1178,19 @@ function MasterDataCard({
               </div>
 
               <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => onOpenChange(false)}
-                >
-                  إلغاء
+                <Button variant="outline" onClick={() => onOpenChange(false)}>
+                  {t.cancel}
                 </Button>
-                <Button type="button" onClick={onCreate} disabled={creating} className="gap-2">
+                <Button onClick={onCreate} disabled={creating} className="gap-2">
                   {creating ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      جاري الحفظ...
+                      {t.saveLoading}
                     </>
                   ) : (
                     <>
                       <Plus className="h-4 w-4" />
-                      حفظ
+                      {t.save}
                     </>
                   )}
                 </Button>
@@ -657,83 +1198,62 @@ function MasterDataCard({
             </DialogContent>
           </Dialog>
 
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl gap-2"
-            onClick={onRefresh}
-          >
+          <Button variant="outline" onClick={onRefresh} className="gap-2">
             <RefreshCw className="h-4 w-4" />
-            تحديث
+            {t.refresh}
           </Button>
         </div>
-      </CardHeader>
 
-      <CardContent className="p-4">
         {loading ? (
-          <div className="flex min-h-[260px] items-center justify-center text-muted-foreground">
-            <div className="flex items-center gap-2 rounded-2xl border bg-muted/30 px-4 py-3">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>جاري التحميل...</span>
-            </div>
+          <div className="flex items-center justify-center py-14 text-muted-foreground">
+            <Loader2 className="me-2 h-5 w-5 animate-spin" />
+            {t.loading}
           </div>
         ) : items.length === 0 ? (
-          <div className="flex min-h-[260px] flex-col items-center justify-center rounded-3xl border border-dashed bg-muted/10 px-4 text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border bg-background">
+          <div className="rounded-2xl border border-dashed p-8 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border bg-muted/30">
               {icon}
             </div>
-            <h3 className="text-base font-semibold">{emptyText}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              يمكنك إضافة عنصر جديد مباشرة من هذا القسم
-            </p>
+            <h3 className="font-semibold">{emptyText}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">{t.directAddHint}</p>
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between rounded-2xl border border-border/60 bg-background px-3 py-3 shadow-sm transition-all hover:bg-muted/20"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border bg-muted/20">
-                      {itemIcon}
-                    </div>
+            {items.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background p-3"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="rounded-xl border bg-muted/30 p-2.5">{itemIcon}</div>
 
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">
-                        {item.name}
-                      </div>
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{item.name}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" dir="ltr">
+                        {t.id}: {formatEnglishNumber(item.id)}
+                      </Badge>
 
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className="rounded-full text-[11px]"
-                        >
-                          ID: {item.id}
-                        </Badge>
-
-                        <Badge
-                          className={cn(
-                            "rounded-full text-[11px]",
-                            item.is_active === false
-                              ? "border-rose-500/20 bg-rose-500/10 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300"
-                              : "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
-                          )}
-                        >
-                          {item.is_active === false ? "Inactive" : "Active"}
-                        </Badge>
-                      </div>
+                      <Badge
+                        className={cn(
+                          item.is_active === false
+                            ? "border-red-200 bg-red-50 text-red-700"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        )}
+                      >
+                        {getLookupActiveLabel(item.is_active, lang)}
+                      </Badge>
                     </div>
                   </div>
-
-                  {item.biotime_code ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {item.biotime_code}
-                    </Badge>
-                  ) : null}
                 </div>
-              ))}
-            </div>
+
+                {item.biotime_code ? (
+                  <Badge variant="secondary" dir="ltr">
+                    {item.biotime_code}
+                  </Badge>
+                ) : null}
+              </div>
+            ))}
           </div>
         )}
       </CardContent>
@@ -767,6 +1287,7 @@ function WorkScheduleSection({
   creating,
   editItem,
   onEditItem,
+  lang,
 }: {
   items: LookupItem[]
   loading: boolean
@@ -793,84 +1314,74 @@ function WorkScheduleSection({
   creating: boolean
   editItem: (item: LookupItem) => void
   onEditItem: (item: LookupItem) => void
+  lang: Lang
 }) {
+  const t = translations[lang]
+  const weekendOptions = WEEKEND_DAY_OPTIONS[lang]
+
   return (
-    <Card className="overflow-hidden rounded-[28px] border-border/60 shadow-sm">
-      <CardHeader className="border-b border-border/50 bg-muted/20 pb-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border bg-background shadow-sm">
-              <Clock3 className="h-5 w-5" />
-            </div>
-            <div>
-              <CardTitle className="text-base font-semibold">فترات العمل</CardTitle>
-              <CardDescription className="mt-1">
-                عرض وإضافة وتعديل جداول الدوام الحالية
-              </CardDescription>
-            </div>
+    <Card className="border-border/60">
+      <CardHeader>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="space-y-1">
+            <CardTitle>{t.workSchedulesTitle}</CardTitle>
+            <CardDescription>{t.workSchedulesSubtitle}</CardDescription>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full px-3 py-1">
-              {items.length}
+            <Badge variant="secondary" dir="ltr">
+              {formatEnglishNumber(items.length)}
             </Badge>
 
             <Dialog open={open} onOpenChange={onOpenChange}>
               <DialogTrigger asChild>
-                <Button className="h-10 rounded-xl gap-2">
+                <Button className="gap-2">
                   <Plus className="h-4 w-4" />
-                  إضافة فترة عمل
+                  {t.addWorkSchedule}
                 </Button>
               </DialogTrigger>
 
-              <DialogContent className="sm:max-w-2xl">
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl" dir={lang === "ar" ? "rtl" : "ltr"}>
                 <DialogHeader>
-                  <DialogTitle>إضافة / تعديل فترة عمل</DialogTitle>
-                  <DialogDescription>
-                    يمكنك إنشاء فترة جديدة أو تعديل فترة موجودة حسب نوع الدوام
-                  </DialogDescription>
+                  <DialogTitle>{t.editWorkSchedule}</DialogTitle>
+                  <DialogDescription>{t.editWorkScheduleDescription}</DialogDescription>
                 </DialogHeader>
 
                 <div className="grid grid-cols-1 gap-4 py-2 md:grid-cols-2">
                   <div className="space-y-2 md:col-span-2">
-                    <label className="text-sm font-medium">اسم الفترة</label>
+                    <label className="text-sm font-medium">{t.workScheduleName}</label>
                     <Input
                       value={createName}
                       onChange={(e) => onCreateNameChange(e.target.value)}
-                      placeholder="مثال: الفترة الصباحية"
+                      placeholder={t.workScheduleNamePlaceholder}
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">نوع الفترة</label>
+                    <label className="text-sm font-medium">{t.workScheduleType}</label>
                     <Select
                       value={createType}
-                      onValueChange={(value) =>
-                        onCreateTypeChange(value as ScheduleType)
-                      }
+                      onValueChange={(value) => onCreateTypeChange(value as ScheduleType)}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="اختر النوع" />
+                        <SelectValue placeholder={t.workScheduleType} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="FULL_TIME">دوام فترة واحدة</SelectItem>
-                        <SelectItem value="PART_TIME">دوام فترتين</SelectItem>
-                        <SelectItem value="HOURLY">دوام بالساعات</SelectItem>
+                        <SelectItem value="FULL_TIME">{t.fullTime}</SelectItem>
+                        <SelectItem value="PART_TIME">{t.partTime}</SelectItem>
+                        <SelectItem value="HOURLY">{t.hourly}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">يوم الإجازة</label>
-                    <Select
-                      value={createWeekendDay}
-                      onValueChange={onCreateWeekendDayChange}
-                    >
+                    <label className="text-sm font-medium">{t.weekendDay}</label>
+                    <Select value={createWeekendDay} onValueChange={onCreateWeekendDayChange}>
                       <SelectTrigger>
-                        <SelectValue placeholder="اختر يوم الإجازة" />
+                        <SelectValue placeholder={t.weekendDay} />
                       </SelectTrigger>
                       <SelectContent>
-                        {WEEKEND_DAY_OPTIONS.map((day) => (
+                        {weekendOptions.map((day) => (
                           <SelectItem key={day.value} value={day.value}>
                             {day.label}
                           </SelectItem>
@@ -879,11 +1390,12 @@ function WorkScheduleSection({
                     </Select>
                   </div>
 
-                  {createType !== "HOURLY" ? (
+                  {createType !== "HOURLY" && (
                     <>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">الفترة الأولى من</label>
+                        <label className="text-sm font-medium">{t.firstPeriodFrom}</label>
                         <Input
+                          dir="ltr"
                           type="time"
                           value={createPeriod1Start}
                           onChange={(e) => onCreatePeriod1StartChange(e.target.value)}
@@ -891,21 +1403,23 @@ function WorkScheduleSection({
                       </div>
 
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">الفترة الأولى إلى</label>
+                        <label className="text-sm font-medium">{t.firstPeriodTo}</label>
                         <Input
+                          dir="ltr"
                           type="time"
                           value={createPeriod1End}
                           onChange={(e) => onCreatePeriod1EndChange(e.target.value)}
                         />
                       </div>
                     </>
-                  ) : null}
+                  )}
 
-                  {createType === "PART_TIME" ? (
+                  {createType === "PART_TIME" && (
                     <>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">الفترة الثانية من</label>
+                        <label className="text-sm font-medium">{t.secondPeriodFrom}</label>
                         <Input
+                          dir="ltr"
                           type="time"
                           value={createPeriod2Start}
                           onChange={(e) => onCreatePeriod2StartChange(e.target.value)}
@@ -913,50 +1427,47 @@ function WorkScheduleSection({
                       </div>
 
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">الفترة الثانية إلى</label>
+                        <label className="text-sm font-medium">{t.secondPeriodTo}</label>
                         <Input
+                          dir="ltr"
                           type="time"
                           value={createPeriod2End}
                           onChange={(e) => onCreatePeriod2EndChange(e.target.value)}
                         />
                       </div>
                     </>
-                  ) : null}
+                  )}
 
-                  {createType === "HOURLY" ? (
+                  {createType === "HOURLY" && (
                     <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-medium">عدد الساعات</label>
+                      <label className="text-sm font-medium">{t.targetHours}</label>
                       <Input
+                        dir="ltr"
                         type="number"
                         min="1"
                         step="0.5"
                         value={createTargetHours}
                         onChange={(e) => onCreateTargetHoursChange(e.target.value)}
-                        placeholder="مثال: 8"
+                        placeholder={t.targetHoursPlaceholder}
                       />
                     </div>
-                  ) : null}
+                  )}
                 </div>
 
                 <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => onOpenChange(false)}
-                  >
-                    إلغاء
+                  <Button variant="outline" onClick={() => onOpenChange(false)}>
+                    {t.cancel}
                   </Button>
-
-                  <Button type="button" onClick={onCreate} disabled={creating} className="gap-2">
+                  <Button onClick={onCreate} disabled={creating} className="gap-2">
                     {creating ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        جاري الحفظ...
+                        {t.saveLoading}
                       </>
                     ) : (
                       <>
                         <Plus className="h-4 w-4" />
-                        حفظ الفترة
+                        {t.saveWorkSchedule}
                       </>
                     )}
                   </Button>
@@ -964,175 +1475,208 @@ function WorkScheduleSection({
               </DialogContent>
             </Dialog>
 
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl gap-2"
-              onClick={onRefresh}
-            >
+            <Button variant="outline" onClick={onRefresh} className="gap-2">
               <RefreshCw className="h-4 w-4" />
-              تحديث
+              {t.refresh}
             </Button>
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="p-4">
+      <CardContent>
         {loading ? (
-          <div className="flex min-h-[260px] items-center justify-center text-muted-foreground">
-            <div className="flex items-center gap-2 rounded-2xl border bg-muted/30 px-4 py-3">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>جاري تحميل الفترات...</span>
-            </div>
+          <div className="flex items-center justify-center py-14 text-muted-foreground">
+            <Loader2 className="me-2 h-5 w-5 animate-spin" />
+            {t.loadingWorkSchedules}
           </div>
         ) : items.length === 0 ? (
-          <div className="flex min-h-[220px] flex-col items-center justify-center rounded-3xl border border-dashed bg-muted/10 px-4 text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border bg-background">
+          <div className="rounded-2xl border border-dashed p-8 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border bg-muted/30">
               <Clock3 className="h-5 w-5" />
             </div>
-            <h3 className="text-base font-semibold">لا توجد فترات عمل حالياً</h3>
+            <h3 className="font-semibold">{t.noWorkSchedules}</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              يمكنك إضافة فترة عمل جديدة مباشرة من هذا القسم
+              {t.noWorkSchedulesDescription}
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-3xl border border-border/60 bg-background">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/30 hover:bg-muted/30">
-                  <TableHead>الاسم</TableHead>
-                  <TableHead>النوع</TableHead>
-                  <TableHead>الفترة الأولى</TableHead>
-                  <TableHead>الفترة الثانية</TableHead>
-                  <TableHead>الإجازة</TableHead>
-                  <TableHead>الساعات</TableHead>
-                  <TableHead>الحالة</TableHead>
-                  <TableHead className="text-center">إجراء</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {items.map((item) => (
-                  <TableRow key={item.id} className="hover:bg-muted/20">
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl border bg-muted/20">
-                          <Clock3 className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <span>{item.name}</span>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge variant="outline" className="rounded-full">
-                        {getScheduleTypeLabel(item.schedule_type)}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>
-                      {item.period1_start || item.period1_end
-                        ? `${formatTimeLabel(item.period1_start)} - ${formatTimeLabel(item.period1_end)}`
-                        : "--"}
-                    </TableCell>
-
-                    <TableCell>
-                      {item.period2_start || item.period2_end
-                        ? `${formatTimeLabel(item.period2_start)} - ${formatTimeLabel(item.period2_end)}`
-                        : "--"}
-                    </TableCell>
-
-                    <TableCell>{item.weekend_days_ar || item.weekend_days || "--"}</TableCell>
-                    <TableCell>{formatHoursLabel(item.target_daily_hours)}</TableCell>
-
-                    <TableCell>
-                      <Badge
-                        className={cn(
-                          "rounded-full",
-                          item.is_active === false
-                            ? "border-rose-500/20 bg-rose-500/10 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300"
-                            : "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
-                        )}
-                      >
-                        {item.is_active === false ? "Inactive" : "Active"}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="rounded-xl gap-2"
-                        onClick={() => {
-                          editItem(item)
-                          onEditItem(item)
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                        عرض/تعديل
-                      </Button>
-                    </TableCell>
+          <>
+            <div className="hidden lg:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t.name}</TableHead>
+                    <TableHead>{t.type}</TableHead>
+                    <TableHead>{t.firstPeriod}</TableHead>
+                    <TableHead>{t.secondPeriod}</TableHead>
+                    <TableHead>{t.vacation}</TableHead>
+                    <TableHead>{t.hours}</TableHead>
+                    <TableHead>{t.userStatus}</TableHead>
+                    <TableHead>{t.action}</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+
+                <TableBody>
+                  {items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2 font-medium">
+                          <Clock3 className="h-4 w-4 text-muted-foreground" />
+                          {item.name}
+                        </div>
+                      </TableCell>
+
+                      <TableCell>
+                        <Badge variant="outline">{getScheduleTypeLabel(item.schedule_type, lang)}</Badge>
+                      </TableCell>
+
+                      <TableCell dir="ltr">
+                        {item.period1_start || item.period1_end
+                          ? `${formatTimeLabel(item.period1_start)} - ${formatTimeLabel(item.period1_end)}`
+                          : "--"}
+                      </TableCell>
+
+                      <TableCell dir="ltr">
+                        {item.period2_start || item.period2_end
+                          ? `${formatTimeLabel(item.period2_start)} - ${formatTimeLabel(item.period2_end)}`
+                          : "--"}
+                      </TableCell>
+
+                      <TableCell>
+                        {lang === "ar"
+                          ? item.weekend_days_ar || item.weekend_days || "--"
+                          : item.weekend_days || item.weekend_days_ar || "--"}
+                      </TableCell>
+
+                      <TableCell dir="ltr">{formatHoursLabel(item.target_daily_hours)}</TableCell>
+
+                      <TableCell>
+                        <Badge
+                          className={cn(
+                            item.is_active === false
+                              ? "border-red-200 bg-red-50 text-red-700"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          )}
+                        >
+                          {getLookupActiveLabel(item.is_active, lang)}
+                        </Badge>
+                      </TableCell>
+
+                      <TableCell>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            editItem(item)
+                            onEditItem(item)
+                          }}
+                          className="gap-2"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          {t.viewEdit}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="grid gap-4 lg:hidden">
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-border/60 bg-background p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <Clock3 className="h-4 w-4 text-muted-foreground" />
+                        {item.name}
+                      </div>
+                      <Badge variant="outline">{getScheduleTypeLabel(item.schedule_type, lang)}</Badge>
+                    </div>
+
+                    <Badge
+                      className={cn(
+                        item.is_active === false
+                          ? "border-red-200 bg-red-50 text-red-700"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      )}
+                    >
+                      {getLookupActiveLabel(item.is_active, lang)}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-xl border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">{t.firstPeriod}</p>
+                      <p dir="ltr" className="mt-1 font-medium">
+                        {item.period1_start || item.period1_end
+                          ? `${formatTimeLabel(item.period1_start)} - ${formatTimeLabel(item.period1_end)}`
+                          : "--"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">{t.secondPeriod}</p>
+                      <p dir="ltr" className="mt-1 font-medium">
+                        {item.period2_start || item.period2_end
+                          ? `${formatTimeLabel(item.period2_start)} - ${formatTimeLabel(item.period2_end)}`
+                          : "--"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">{t.vacation}</p>
+                      <p className="mt-1 font-medium">
+                        {lang === "ar"
+                          ? item.weekend_days_ar || item.weekend_days || "--"
+                          : item.weekend_days || item.weekend_days_ar || "--"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">{t.hours}</p>
+                      <p dir="ltr" className="mt-1 font-medium">
+                        {formatHoursLabel(item.target_daily_hours)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="mt-4 w-full gap-2"
+                    onClick={() => {
+                      editItem(item)
+                      onEditItem(item)
+                    }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    {t.viewEdit}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
   )
 }
 
-function StatCard({
-  title,
-  value,
-  icon,
-  tone = "default",
-}: {
-  title: string
-  value: number
-  icon: React.ReactNode
-  tone?: "default" | "emerald" | "rose" | "blue"
-}) {
-  const toneClasses =
-    tone === "emerald"
-      ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300"
-      : tone === "rose"
-        ? "bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300"
-        : tone === "blue"
-          ? "bg-blue-500/10 text-blue-700 border-blue-500/20 dark:text-blue-300"
-          : "bg-primary/10 text-primary border-primary/20"
-
-  return (
-    <Card className="rounded-[28px] border-border/60 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-      <CardContent className="flex items-center justify-between p-5">
-        <div className="space-y-1">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <h3 className="text-2xl font-bold tracking-tight">{value}</h3>
-        </div>
-
-        <div
-          className={cn(
-            "flex h-12 w-12 items-center justify-center rounded-2xl border shadow-sm",
-            toneClasses
-          )}
-        >
-          {icon}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 export default function CompanyEmployeesPage() {
+  const [lang, setLang] = useState<Lang>("ar")
+  const [direction, setDirection] = useState<Direction>("rtl")
+
   const [employees, setEmployees] = useState<EmployeeRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("ALL")
   const [departmentFilter, setDepartmentFilter] = useState("ALL")
   const [branchFilter, setBranchFilter] = useState("ALL")
-
-  const [roles] = useState<CompanyRoleOption[]>(COMPANY_ROLE_OPTIONS)
 
   const [openCreateDialog, setOpenCreateDialog] = useState(false)
   const [fullName, setFullName] = useState("")
@@ -1166,8 +1710,7 @@ export default function CompanyEmployeesPage() {
   const [newJobTitleName, setNewJobTitleName] = useState("")
 
   const [newWorkScheduleName, setNewWorkScheduleName] = useState("")
-  const [newWorkScheduleType, setNewWorkScheduleType] =
-    useState<ScheduleType>("FULL_TIME")
+  const [newWorkScheduleType, setNewWorkScheduleType] = useState<ScheduleType>("FULL_TIME")
   const [newWorkScheduleWeekendDay, setNewWorkScheduleWeekendDay] = useState("fri")
   const [newWorkSchedulePeriod1Start, setNewWorkSchedulePeriod1Start] = useState("")
   const [newWorkSchedulePeriod1End, setNewWorkSchedulePeriod1End] = useState("")
@@ -1180,44 +1723,57 @@ export default function CompanyEmployeesPage() {
   const [creatingJobTitle, setCreatingJobTitle] = useState(false)
   const [creatingWorkSchedule, setCreatingWorkSchedule] = useState(false)
 
-  async function fetchEmployees() {
-    setLoading(true)
+  const t = translations[lang]
+  const isArabic = direction === "rtl"
+  const roles = COMPANY_ROLE_OPTIONS_BY_LANG[lang]
 
-    try {
-      const response = await fetch(`${API_BASE}/api/company/employees/`, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        cache: "no-store",
-      })
+  const syncLanguageState = useCallback(() => {
+    const nextLang = getDocumentLang()
+    const nextDir = getDocumentDir()
+    setLang(nextLang)
+    setDirection(nextDir)
+  }, [])
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
+  const fetchEmployees = useCallback(
+    async (silent = false) => {
+      if (silent) setRefreshing(true)
+      else setLoading(true)
 
-      const data: EmployeesApiResponse = await response.json()
-      const rawResults = data.results || data.employees || data.data || []
+      try {
+        const response = await fetch(`${API_BASE}/api/company/employees/`, {
+          method: "GET",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        })
 
-      if (!Array.isArray(rawResults) || rawResults.length === 0) {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        const data: EmployeesApiResponse = await response.json()
+        const rawResults = data.results || data.employees || data.data || []
+
+        if (!Array.isArray(rawResults) || rawResults.length === 0) {
+          setEmployees(FALLBACK_EMPLOYEES)
+          toast.warning(t.employeesFallbackEmpty)
+          return
+        }
+
+        setEmployees(rawResults.map(normalizeEmployeeRow))
+      } catch (error) {
+        console.error("Employees fetch error:", error)
         setEmployees(FALLBACK_EMPLOYEES)
-        toast.warning("تم عرض بيانات تجريبية لأن قائمة الموظفين فارغة")
-        return
+        toast.warning(t.employeesFallbackError)
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
       }
+    },
+    [t.employeesFallbackEmpty, t.employeesFallbackError]
+  )
 
-      const normalized = rawResults.map(normalizeEmployeeRow)
-      setEmployees(normalized)
-    } catch (error) {
-      console.error("Employees fetch error:", error)
-      setEmployees(FALLBACK_EMPLOYEES)
-      toast.warning("تعذر جلب البيانات الحقيقية، تم عرض بيانات تجريبية")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function fetchLookups() {
+  const fetchLookups = useCallback(async () => {
     setLoadingLookups(true)
 
     try {
@@ -1266,21 +1822,51 @@ export default function CompanyEmployeesPage() {
       setBranchOptions(extractLookupItems(branchesData, "branches"))
 
       const schedulesResults = extractLookupItems(schedulesData, "schedules")
-      const workSchedulesResults = extractLookupItems(
-        schedulesData,
-        "work_schedules"
-      )
-
+      const workSchedulesResults = extractLookupItems(schedulesData, "work_schedules")
       setWorkScheduleOptions(
         schedulesResults.length ? schedulesResults : workSchedulesResults
       )
     } catch (error) {
       console.error("Lookup loading error:", error)
-      toast.error("فشل تحميل القوائم المساعدة")
+      toast.error(t.lookupsLoadFailed)
     } finally {
       setLoadingLookups(false)
     }
-  }
+  }, [t.lookupsLoadFailed])
+
+  useEffect(() => {
+    syncLanguageState()
+
+    const observer = new MutationObserver(syncLanguageState)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["lang", "dir"],
+    })
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["lang", "dir"],
+    })
+
+    window.addEventListener("languagechange", syncLanguageState)
+    window.addEventListener("focus", syncLanguageState)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("languagechange", syncLanguageState)
+      window.removeEventListener("focus", syncLanguageState)
+    }
+  }, [syncLanguageState])
+
+  useEffect(() => {
+    fetchEmployees()
+    fetchLookups()
+  }, [fetchEmployees, fetchLookups])
+
+  useEffect(() => {
+    if (openCreateDialog) {
+      fetchLookups()
+    }
+  }, [openCreateDialog, fetchLookups])
 
   function resetCreateForm() {
     setFullName("")
@@ -1312,12 +1898,8 @@ export default function CompanyEmployeesPage() {
     setNewWorkScheduleName(item.name || "")
     setNewWorkScheduleType((item.schedule_type as ScheduleType) || "FULL_TIME")
     setNewWorkScheduleWeekendDay(item.weekend_days || "fri")
-    setNewWorkSchedulePeriod1Start(
-      formatTimeLabel(item.period1_start || item.start_time || "")
-    )
-    setNewWorkSchedulePeriod1End(
-      formatTimeLabel(item.period1_end || item.end_time || "")
-    )
+    setNewWorkSchedulePeriod1Start(formatTimeLabel(item.period1_start || item.start_time || ""))
+    setNewWorkSchedulePeriod1End(formatTimeLabel(item.period1_end || item.end_time || ""))
     setNewWorkSchedulePeriod2Start(formatTimeLabel(item.period2_start || ""))
     setNewWorkSchedulePeriod2End(formatTimeLabel(item.period2_end || ""))
     setNewWorkScheduleTargetHours(
@@ -1329,9 +1911,7 @@ export default function CompanyEmployeesPage() {
 
   function toggleBranch(branchId: number) {
     setSelectedBranchIds((prev) =>
-      prev.includes(branchId)
-        ? prev.filter((id) => id !== branchId)
-        : [...prev, branchId]
+      prev.includes(branchId) ? prev.filter((id) => id !== branchId) : [...prev, branchId]
     )
   }
 
@@ -1342,22 +1922,22 @@ export default function CompanyEmployeesPage() {
     const safePhone = phone.trim()
 
     if (!safeFullName) {
-      toast.error("Full name is required")
+      toast.error(t.fullNameRequired)
       return
     }
 
     if (!safeUsername) {
-      toast.error("Username is required")
+      toast.error(t.usernameRequired)
       return
     }
 
     if (safeUsername.length < 3) {
-      toast.error("Username must be at least 3 characters")
+      toast.error(t.usernameLength)
       return
     }
 
     if (!safeEmail || !isValidEmail(safeEmail)) {
-      toast.error("Please enter a valid email address")
+      toast.error(t.emailInvalid)
       return
     }
 
@@ -1365,9 +1945,7 @@ export default function CompanyEmployeesPage() {
 
     try {
       const csrfToken = getCookie("csrftoken")
-      const temporaryPassword = `Primey@${Math.floor(
-        100000 + Math.random() * 900000
-      )}`
+      const temporaryPassword = `Primey@${Math.floor(100000 + Math.random() * 900000)}`
 
       const createResponse = await fetch(`${API_BASE}/api/company/employees/create/`, {
         method: "POST",
@@ -1380,9 +1958,7 @@ export default function CompanyEmployeesPage() {
           employee: {
             full_name: safeFullName,
             mobile_number: safePhone,
-            department_id: selectedDepartmentId
-              ? Number(selectedDepartmentId)
-              : null,
+            department_id: selectedDepartmentId ? Number(selectedDepartmentId) : null,
             job_title_id: selectedJobTitleId ? Number(selectedJobTitleId) : null,
             branch_ids: selectedBranchIds,
           },
@@ -1410,19 +1986,13 @@ export default function CompanyEmployeesPage() {
             : null
 
         throw new Error(
-          firstError ||
-            createData.error ||
-            createData.message ||
-            "Failed to create company user"
+          firstError || createData.error || createData.message || t.createCompanyUserFailed
         )
       }
 
-      const createdEmployeeId =
-        createData.employee_id || createData.data?.employee_id
+      const createdEmployeeId = createData.employee_id || createData.data?.employee_id
 
       if (createdEmployeeId && selectedWorkScheduleId) {
-        const csrfTokenForSchedule = getCookie("csrftoken")
-
         const scheduleResponse = await fetch(
           `${API_BASE}/api/company/employees/${createdEmployeeId}/assign-work-schedule/`,
           {
@@ -1430,7 +2000,7 @@ export default function CompanyEmployeesPage() {
             credentials: "include",
             headers: {
               "Content-Type": "application/json",
-              "X-CSRFToken": csrfTokenForSchedule,
+              "X-CSRFToken": csrfToken,
             },
             body: JSON.stringify({
               schedule_id: Number(selectedWorkScheduleId),
@@ -1448,28 +2018,24 @@ export default function CompanyEmployeesPage() {
 
         if (!scheduleResponse.ok || !isScheduleSuccess) {
           toast.warning(
-            scheduleData.error ||
-              scheduleData.message ||
-              "تم إنشاء الموظف لكن فشل ربط جدول الدوام"
+            scheduleData.error || scheduleData.message || t.workScheduleAssignFailed
           )
         }
       }
 
-      toast.success("Company user created successfully", {
+      toast.success(t.companyUserCreated, {
         description:
           createData.temporary_password ||
           createData.data?.temporary_password ||
-          `Temporary password: ${temporaryPassword}`,
+          `${t.temporaryPassword}: ${temporaryPassword}`,
       })
 
       resetCreateForm()
       setOpenCreateDialog(false)
-      await fetchEmployees()
+      await fetchEmployees(true)
     } catch (error) {
-      console.error("Create company user from employees page error:", error)
-      toast.error(
-        error instanceof Error ? error.message : "Failed to create company user"
-      )
+      console.error("Create company user error:", error)
+      toast.error(error instanceof Error ? error.message : t.createCompanyUserFailed)
     } finally {
       setSubmitting(false)
     }
@@ -1478,7 +2044,7 @@ export default function CompanyEmployeesPage() {
   async function handleCreateBranch() {
     const safeName = newBranchName.trim()
     if (!safeName) {
-      toast.error("اسم الفرع مطلوب")
+      toast.error(t.branchNameRequired)
       return
     }
 
@@ -1500,21 +2066,19 @@ export default function CompanyEmployeesPage() {
 
       const isSuccess =
         response.ok &&
-        (data.success === true ||
-          data.status === "success" ||
-          data.status === "ok")
+        (data.success === true || data.status === "success" || data.status === "ok")
 
       if (!isSuccess) {
-        throw new Error(data.error || data.message || "فشل إنشاء الفرع")
+        throw new Error(data.error || data.message || t.branchCreateFailed)
       }
 
-      toast.success(data.message || "تم إنشاء الفرع بنجاح")
+      toast.success(data.message || t.branchCreated)
       setNewBranchName("")
       setOpenBranchDialog(false)
       await fetchLookups()
     } catch (error) {
       console.error("Create branch error:", error)
-      toast.error(error instanceof Error ? error.message : "فشل إنشاء الفرع")
+      toast.error(error instanceof Error ? error.message : t.branchCreateFailed)
     } finally {
       setCreatingBranch(false)
     }
@@ -1523,7 +2087,7 @@ export default function CompanyEmployeesPage() {
   async function handleCreateDepartment() {
     const safeName = newDepartmentName.trim()
     if (!safeName) {
-      toast.error("اسم القسم مطلوب")
+      toast.error(t.departmentNameRequired)
       return
     }
 
@@ -1531,38 +2095,33 @@ export default function CompanyEmployeesPage() {
 
     try {
       const csrfToken = getCookie("csrftoken")
-      const response = await fetch(
-        `${API_BASE}/api/company/departments/create/`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken,
-          },
-          body: JSON.stringify({ name: safeName }),
-        }
-      )
+      const response = await fetch(`${API_BASE}/api/company/departments/create/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+        body: JSON.stringify({ name: safeName }),
+      })
 
       const data: GenericApiResponse = await response.json()
 
       const isSuccess =
         response.ok &&
-        (data.success === true ||
-          data.status === "success" ||
-          data.status === "ok")
+        (data.success === true || data.status === "success" || data.status === "ok")
 
       if (!isSuccess) {
-        throw new Error(data.error || data.message || "فشل إنشاء القسم")
+        throw new Error(data.error || data.message || t.departmentCreateFailed)
       }
 
-      toast.success(data.message || "تم إنشاء القسم بنجاح")
+      toast.success(data.message || t.departmentCreated)
       setNewDepartmentName("")
       setOpenDepartmentDialog(false)
       await fetchLookups()
     } catch (error) {
       console.error("Create department error:", error)
-      toast.error(error instanceof Error ? error.message : "فشل إنشاء القسم")
+      toast.error(error instanceof Error ? error.message : t.departmentCreateFailed)
     } finally {
       setCreatingDepartment(false)
     }
@@ -1571,7 +2130,7 @@ export default function CompanyEmployeesPage() {
   async function handleCreateJobTitle() {
     const safeName = newJobTitleName.trim()
     if (!safeName) {
-      toast.error("اسم الوظيفة مطلوب")
+      toast.error(t.jobTitleNameRequired)
       return
     }
 
@@ -1593,21 +2152,19 @@ export default function CompanyEmployeesPage() {
 
       const isSuccess =
         response.ok &&
-        (data.success === true ||
-          data.status === "success" ||
-          data.status === "ok")
+        (data.success === true || data.status === "success" || data.status === "ok")
 
       if (!isSuccess) {
-        throw new Error(data.error || data.message || "فشل إنشاء الوظيفة")
+        throw new Error(data.error || data.message || t.jobTitleCreateFailed)
       }
 
-      toast.success(data.message || "تم إنشاء الوظيفة بنجاح")
+      toast.success(data.message || t.jobTitleCreated)
       setNewJobTitleName("")
       setOpenJobTitleDialog(false)
       await fetchLookups()
     } catch (error) {
       console.error("Create job title error:", error)
-      toast.error(error instanceof Error ? error.message : "فشل إنشاء الوظيفة")
+      toast.error(error instanceof Error ? error.message : t.jobTitleCreateFailed)
     } finally {
       setCreatingJobTitle(false)
     }
@@ -1617,31 +2174,31 @@ export default function CompanyEmployeesPage() {
     const safeName = newWorkScheduleName.trim()
 
     if (!safeName) {
-      toast.error("اسم فترة العمل مطلوب")
+      toast.error(t.workScheduleNameRequired)
       return
     }
 
     if (!newWorkScheduleWeekendDay) {
-      toast.error("يوم الإجازة مطلوب")
+      toast.error(t.weekendDayRequired)
       return
     }
 
     if (newWorkScheduleType !== "HOURLY") {
       if (!newWorkSchedulePeriod1Start || !newWorkSchedulePeriod1End) {
-        toast.error("أوقات الفترة الأولى مطلوبة")
+        toast.error(t.firstPeriodRequired)
         return
       }
 
       if (newWorkScheduleType === "PART_TIME") {
         if (!newWorkSchedulePeriod2Start || !newWorkSchedulePeriod2End) {
-          toast.error("أوقات الفترة الثانية مطلوبة")
+          toast.error(t.secondPeriodRequired)
           return
         }
       }
     }
 
     if (newWorkScheduleType === "HOURLY" && !newWorkScheduleTargetHours) {
-      toast.error("عدد الساعات مطلوب")
+      toast.error(t.targetHoursRequired)
       return
     }
 
@@ -1660,9 +2217,7 @@ export default function CompanyEmployeesPage() {
         is_active: true,
       }
 
-      if (editingScheduleId) {
-        payload.id = editingScheduleId
-      }
+      if (editingScheduleId) payload.id = editingScheduleId
 
       if (newWorkScheduleType === "FULL_TIME") {
         payload.period1_start = newWorkSchedulePeriod1Start
@@ -1706,19 +2261,14 @@ export default function CompanyEmployeesPage() {
 
       const isSuccess =
         response.ok &&
-        (data.success === true ||
-          data.status === "success" ||
-          data.status === "ok")
+        (data.success === true || data.status === "success" || data.status === "ok")
 
       if (!isSuccess) {
-        throw new Error(data.error || data.message || "فشل حفظ فترة العمل")
+        throw new Error(data.error || data.message || t.workScheduleSaveFailed)
       }
 
       toast.success(
-        data.message ||
-          (editingScheduleId
-            ? "تم تعديل فترة العمل بنجاح"
-            : "تم إنشاء فترة العمل بنجاح")
+        data.message || (editingScheduleId ? t.workScheduleUpdated : t.workScheduleCreated)
       )
 
       resetWorkScheduleForm()
@@ -1726,30 +2276,21 @@ export default function CompanyEmployeesPage() {
       await fetchLookups()
     } catch (error) {
       console.error("Create/update work schedule error:", error)
-      toast.error(
-        error instanceof Error ? error.message : "فشل حفظ فترة العمل"
-      )
+      toast.error(error instanceof Error ? error.message : t.workScheduleSaveFailed)
     } finally {
       setCreatingWorkSchedule(false)
     }
   }
 
-  useEffect(() => {
-    fetchEmployees()
-    fetchLookups()
-  }, [])
+  function handlePrint() {
+    window.print()
+    toast.success(t.printOpened)
+  }
 
-  useEffect(() => {
-    if (openCreateDialog) {
-      fetchLookups()
-    }
-  }, [openCreateDialog])
-
-  const departments = useMemo(() => {
-    return Array.from(
-      new Set(employees.map((item) => item.department).filter(Boolean))
-    )
-  }, [employees])
+  const departments = useMemo(
+    () => Array.from(new Set(employees.map((item) => item.department).filter(Boolean))),
+    [employees]
+  )
 
   const branches = useMemo(() => {
     const allBranchNames = employees.flatMap((item) =>
@@ -1767,10 +2308,10 @@ export default function CompanyEmployeesPage() {
 
   const filteredEmployees = useMemo(() => {
     return employees.filter((employee) => {
-      const safeSearch = search.toLowerCase()
+      const safeSearch = search.trim().toLowerCase()
 
       const matchesSearch =
-        !search ||
+        !safeSearch ||
         employee.full_name.toLowerCase().includes(safeSearch) ||
         employee.email.toLowerCase().includes(safeSearch) ||
         employee.phone.toLowerCase().includes(safeSearch) ||
@@ -1781,19 +2322,14 @@ export default function CompanyEmployeesPage() {
         (employee.role || "").toLowerCase().includes(safeSearch) ||
         employee.branch.toLowerCase().includes(safeSearch)
 
-      const matchesStatus =
-        statusFilter === "ALL" || employee.status === statusFilter
-
+      const matchesStatus = statusFilter === "ALL" || employee.status === statusFilter
       const matchesDepartment =
         departmentFilter === "ALL" || employee.department === departmentFilter
-
       const matchesBranch =
         branchFilter === "ALL" ||
         employee.branches.some((branch) => branch.name === branchFilter)
 
-      return (
-        matchesSearch && matchesStatus && matchesDepartment && matchesBranch
-      )
+      return matchesSearch && matchesStatus && matchesDepartment && matchesBranch
     })
   }, [employees, search, statusFilter, departmentFilter, branchFilter])
 
@@ -1802,22 +2338,11 @@ export default function CompanyEmployeesPage() {
     const active = employees.filter((e) => e.status === "ACTIVE").length
     const inactive = employees.filter((e) => e.status === "INACTIVE").length
     const departmentsCount = departments.length
-
-    return {
-      total,
-      active,
-      inactive,
-      departmentsCount,
-    }
+    return { total, active, inactive, departmentsCount }
   }, [employees, departments])
 
-  function handlePrint() {
-    window.print()
-    toast.success("تم فتح نافذة الطباعة")
-  }
-
   return (
-    <div className="space-y-6 p-4 md:p-6">
+    <div dir={direction} className="space-y-6">
       <style jsx global>{`
         @media print {
           body * {
@@ -1843,685 +2368,722 @@ export default function CompanyEmployeesPage() {
         }
       `}</style>
 
-      <Card className="no-print overflow-hidden rounded-[32px] border-border/60 shadow-sm">
-        <CardContent className="p-0">
-          <div className="border-b border-border/50 bg-gradient-to-br from-muted/30 via-background to-background px-6 py-6">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-              <div className="space-y-3">
-                <div className="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Premium Employees Workspace
+      <div className="no-print flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 rounded-full border bg-muted/40 px-3 py-1 text-xs font-medium">
+            <Sparkles className="h-3.5 w-3.5" />
+            {t.pageTitle}
+          </div>
+
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
+            {t.pageTitle}
+          </h1>
+          <p className="text-sm text-muted-foreground md:text-base">
+            {t.pageDescription}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Dialog open={openCreateDialog} onOpenChange={setOpenCreateDialog}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <UserPlus className="h-4 w-4" />
+                {t.addEmployee}
+              </Button>
+            </DialogTrigger>
+
+            <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl" dir={direction}>
+              <DialogHeader>
+                <DialogTitle>{t.addCompanyUser}</DialogTitle>
+                <DialogDescription>{t.addCompanyUserDescription}</DialogDescription>
+              </DialogHeader>
+
+              <div className="grid grid-cols-1 gap-6 py-2 lg:grid-cols-3">
+                <div className="lg:col-span-2">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.fullName}</label>
+                      <Input
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder={t.exampleFullName}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.username}</label>
+                      <Input
+                        dir="ltr"
+                        lang="en"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder={t.exampleUsername}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.email}</label>
+                      <Input
+                        dir="ltr"
+                        lang="en"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder={t.exampleEmail}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.phone}</label>
+                      <Input
+                        dir="ltr"
+                        lang="en"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder={t.examplePhone}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.role}</label>
+                      <Select value={role} onValueChange={(value) => setRole(value as CompanyRole)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t.selectRole} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles.map((item) => (
+                            <SelectItem key={item.code} value={item.code}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.userStatus}</label>
+                      <Select
+                        value={status}
+                        onValueChange={(value) => setStatus(value as UserStatus)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={t.selectStatus} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ACTIVE">{t.statusActive}</SelectItem>
+                          <SelectItem value="INACTIVE">{t.statusInactive}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.department}</label>
+                      <Select value={selectedDepartmentId} onValueChange={setSelectedDepartmentId}>
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={
+                              loadingLookups ? t.loadingDepartments : t.selectDepartment
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departmentOptions.map((item) => (
+                            <SelectItem key={item.id} value={String(item.id)}>
+                              {item.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.jobTitle}</label>
+                      <Select value={selectedJobTitleId} onValueChange={setSelectedJobTitleId}>
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={
+                              loadingLookups ? t.loadingJobTitles : t.selectJobTitle
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {jobTitleOptions.map((item) => (
+                            <SelectItem key={item.id} value={String(item.id)}>
+                              {item.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium">{t.workSchedule}</label>
+                      <Select
+                        value={selectedWorkScheduleId}
+                        onValueChange={setSelectedWorkScheduleId}
+                      >
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={
+                              loadingLookups ? t.loadingSchedules : t.selectWorkSchedule
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {workScheduleOptions.map((item) => (
+                            <SelectItem key={item.id} value={String(item.id)}>
+                              {item.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium">{t.branches}</label>
+
+                      <div className="rounded-2xl border border-border/60 bg-muted/30 p-3">
+                        <div className="mb-3 text-sm text-muted-foreground">
+                          {selectedBranchNames || t.selectBranches}
+                        </div>
+
+                        <div className="max-h-44 space-y-2 overflow-y-auto">
+                          {branchOptions.length === 0 ? (
+                            <div className="text-sm text-muted-foreground">
+                              {loadingLookups ? t.loadingBranches : t.noBranchesAvailable}
+                            </div>
+                          ) : (
+                            branchOptions.map((branch) => {
+                              const checked = selectedBranchIds.includes(branch.id)
+
+                              return (
+                                <div
+                                  key={branch.id}
+                                  className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2"
+                                >
+                                  <label
+                                    htmlFor={`branch-${branch.id}`}
+                                    className="flex flex-1 cursor-pointer items-center gap-3"
+                                  >
+                                    <Checkbox
+                                      id={`branch-${branch.id}`}
+                                      checked={checked}
+                                      onCheckedChange={() => toggleBranch(branch.id)}
+                                    />
+                                    <span className="text-sm font-medium">{branch.name}</span>
+                                  </label>
+
+                                  {checked ? (
+                                    <Check className="h-4 w-4 text-emerald-600" />
+                                  ) : null}
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div>
-                  <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-                    Employees
-                  </h1>
-                  <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                    إدارة وعرض بيانات الموظفين داخل الشركة بشكل احترافي مع دعم
-                    الفلاتر والربط مع الأقسام والفروع وجداول الدوام.
-                  </p>
-                </div>
+                <Card className="h-fit border-border/60">
+                  <CardHeader>
+                    <CardTitle className="text-sm">{t.roleSummary}</CardTitle>
+                    <CardDescription>{t.quickPreview}</CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="space-y-4">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium gap-1",
+                        getRoleBadgeClass(role)
+                      )}
+                    >
+                      {getRoleIcon(role)}
+                      {getRoleLabel(role, lang)}
+                    </span>
+
+                    <Separator />
+
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.userStatus}</span>
+                        <span className="font-medium">
+                          {status === "ACTIVE" ? t.statusActive : t.statusInactive}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.department}</span>
+                        <span className="font-medium text-end">
+                          {departmentOptions.find(
+                            (item) => String(item.id) === selectedDepartmentId
+                          )?.name || "—"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.jobTitle}</span>
+                        <span className="font-medium text-end">
+                          {jobTitleOptions.find(
+                            (item) => String(item.id) === selectedJobTitleId
+                          )?.name || "—"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.branches}</span>
+                        <span dir="ltr" className="font-medium">
+                          {formatEnglishNumber(selectedBranchIds.length)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.workSchedule}</span>
+                        <span className="font-medium text-end">
+                          {workScheduleOptions.find(
+                            (item) => String(item.id) === selectedWorkScheduleId
+                          )?.name || "—"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.binding}</span>
+                        <span className="font-medium text-emerald-600">
+                          {t.companyBinding}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Dialog open={openCreateDialog} onOpenChange={setOpenCreateDialog}>
-                  <DialogTrigger asChild>
-                    <Button className="h-10 rounded-xl gap-2">
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    resetCreateForm()
+                    setOpenCreateDialog(false)
+                  }}
+                >
+                  {t.cancel}
+                </Button>
+
+                <Button onClick={handleCreateUserFromEmployees} disabled={submitting} className="gap-2">
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {t.creating}
+                    </>
+                  ) : (
+                    <>
                       <UserPlus className="h-4 w-4" />
-                      Add Employee
-                    </Button>
-                  </DialogTrigger>
+                      {t.saveUser}
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
-                  <DialogContent className="sm:max-w-4xl">
-                    <DialogHeader>
-                      <DialogTitle>Add Company User</DialogTitle>
-                      <DialogDescription>
-                        This will create a real company user and assign the selected company role.
-                      </DialogDescription>
-                    </DialogHeader>
+          <Button variant="outline" onClick={() => fetchEmployees(true)} disabled={refreshing} className="gap-2">
+            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {t.refresh}
+          </Button>
 
-                    <div className="grid grid-cols-1 gap-6 py-2 lg:grid-cols-3">
-                      <div className="lg:col-span-2">
-                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Full Name</label>
-                            <Input
-                              value={fullName}
-                              onChange={(e) => setFullName(e.target.value)}
-                              placeholder="Example: Ahmed Alharbi"
-                            />
-                          </div>
+          <Button variant="outline" onClick={downloadExcelFile.bind(null, filteredEmployees, lang)} className="gap-2">
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.excel}
+          </Button>
 
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Username</label>
-                            <Input
-                              value={username}
-                              onChange={(e) => setUsername(e.target.value)}
-                              placeholder="Example: ahmed.hr"
-                            />
-                          </div>
+          <Button variant="outline" onClick={handlePrint} className="gap-2">
+            <FileDown className="h-4 w-4" />
+            {t.pdf}
+          </Button>
+        </div>
+      </div>
 
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Email</label>
-                            <Input
-                              type="email"
-                              value={email}
-                              onChange={(e) => setEmail(e.target.value)}
-                              placeholder="example@company.com"
-                            />
-                          </div>
+      <div className="no-print grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title={t.totalEmployees}
+          value={stats.total}
+          description={t.allEmployeesDesc}
+          icon={Users}
+        />
+        <StatCard
+          title={t.activeEmployees}
+          value={stats.active}
+          description={t.activeEmployeesDesc}
+          icon={UserCheck}
+          valueClassName="text-emerald-600"
+        />
+        <StatCard
+          title={t.inactiveEmployees}
+          value={stats.inactive}
+          description={t.inactiveEmployeesDesc}
+          icon={UserX}
+          valueClassName="text-red-600"
+        />
+        <StatCard
+          title={t.departmentsCount}
+          value={stats.departmentsCount}
+          description={t.departmentsCountDesc}
+          icon={Building2}
+          valueClassName="text-blue-600"
+        />
+      </div>
 
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Phone</label>
-                            <Input
-                              value={phone}
-                              onChange={(e) => setPhone(e.target.value)}
-                              placeholder="+9665xxxxxxxx"
-                            />
-                          </div>
+      <Card className="no-print border-border/60">
+        <CardHeader>
+          <CardTitle>{t.filtersTitle}</CardTitle>
+          <CardDescription>{t.filtersDescription}</CardDescription>
+        </CardHeader>
 
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Role</label>
-                            <Select
-                              value={role}
-                              onValueChange={(value) => setRole(value as CompanyRole)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select role" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {roles.map((item) => (
-                                  <SelectItem key={item.code} value={item.code}>
-                                    {item.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative w-full max-w-sm">
+              <Search
+                className={cn(
+                  "pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  isArabic ? "right-3" : "left-3"
+                )}
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={isArabic ? "pr-10" : "pl-10"}
+              />
+            </div>
 
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Status</label>
-                            <Select
-                              value={status}
-                              onValueChange={(value) => setStatus(value as UserStatus)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select status" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="ACTIVE">Active</SelectItem>
-                                <SelectItem value="INACTIVE">Inactive</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder={t.filterStatus} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">{t.allStatuses}</SelectItem>
+                <SelectItem value="ACTIVE">{t.statusActive}</SelectItem>
+                <SelectItem value="INACTIVE">{t.statusInactive}</SelectItem>
+                <SelectItem value="ON_LEAVE">{t.statusOnLeave}</SelectItem>
+              </SelectContent>
+            </Select>
 
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Department</label>
-                            <Select
-                              value={selectedDepartmentId}
-                              onValueChange={setSelectedDepartmentId}
-                            >
-                              <SelectTrigger>
-                                <SelectValue
-                                  placeholder={
-                                    loadingLookups
-                                      ? "Loading departments..."
-                                      : "Select department"
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {departmentOptions.map((item) => (
-                                  <SelectItem key={item.id} value={String(item.id)}>
-                                    {item.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
+            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder={t.filterDepartment} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">{t.allDepartments}</SelectItem>
+                {departments.map((department) => (
+                  <SelectItem key={department} value={department}>
+                    {department}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Job Title</label>
-                            <Select
-                              value={selectedJobTitleId}
-                              onValueChange={setSelectedJobTitleId}
-                            >
-                              <SelectTrigger>
-                                <SelectValue
-                                  placeholder={
-                                    loadingLookups
-                                      ? "Loading job titles..."
-                                      : "Select job title"
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {jobTitleOptions.map((item) => (
-                                  <SelectItem key={item.id} value={String(item.id)}>
-                                    {item.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder={t.filterBranch} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">{t.allBranches}</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>
+                    {branch}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-                          <div className="space-y-2 md:col-span-2">
-                            <label className="text-sm font-medium">Work Schedule</label>
-                            <Select
-                              value={selectedWorkScheduleId}
-                              onValueChange={setSelectedWorkScheduleId}
-                            >
-                              <SelectTrigger>
-                                <SelectValue
-                                  placeholder={
-                                    loadingLookups
-                                      ? "Loading schedules..."
-                                      : "Select work schedule"
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {workScheduleOptions.map((item) => (
-                                  <SelectItem key={item.id} value={String(item.id)}>
-                                    {item.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
+            <Button variant="outline" onClick={() => {
+              setSearch("")
+              setStatusFilter("ALL")
+              setDepartmentFilter("ALL")
+              setBranchFilter("ALL")
+              toast.success(t.filtersReset)
+            }} className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              {t.reset}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-                          <div className="space-y-2 md:col-span-2">
-                            <label className="text-sm font-medium">Branches</label>
+      <Card className="employees-print-area border-border/60">
+        <CardHeader>
+          <CardTitle>{t.employeesList}</CardTitle>
+          <CardDescription>
+            {t.totalResults}: <span dir="ltr">{formatEnglishNumber(filteredEmployees.length)}</span>
+          </CardDescription>
+        </CardHeader>
 
-                            <div className="rounded-2xl border border-border/60 bg-muted/10 p-3">
-                              <div className="mb-3 text-sm text-muted-foreground">
-                                {selectedBranchNames || "Select one or more branches"}
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-14 text-muted-foreground">
+              <Loader2 className="me-2 h-5 w-5 animate-spin" />
+              {t.loadingEmployees}
+            </div>
+          ) : (
+            <>
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[260px]">{t.employee}</TableHead>
+                      <TableHead>{t.employeeNo}</TableHead>
+                      <TableHead>{t.department}</TableHead>
+                      <TableHead>{t.jobTitle}</TableHead>
+                      <TableHead>{t.employeeBranches}</TableHead>
+                      <TableHead>{t.userStatus}</TableHead>
+                      <TableHead>{t.joinDate}</TableHead>
+                      <TableHead>{t.actions}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {filteredEmployees.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
+                          {t.noResults}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredEmployees.map((employee) => (
+                        <TableRow key={employee.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10 shrink-0">
+                                <AvatarImage src={employee.avatar || ""} alt={employee.full_name} />
+                                <AvatarFallback>{getInitials(employee.full_name)}</AvatarFallback>
+                              </Avatar>
+
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{employee.full_name}</div>
+                                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                  <span dir="ltr" className="inline-flex items-center gap-1">
+                                    <Mail className="h-3.5 w-3.5" />
+                                    {employee.email || "—"}
+                                  </span>
+                                  <span dir="ltr" className="inline-flex items-center gap-1">
+                                    <Phone className="h-3.5 w-3.5" />
+                                    {employee.phone || "—"}
+                                  </span>
+                                  {employee.role ? (
+                                    <span
+                                      className={cn(
+                                        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium gap-1",
+                                        getRoleBadgeClass((employee.role.toUpperCase() as CompanyRole) || "EMPLOYEE")
+                                      )}
+                                    >
+                                      {getRoleLabel(employee.role, lang)}
+                                    </span>
+                                  ) : null}
+                                </div>
                               </div>
+                            </div>
+                          </TableCell>
 
-                              <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
-                                {branchOptions.length === 0 ? (
-                                  <div className="text-sm text-muted-foreground">
-                                    {loadingLookups
-                                      ? "Loading branches..."
-                                      : "No branches available"}
-                                  </div>
-                                ) : (
-                                  branchOptions.map((branch) => {
-                                    const checked = selectedBranchIds.includes(branch.id)
+                          <TableCell dir="ltr" className="tabular-nums">
+                            {employee.employee_code || "—"}
+                          </TableCell>
 
-                                    return (
-                                      <label
-                                        key={branch.id}
-                                        className="flex cursor-pointer items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2 transition hover:bg-muted/30"
-                                      >
-                                        <div className="flex items-center gap-2">
-                                          <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            onChange={() => toggleBranch(branch.id)}
-                                            className="h-4 w-4 rounded border-gray-300"
-                                          />
-                                          <span className="text-sm font-medium">
-                                            {branch.name}
-                                          </span>
-                                        </div>
+                          <TableCell>{employee.department || "—"}</TableCell>
 
-                                        {checked ? (
-                                          <Check className="h-4 w-4 text-emerald-600" />
-                                        ) : null}
-                                      </label>
-                                    )
-                                  })
-                                )}
-                              </div>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Briefcase className="h-4 w-4 text-muted-foreground" />
+                              <span>{employee.job_title || "—"}</span>
+                            </div>
+                          </TableCell>
+
+                          <TableCell>{employee.branch || "—"}</TableCell>
+
+                          <TableCell>
+                            <StatusBadge status={employee.status} lang={lang} />
+                          </TableCell>
+
+                          <TableCell dir="ltr" className="tabular-nums">
+                            {formatDateLabel(employee.join_date)}
+                          </TableCell>
+
+                          <TableCell>
+                            <Button asChild size="sm" variant="outline" className="gap-2">
+                              <Link href={`/company/employees/${employee.id}`}>
+                                <Eye className="h-4 w-4" />
+                                {t.view}
+                              </Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="grid gap-4 lg:hidden">
+                {filteredEmployees.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">
+                    {t.noResultsDescription}
+                  </div>
+                ) : (
+                  filteredEmployees.map((employee) => (
+                    <div
+                      key={employee.id}
+                      className="rounded-2xl border border-border/60 bg-background p-4 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 items-start gap-3">
+                          <Avatar className="h-12 w-12 shrink-0">
+                            <AvatarImage src={employee.avatar || ""} alt={employee.full_name} />
+                            <AvatarFallback>{getInitials(employee.full_name)}</AvatarFallback>
+                          </Avatar>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-semibold">{employee.full_name}</div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              {employee.role ? (
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                                    getRoleBadgeClass((employee.role.toUpperCase() as CompanyRole) || "EMPLOYEE")
+                                  )}
+                                >
+                                  {getRoleLabel(employee.role, lang)}
+                                </span>
+                              ) : null}
+                              <StatusBadge status={employee.status} lang={lang} />
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      <Card className="h-fit rounded-3xl border-border/60 bg-muted/10 shadow-none">
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-sm">Role Summary</CardTitle>
-                          <CardDescription>Quick preview</CardDescription>
-                        </CardHeader>
+                      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                        <div className="rounded-xl border bg-muted/30 p-3">
+                          <p className="text-xs text-muted-foreground">{t.employeeNo}</p>
+                          <p dir="ltr" className="mt-1 font-medium tabular-nums">
+                            {employee.employee_code || "—"}
+                          </p>
+                        </div>
 
-                        <CardContent className="space-y-4">
-                          <Badge className={cn("gap-1 rounded-full", getRoleBadgeClass(role))}>
-                            {getRoleIcon(role)}
-                            {getRoleLabel(role)}
-                          </Badge>
+                        <div className="rounded-xl border bg-muted/30 p-3">
+                          <p className="text-xs text-muted-foreground">{t.joinDate}</p>
+                          <p dir="ltr" className="mt-1 font-medium tabular-nums">
+                            {formatDateLabel(employee.join_date)}
+                          </p>
+                        </div>
 
-                          <Separator />
+                        <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
+                          <p className="text-xs text-muted-foreground">{t.department}</p>
+                          <p className="mt-1 font-medium">{employee.department || "—"}</p>
+                        </div>
 
-                          <div className="space-y-3 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Status</span>
-                              <span className="font-medium">
-                                {status === "ACTIVE" ? "Active" : "Inactive"}
-                              </span>
-                            </div>
+                        <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
+                          <p className="text-xs text-muted-foreground">{t.jobTitle}</p>
+                          <p className="mt-1 font-medium">{employee.job_title || "—"}</p>
+                        </div>
 
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-muted-foreground">Department</span>
-                              <span className="font-medium text-right">
-                                {departmentOptions.find(
-                                  (item) => String(item.id) === selectedDepartmentId
-                                )?.name || "--"}
-                              </span>
-                            </div>
+                        <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
+                          <p className="text-xs text-muted-foreground">{t.employeeBranches}</p>
+                          <p className="mt-1 font-medium">{employee.branch || "—"}</p>
+                        </div>
 
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-muted-foreground">Job Title</span>
-                              <span className="font-medium text-right">
-                                {jobTitleOptions.find(
-                                  (item) => String(item.id) === selectedJobTitleId
-                                )?.name || "--"}
-                              </span>
-                            </div>
+                        <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
+                          <p className="text-xs text-muted-foreground">{t.email}</p>
+                          <p dir="ltr" className="mt-1 truncate font-medium">
+                            {employee.email || "—"}
+                          </p>
+                        </div>
 
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Branches</span>
-                              <span className="font-medium">
-                                {selectedBranchIds.length}
-                              </span>
-                            </div>
+                        <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
+                          <p className="text-xs text-muted-foreground">{t.phone}</p>
+                          <p dir="ltr" className="mt-1 font-medium">
+                            {employee.phone || "—"}
+                          </p>
+                        </div>
+                      </div>
 
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-muted-foreground">Schedule</span>
-                              <span className="font-medium text-right">
-                                {workScheduleOptions.find(
-                                  (item) => String(item.id) === selectedWorkScheduleId
-                                )?.name || "--"}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Binding</span>
-                              <span className="font-medium text-emerald-600">Company</span>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
+                      <Button asChild variant="outline" className="mt-4 w-full gap-2">
+                        <Link href={`/company/employees/${employee.id}`}>
+                          <Eye className="h-4 w-4" />
+                          {t.view}
+                        </Link>
+                      </Button>
                     </div>
-
-                    <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          resetCreateForm()
-                          setOpenCreateDialog(false)
-                        }}
-                      >
-                        Cancel
-                      </Button>
-
-                      <Button
-                        type="button"
-                        onClick={handleCreateUserFromEmployees}
-                        disabled={submitting}
-                        className="gap-2"
-                      >
-                        {submitting ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Creating...
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus className="h-4 w-4" />
-                            Save User
-                          </>
-                        )}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-
-                <Button variant="outline" onClick={fetchEmployees} className="h-10 rounded-xl gap-2">
-                  <RefreshCw className="h-4 w-4" />
-                  Refresh
-                </Button>
-
-                <Button variant="outline" onClick={handlePrint} className="h-10 rounded-xl gap-2">
-                  <Printer className="h-4 w-4" />
-                  Print
-                </Button>
-
-                <Button
-                  onClick={() => downloadExcelFile(filteredEmployees)}
-                  className="h-10 rounded-xl gap-2"
-                >
-                  <FileSpreadsheet className="h-4 w-4" />
-                  Export Excel
-                </Button>
+                  ))
+                )}
               </div>
-            </div>
-          </div>
-
-          <div className="px-6 py-5">
-            <div className="mb-4 flex items-center gap-2 text-sm font-medium">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              Filters
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
-              <div className="relative lg:col-span-5">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="ابحث بالاسم، اليوزر، البريد، الجوال، الرقم الوظيفي، القسم، الوظيفة..."
-                  className="h-11 rounded-xl pl-9"
-                />
-              </div>
-
-              <div className="lg:col-span-2">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-11 rounded-xl">
-                    <SelectValue placeholder="الحالة" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Statuses</SelectItem>
-                    <SelectItem value="ACTIVE">Active</SelectItem>
-                    <SelectItem value="INACTIVE">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="lg:col-span-2">
-                <Select
-                  value={departmentFilter}
-                  onValueChange={setDepartmentFilter}
-                >
-                  <SelectTrigger className="h-11 rounded-xl">
-                    <SelectValue placeholder="القسم" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Departments</SelectItem>
-                    {departments.map((department) => (
-                      <SelectItem key={department} value={department}>
-                        {department}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="lg:col-span-2">
-                <Select value={branchFilter} onValueChange={setBranchFilter}>
-                  <SelectTrigger className="h-11 rounded-xl">
-                    <SelectValue placeholder="الفرع" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Branches</SelectItem>
-                    {branches.map((branch) => (
-                      <SelectItem key={branch} value={branch}>
-                        {branch}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="lg:col-span-1">
-                <Button
-                  variant="secondary"
-                  className="h-11 w-full rounded-xl"
-                  onClick={() => {
-                    setSearch("")
-                    setStatusFilter("ALL")
-                    setDepartmentFilter("ALL")
-                    setBranchFilter("ALL")
-                    toast.success("تمت إعادة تعيين الفلاتر")
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="no-print grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title="Total Employees"
-          value={stats.total}
-          icon={<Users className="h-5 w-5" />}
-        />
-        <StatCard
-          title="Active"
-          value={stats.active}
-          icon={<UserCheck className="h-5 w-5" />}
-          tone="emerald"
-        />
-        <StatCard
-          title="Inactive"
-          value={stats.inactive}
-          icon={<UserX className="h-5 w-5" />}
-          tone="rose"
-        />
-        <StatCard
-          title="Departments"
-          value={stats.departmentsCount}
-          icon={<Building2 className="h-5 w-5" />}
-          tone="blue"
-        />
-      </div>
-
-      <Card className="employees-print-area overflow-hidden rounded-[30px] border-border/60 shadow-sm">
-        <CardHeader className="border-b border-border/50 bg-muted/20 pb-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle className="text-xl font-semibold">Employees Overview</CardTitle>
-              <CardDescription className="mt-1">
-                إجمالي النتائج الحالية: {filteredEmployees.length}
-              </CardDescription>
-            </div>
-
-            <div className="no-print flex items-center gap-2">
-              <Badge variant="secondary" className="rounded-full px-3 py-1">
-                <BadgeCheck className="mr-1 h-3.5 w-3.5" />
-                Ready
-              </Badge>
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="p-4">
-          {loading ? (
-            <div className="flex min-h-[320px] items-center justify-center">
-              <div className="flex items-center gap-3 rounded-2xl border bg-muted/20 px-4 py-3 text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span>جاري تحميل الموظفين...</span>
-              </div>
-            </div>
-          ) : filteredEmployees.length === 0 ? (
-            <div className="flex min-h-[240px] flex-col items-center justify-center rounded-3xl border border-dashed bg-muted/10 text-center">
-              <Users className="mb-3 h-10 w-10 text-muted-foreground" />
-              <h3 className="text-lg font-semibold">لا توجد نتائج</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                جرّب تعديل البحث أو الفلاتر لعرض بيانات أخرى
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-3xl border border-border/60">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Employee No.</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Job Title</TableHead>
-                    <TableHead>Branches</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Join Date</TableHead>
-                    <TableHead className="no-print text-center">View</TableHead>
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {filteredEmployees.map((employee) => (
-                    <TableRow key={employee.id} className="align-top hover:bg-muted/20">
-                      <TableCell>
-                        <div className="flex min-w-[300px] items-start gap-3">
-                          <Avatar className="h-12 w-12 rounded-2xl border border-border/60 shadow-sm">
-                            <AvatarImage
-                              src={employee.avatar || ""}
-                              alt={employee.full_name}
-                            />
-                            <AvatarFallback className="rounded-2xl bg-muted font-semibold">
-                              {getInitials(employee.full_name)}
-                            </AvatarFallback>
-                          </Avatar>
-
-                          <div className="space-y-1.5">
-                            <div className="font-semibold">
-                              {employee.full_name}
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                              <span className="inline-flex items-center gap-1">
-                                <Mail className="h-3.5 w-3.5" />
-                                {employee.email || "-"}
-                              </span>
-
-                              <span className="inline-flex items-center gap-1">
-                                <Phone className="h-3.5 w-3.5" />
-                                {employee.phone || "-"}
-                              </span>
-
-                              {employee.role ? (
-                                <Badge
-                                  variant="outline"
-                                  className="rounded-full text-[11px]"
-                                >
-                                  {employee.role}
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="font-medium">
-                        {employee.employee_code || "-"}
-                      </TableCell>
-
-                      <TableCell>
-                        <Badge variant="outline" className="rounded-full">
-                          {employee.department || "-"}
-                        </Badge>
-                      </TableCell>
-
-                      <TableCell>
-                        <div className="inline-flex items-center gap-2">
-                          <Briefcase className="h-4 w-4 text-muted-foreground" />
-                          <span>{employee.job_title || "-"}</span>
-                        </div>
-                      </TableCell>
-
-                      <TableCell>
-                        <div className="max-w-[220px] leading-6">
-                          {employee.branch || "-"}
-                        </div>
-                      </TableCell>
-
-                      <TableCell>{getStatusBadge(employee.status)}</TableCell>
-
-                      <TableCell>
-                        <div className="inline-flex items-center gap-2 text-sm">
-                          <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                          <span>{formatDateLabel(employee.join_date)}</span>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="no-print text-center">
-                        <Button
-                          asChild
-                          variant="outline"
-                          size="sm"
-                          className="rounded-xl gap-2"
-                        >
-                          <Link href={`/company/employees/${employee.id}`}>
-                            <Eye className="h-4 w-4" />
-                            View
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            </>
           )}
         </CardContent>
       </Card>
 
-      <div className="no-print grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="no-print grid gap-4 xl:grid-cols-3">
         <MasterDataCard
-          title="الفروع"
-          subtitle="عرض وإضافة فروع الشركة"
+          title={t.branchCardTitle}
+          subtitle={t.branchCardSubtitle}
           count={branchOptions.length}
           icon={<GitBranch className="h-5 w-5" />}
           items={branchOptions}
           loading={loadingLookups}
-          emptyText="لا توجد فروع حالياً"
+          emptyText={t.noBranches}
           onRefresh={fetchLookups}
           open={openBranchDialog}
           onOpenChange={setOpenBranchDialog}
-          createTitle="إضافة فرع جديد"
-          createDescription="سيتم إنشاء فرع جديد داخل الشركة الحالية"
-          createPlaceholder="مثال: الفرع الرئيسي"
+          createTitle={t.addBranchTitle}
+          createDescription={t.addBranchDescription}
+          createPlaceholder={t.addBranchPlaceholder}
           createValue={newBranchName}
           onCreateValueChange={setNewBranchName}
           onCreate={handleCreateBranch}
           creating={creatingBranch}
           itemIcon={<GitBranch className="h-4 w-4" />}
+          lang={lang}
         />
 
         <MasterDataCard
-          title="الأقسام"
-          subtitle="عرض وإضافة أقسام الشركة"
+          title={t.departmentCardTitle}
+          subtitle={t.departmentCardSubtitle}
           count={departmentOptions.length}
           icon={<Building2 className="h-5 w-5" />}
           items={departmentOptions}
           loading={loadingLookups}
-          emptyText="لا توجد أقسام حالياً"
+          emptyText={t.noDepartments}
           onRefresh={fetchLookups}
           open={openDepartmentDialog}
           onOpenChange={setOpenDepartmentDialog}
-          createTitle="إضافة قسم جديد"
-          createDescription="سيتم إنشاء قسم جديد داخل الشركة الحالية"
-          createPlaceholder="مثال: الموارد البشرية"
+          createTitle={t.addDepartmentTitle}
+          createDescription={t.addDepartmentDescription}
+          createPlaceholder={t.addDepartmentPlaceholder}
           createValue={newDepartmentName}
           onCreateValueChange={setNewDepartmentName}
           onCreate={handleCreateDepartment}
           creating={creatingDepartment}
           itemIcon={<Building2 className="h-4 w-4" />}
+          lang={lang}
         />
 
         <MasterDataCard
-          title="الوظائف"
-          subtitle="عرض وإضافة المسميات الوظيفية"
+          title={t.jobTitleCardTitle}
+          subtitle={t.jobTitleCardSubtitle}
           count={jobTitleOptions.length}
           icon={<Layers3 className="h-5 w-5" />}
           items={jobTitleOptions}
           loading={loadingLookups}
-          emptyText="لا توجد وظائف حالياً"
+          emptyText={t.noJobTitles}
           onRefresh={fetchLookups}
           open={openJobTitleDialog}
           onOpenChange={setOpenJobTitleDialog}
-          createTitle="إضافة وظيفة جديدة"
-          createDescription="سيتم إنشاء مسمى وظيفي جديد داخل الشركة الحالية"
-          createPlaceholder="مثال: محاسب أول"
+          createTitle={t.addJobTitleTitle}
+          createDescription={t.addJobTitleDescription}
+          createPlaceholder={t.addJobTitlePlaceholder}
           createValue={newJobTitleName}
           onCreateValueChange={setNewJobTitleName}
           onCreate={handleCreateJobTitle}
           creating={creatingJobTitle}
           itemIcon={<Briefcase className="h-4 w-4" />}
+          lang={lang}
         />
       </div>
 
@@ -2555,16 +3117,31 @@ export default function CompanyEmployeesPage() {
           creating={creatingWorkSchedule}
           editItem={fillWorkScheduleForm}
           onEditItem={() => setOpenWorkScheduleDialog(true)}
+          lang={lang}
         />
       </div>
 
-      <Card className="no-print rounded-[28px] border-dashed border-border/60 bg-muted/10 shadow-none">
+      <Card className="no-print border-border/60">
         <CardContent className="flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
-            <div className="text-sm font-medium">Quick Summary</div>
+            <div className="text-sm font-medium">{t.quickSummary}</div>
             <div className="text-sm text-muted-foreground">
-              لديك الآن {filteredEmployees.length} نتيجة معروضة، و {workScheduleOptions.length} فترة عمل،
-              و {branchOptions.length} فرع، و {departmentOptions.length} قسم.
+              {lang === "ar" ? (
+                <>
+                  لديك الآن <span dir="ltr">{formatEnglishNumber(filteredEmployees.length)}</span> نتيجة
+                  معروضة، و <span dir="ltr">{formatEnglishNumber(workScheduleOptions.length)}</span> فترة
+                  عمل، و <span dir="ltr">{formatEnglishNumber(branchOptions.length)}</span> فرع، و{" "}
+                  <span dir="ltr">{formatEnglishNumber(departmentOptions.length)}</span> قسم.
+                </>
+              ) : (
+                <>
+                  You currently have <span dir="ltr">{formatEnglishNumber(filteredEmployees.length)}</span>{" "}
+                  visible results, <span dir="ltr">{formatEnglishNumber(workScheduleOptions.length)}</span>{" "}
+                  work schedules, <span dir="ltr">{formatEnglishNumber(branchOptions.length)}</span>{" "}
+                  branches, and <span dir="ltr">{formatEnglishNumber(departmentOptions.length)}</span>{" "}
+                  departments.
+                </>
+              )}
             </div>
           </div>
 
@@ -2572,8 +3149,8 @@ export default function CompanyEmployeesPage() {
             href="/company/profile"
             className="inline-flex items-center gap-2 text-sm font-medium text-primary transition hover:opacity-80"
           >
-            الانتقال إلى Company Profile
-            <ChevronRight className="h-4 w-4" />
+            {t.goToCompanyProfile}
+            <ChevronRight className={cn("h-4 w-4", isArabic ? "rotate-180" : "")} />
           </Link>
         </CardContent>
       </Card>

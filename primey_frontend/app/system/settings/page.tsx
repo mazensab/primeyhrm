@@ -13,8 +13,9 @@ import {
   Save,
   Server,
   ShieldCheck,
-  Clock3
+  Clock3,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,8 +25,6 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 
-import { toast } from "sonner"
-
 const API_BASE = "http://localhost:8000/api/system/settings"
 
 /* =====================================================
@@ -33,6 +32,8 @@ const API_BASE = "http://localhost:8000/api/system/settings"
 ===================================================== */
 
 type ModulesMap = Record<string, boolean>
+type Locale = "ar" | "en"
+type Direction = "rtl" | "ltr"
 
 interface EmailSettings {
   smtp_server: string
@@ -46,6 +47,209 @@ interface EmailSettings {
   status: "ready" | "incomplete"
   updated_at?: string | null
 }
+
+/* =====================================================
+   i18n
+===================================================== */
+
+const translations = {
+  ar: {
+    pageTitle: "إعدادات النظام",
+    pageSubtitle: "Primey HR Cloud — حوكمة المنصة وإعدادات البريد الإلكتروني",
+
+    refresh: "تحديث",
+    reload: "إعادة تحميل",
+
+    platformControl: "التحكم بالمنصة",
+    platformActive: "المنصة مفعلة",
+    platformActiveDesc: "مفتاح تشغيل/إيقاف عام لكامل المنصة",
+
+    maintenanceMode: "وضع الصيانة",
+    maintenanceModeDesc: "يسمح فقط للسوبر أدمن بالدخول عند التفعيل",
+
+    readonlyMode: "وضع القراءة فقط",
+    readonlyModeDesc: "يمنع عمليات التعديل مع إبقاء الوصول للقراءة فقط",
+
+    billingEnabled: "الفوترة مفعلة",
+    billingEnabledDesc: "تفعيل أو تعطيل الوصول إلى نظام الفوترة",
+
+    emailStatus: "حالة البريد",
+    ready: "جاهز",
+    incomplete: "غير مكتمل",
+    emailReadyDesc: "إعداد SMTP جاهز للإرسال.",
+    emailIncompleteDesc: "بعض الحقول المطلوبة للبريد ما زالت ناقصة.",
+
+    fromEmail: "البريد المرسل",
+    notConfigured: "غير مهيأ",
+    fromEmailDesc: "العنوان المستخدم في الإرسال التجريبي والبريد الصادر",
+
+    validation: "التحقق",
+    allValid: "جميع حقول SMTP المطلوبة صالحة.",
+    missingFields: "الحقول الناقصة:",
+    lastUpdated: "آخر تحديث",
+    lastUpdatedDesc: "آخر وقت تم فيه حفظ إعدادات البريد",
+    notAvailable: "غير متوفر",
+
+    emailSettings: "إعدادات البريد الإلكتروني",
+    unsavedChanges: "توجد تغييرات غير محفوظة",
+    saved: "محفوظ",
+    resetChanges: "استرجاع التعديلات",
+    saveAll: "حفظ الكل",
+
+    smtpHost: "SMTP Host",
+    smtpPort: "SMTP Port",
+    usernameSender: "اسم المستخدم / البريد المرسل",
+    passwordLabel: "كلمة المرور / App Password",
+    showPassword: "إظهار كلمة المرور",
+    hidePassword: "إخفاء كلمة المرور",
+
+    useTls: "استخدام TLS",
+    useTlsDesc: "موصى به لـ Gmail ومعظم مزودي SMTP الآمنين",
+
+    testEmailRecipient: "مستلم البريد التجريبي",
+    testEmail: "إرسال اختبار",
+
+    notes: "ملاحظات",
+    note1: "في Gmail استخدم App Password بدل كلمة المرور العادية.",
+    note2: "يتم الحفظ تلقائيًا عند مغادرة كل حقل.",
+    note3: "زر حفظ الكل مفيد عند تعديل عدة حقول معًا.",
+    note4: "الإرسال التجريبي يعتمد على القيم المحفوظة في الـ backend.",
+
+    systemModules: "وحدات النظام",
+    noModules: "لم يتم إرجاع أي وحدات من الـ backend.",
+    uiPreviewOnly: "عرض واجهة فقط حاليًا",
+
+    footerUnsaved: "توجد تغييرات غير محفوظة في البريد",
+    footerSaved: "جميع تغييرات البريد محفوظة",
+
+    loading: "جاري تحميل إعدادات النظام...",
+    saving: "جارٍ الحفظ...",
+    testSending: "جارٍ إرسال الاختبار...",
+
+    toastLoadFailed: "فشل تحميل إعدادات النظام",
+    toastSettingSaved: "تم تحديث الإعداد بنجاح",
+    toastSettingUpdateFailed: "فشل تحديث الإعداد",
+    toastEmailSaved: "تم حفظ إعداد البريد بنجاح",
+    toastEmailSaveFailed: "فشل حفظ إعداد البريد",
+    toastSaveAllSuccess: "تم حفظ جميع إعدادات البريد بنجاح",
+    toastNoChanges: "لا توجد تغييرات بريد لحفظها",
+    toastResetSuccess: "تمت إعادة نموذج البريد إلى آخر القيم المحمّلة",
+    toastTestFailed: "فشل إرسال البريد التجريبي",
+    toastModuleUiOnly: "تغيير الوحدات ظاهر في الواجهة فقط حتى يتم تنفيذ الحفظ من الـ backend",
+
+    requiredFields: "أكمل الحقول المطلوبة:",
+    smtpHostShort: "SMTP Host يبدو قصيرًا جدًا",
+    smtpPortInvalid: "SMTP Port يجب أن يكون بين 1 و 65535",
+    usernameInvalid: "اسم المستخدم يجب أن يكون بريدًا إلكترونيًا صالحًا",
+    testEmailInvalid: "البريد التجريبي غير صالح",
+
+    placeholders: {
+      smtpHost: "smtp.gmail.com",
+      smtpPort: "587",
+      username: "info@yourdomain.com",
+      password: "أدخل كلمة مرور SMTP",
+      testEmail: "example@domain.com",
+    },
+  },
+  en: {
+    pageTitle: "System Settings",
+    pageSubtitle: "Primey HR Cloud — Platform Governance & Email Configuration",
+
+    refresh: "Refresh",
+    reload: "Reload",
+
+    platformControl: "Platform Control",
+    platformActive: "Platform Active",
+    platformActiveDesc: "Global kill switch for the whole platform",
+
+    maintenanceMode: "Maintenance Mode",
+    maintenanceModeDesc: "Only super admin can access when enabled",
+
+    readonlyMode: "Readonly Mode",
+    readonlyModeDesc: "Blocks write actions and keeps read-only access",
+
+    billingEnabled: "Billing Enabled",
+    billingEnabledDesc: "Enable or disable billing system access",
+
+    emailStatus: "Email Status",
+    ready: "Ready",
+    incomplete: "Incomplete",
+    emailReadyDesc: "SMTP configuration is ready for sending.",
+    emailIncompleteDesc: "Some required email fields are still missing.",
+
+    fromEmail: "From Email",
+    notConfigured: "Not configured",
+    fromEmailDesc: "Sender used for test email and outbound SMTP",
+
+    validation: "Validation",
+    allValid: "All required SMTP fields are valid.",
+    missingFields: "Missing fields:",
+    lastUpdated: "Last Updated",
+    lastUpdatedDesc: "Latest saved email configuration time",
+    notAvailable: "Not available",
+
+    emailSettings: "Email Settings",
+    unsavedChanges: "Unsaved Changes",
+    saved: "Saved",
+    resetChanges: "Reset Changes",
+    saveAll: "Save All",
+
+    smtpHost: "SMTP Host",
+    smtpPort: "SMTP Port",
+    usernameSender: "Username / Sender Email",
+    passwordLabel: "Password / App Password",
+    showPassword: "Show password",
+    hidePassword: "Hide password",
+
+    useTls: "Use TLS",
+    useTlsDesc: "Recommended for Gmail and most secure SMTP providers",
+
+    testEmailRecipient: "Test Email Recipient",
+    testEmail: "Test Email",
+
+    notes: "Notes",
+    note1: "For Gmail, use App Password instead of your normal password.",
+    note2: "Save happens automatically when you leave each field.",
+    note3: "Save All is useful when editing multiple fields together.",
+    note4: "Test Email uses the saved SMTP values from backend.",
+
+    systemModules: "System Modules",
+    noModules: "No module flags returned from backend.",
+    uiPreviewOnly: "UI preview only for now",
+
+    footerUnsaved: "There are unsaved email changes",
+    footerSaved: "All email changes are saved",
+
+    loading: "Loading system settings...",
+    saving: "Saving...",
+    testSending: "Sending test...",
+
+    toastLoadFailed: "Failed to load system settings",
+    toastSettingSaved: "Setting updated successfully",
+    toastSettingUpdateFailed: "Failed to update setting",
+    toastEmailSaved: "Email setting saved successfully",
+    toastEmailSaveFailed: "Failed to update email setting",
+    toastSaveAllSuccess: "All email settings saved successfully",
+    toastNoChanges: "No email changes to save",
+    toastResetSuccess: "Email form reset to last loaded values",
+    toastTestFailed: "Failed to send test email",
+    toastModuleUiOnly: "Modules UI is shown only here until backend module save is implemented",
+
+    requiredFields: "Please complete required fields:",
+    smtpHostShort: "SMTP Host looks too short",
+    smtpPortInvalid: "SMTP Port must be between 1 and 65535",
+    usernameInvalid: "Username must be a valid email address",
+    testEmailInvalid: "Test recipient email is invalid",
+
+    placeholders: {
+      smtpHost: "smtp.gmail.com",
+      smtpPort: "587",
+      username: "info@yourdomain.com",
+      password: "Enter SMTP password",
+      testEmail: "example@domain.com",
+    },
+  },
+} as const
 
 /* =====================================================
    CSRF COOKIE
@@ -79,7 +283,7 @@ function normalizeEmailSettings(email: Partial<EmailSettings>): EmailSettings {
     from_email: email.from_email ?? "",
     is_ready: email.is_ready ?? false,
     status: email.status ?? "incomplete",
-    updated_at: email.updated_at ?? null
+    updated_at: email.updated_at ?? null,
   }
 }
 
@@ -93,20 +297,32 @@ function areEmailSettingsEqual(a: EmailSettings, b: EmailSettings) {
   )
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "Not available"
+function formatDateTimeEnglish(value?: string | null, fallback = "Not available") {
+  if (!value) return fallback
 
   const date = new Date(value)
 
-  if (Number.isNaN(date.getTime())) return "Not available"
+  if (Number.isNaN(date.getTime())) return fallback
 
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
-    timeStyle: "short"
+    timeStyle: "short",
+    numberingSystem: "latn",
   }).format(date)
 }
 
+function normalizeDigitsToEnglish(value: string | number) {
+  return String(value ?? "").replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString())
+}
+
+function toModuleLabel(moduleKey: string) {
+  return moduleKey.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 export default function SystemSettingsPage() {
+  const [locale, setLocale] = useState<Locale>("en")
+  const [direction, setDirection] = useState<Direction>("ltr")
+
   const [loading, setLoading] = useState(true)
   const [savingField, setSavingField] = useState<string | null>(null)
   const [savingAll, setSavingAll] = useState(false)
@@ -129,7 +345,7 @@ export default function SystemSettingsPage() {
     from_email: "",
     is_ready: false,
     status: "incomplete",
-    updated_at: null
+    updated_at: null,
   })
 
   const [initialEmailSettings, setInitialEmailSettings] = useState<EmailSettings>({
@@ -142,10 +358,42 @@ export default function SystemSettingsPage() {
     from_email: "",
     is_ready: false,
     status: "incomplete",
-    updated_at: null
+    updated_at: null,
   })
 
   const [testEmail, setTestEmail] = useState("")
+
+  const t = translations[locale]
+
+  /* =====================================================
+     Locale + Direction Sync
+  ===================================================== */
+
+  useEffect(() => {
+    if (typeof document === "undefined") return
+
+    const syncLanguageState = () => {
+      const html = document.documentElement
+      const rawLang = (html.lang || "en").toLowerCase()
+      const rawDir = (html.dir || "ltr").toLowerCase()
+
+      setLocale(rawLang.startsWith("ar") ? "ar" : "en")
+      setDirection(rawDir === "rtl" ? "rtl" : "ltr")
+    }
+
+    syncLanguageState()
+
+    const observer = new MutationObserver(() => {
+      syncLanguageState()
+    })
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["lang", "dir"],
+    })
+
+    return () => observer.disconnect()
+  }, [])
 
   /* =====================================================
      Derived
@@ -154,46 +402,43 @@ export default function SystemSettingsPage() {
   const emailMissingFields = useMemo(() => {
     const missing: string[] = []
 
-    if (!emailSettings.smtp_server?.trim()) missing.push("SMTP Host")
+    if (!emailSettings.smtp_server?.trim()) missing.push(t.smtpHost)
     if (!emailSettings.smtp_port || Number(emailSettings.smtp_port) <= 0) {
-      missing.push("SMTP Port")
+      missing.push(t.smtpPort)
     }
-    if (!emailSettings.username?.trim()) missing.push("Username")
-    if (!emailSettings.password?.trim()) missing.push("Password")
+    if (!emailSettings.username?.trim()) missing.push(t.usernameSender)
+    if (!emailSettings.password?.trim()) missing.push(t.passwordLabel)
 
     return missing
-  }, [emailSettings])
+  }, [emailSettings, t])
 
   const emailValidationErrors = useMemo(() => {
     const errors: string[] = []
 
     if (emailSettings.smtp_server.trim() && emailSettings.smtp_server.trim().length < 3) {
-      errors.push("SMTP Host looks too short")
+      errors.push(t.smtpHostShort)
     }
 
     if (
       emailSettings.smtp_port &&
       (Number(emailSettings.smtp_port) < 1 || Number(emailSettings.smtp_port) > 65535)
     ) {
-      errors.push("SMTP Port must be between 1 and 65535")
+      errors.push(t.smtpPortInvalid)
     }
 
     if (
       emailSettings.username.trim() &&
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailSettings.username.trim())
     ) {
-      errors.push("Username must be a valid email address")
+      errors.push(t.usernameInvalid)
     }
 
-    if (
-      testEmail.trim() &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail.trim())
-    ) {
-      errors.push("Test recipient email is invalid")
+    if (testEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail.trim())) {
+      errors.push(t.testEmailInvalid)
     }
 
     return errors
-  }, [emailSettings, testEmail])
+  }, [emailSettings, testEmail, t])
 
   const hasEmailChanges = useMemo(() => {
     return !areEmailSettingsEqual(emailSettings, initialEmailSettings)
@@ -214,7 +459,7 @@ export default function SystemSettingsPage() {
     emailValidationErrors,
     savingAll,
     testingEmail,
-    savingField
+    savingField,
   ])
 
   const isBusy = Boolean(loading || savingField || savingAll || testingEmail)
@@ -230,8 +475,8 @@ export default function SystemSettingsPage() {
       const res = await fetch(`${API_BASE}/`, {
         credentials: "include",
         headers: {
-          Accept: "application/json"
-        }
+          Accept: "application/json",
+        },
       })
 
       if (!res.ok) {
@@ -253,7 +498,7 @@ export default function SystemSettingsPage() {
       setTestEmail(normalizedEmail.username ?? "")
     } catch (err) {
       console.error(err)
-      toast.error("Failed to load system settings")
+      toast.error(t.toastLoadFailed)
     } finally {
       setLoading(false)
     }
@@ -261,6 +506,7 @@ export default function SystemSettingsPage() {
 
   useEffect(() => {
     loadSettings()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /* =====================================================
@@ -277,26 +523,26 @@ export default function SystemSettingsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRFToken": csrf || ""
+          "X-CSRFToken": csrf || "",
         },
         credentials: "include",
         body: JSON.stringify({
           section: "general",
           field,
-          value
-        })
+          value,
+        }),
       })
 
       const data = await res.json()
 
       if (!res.ok) {
-        throw new Error(data?.message || "Failed to update setting")
+        throw new Error(data?.message || t.toastSettingUpdateFailed)
       }
 
-      toast.success("Setting updated successfully")
+      toast.success(t.toastSettingSaved)
     } catch (error) {
       console.error(error)
-      toast.error(error instanceof Error ? error.message : "Failed to update setting")
+      toast.error(error instanceof Error ? error.message : t.toastSettingUpdateFailed)
       await loadSettings()
     } finally {
       setSavingField(null)
@@ -321,20 +567,20 @@ export default function SystemSettingsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRFToken": csrf || ""
+          "X-CSRFToken": csrf || "",
         },
         credentials: "include",
         body: JSON.stringify({
           section: "email",
           field,
-          value
-        })
+          value,
+        }),
       })
 
       const data = await res.json()
 
       if (!res.ok) {
-        throw new Error(data?.message || "Failed to update email setting")
+        throw new Error(data?.message || t.toastEmailSaveFailed)
       }
 
       if (data?.email) {
@@ -344,11 +590,11 @@ export default function SystemSettingsPage() {
       }
 
       if (!options?.silent) {
-        toast.success("Email setting saved successfully")
+        toast.success(t.toastEmailSaved)
       }
     } catch (error) {
       console.error(error)
-      toast.error(error instanceof Error ? error.message : "Failed to update email setting")
+      toast.error(error instanceof Error ? error.message : t.toastEmailSaveFailed)
       await loadSettings()
       throw error
     } finally {
@@ -362,7 +608,7 @@ export default function SystemSettingsPage() {
 
   async function handleSaveAllEmail() {
     if (emailMissingFields.length > 0) {
-      toast.error(`Please complete required fields: ${emailMissingFields.join(", ")}`)
+      toast.error(`${t.requiredFields} ${emailMissingFields.join(", ")}`)
       return
     }
 
@@ -372,7 +618,7 @@ export default function SystemSettingsPage() {
     }
 
     if (!hasEmailChanges) {
-      toast.info("No email changes to save")
+      toast.info(t.toastNoChanges)
       return
     }
 
@@ -405,7 +651,7 @@ export default function SystemSettingsPage() {
         await updateEmailSetting(field, value, { silent: true })
       }
 
-      toast.success("All email settings saved successfully")
+      toast.success(t.toastSaveAllSuccess)
     } catch {
       // handled in updateEmailSetting
     } finally {
@@ -419,7 +665,7 @@ export default function SystemSettingsPage() {
 
   function handleResetEmailChanges() {
     setEmailSettings(initialEmailSettings)
-    toast.success("Email form reset to last loaded values")
+    toast.success(t.toastResetSuccess)
   }
 
   /* =====================================================
@@ -430,7 +676,7 @@ export default function SystemSettingsPage() {
     const csrf = getCookie("csrftoken")
 
     if (emailMissingFields.length > 0) {
-      toast.error(`Please complete required fields: ${emailMissingFields.join(", ")}`)
+      toast.error(`${t.requiredFields} ${emailMissingFields.join(", ")}`)
       return
     }
 
@@ -446,24 +692,24 @@ export default function SystemSettingsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRFToken": csrf || ""
+          "X-CSRFToken": csrf || "",
         },
         credentials: "include",
         body: JSON.stringify({
-          to: testEmail.trim() || emailSettings.username
-        })
+          to: testEmail.trim() || emailSettings.username,
+        }),
       })
 
       const data = await res.json()
 
       if (!res.ok) {
-        throw new Error(data?.message || "Failed to send test email")
+        throw new Error(data?.message || t.toastTestFailed)
       }
 
-      toast.success(data?.message || "Test email sent successfully")
+      toast.success(data?.message || (locale === "ar" ? "تم إرسال البريد التجريبي بنجاح" : "Test email sent successfully"))
     } catch (error) {
       console.error(error)
-      toast.error(error instanceof Error ? error.message : "Failed to send test email")
+      toast.error(error instanceof Error ? error.message : t.toastTestFailed)
     } finally {
       setTestingEmail(false)
     }
@@ -476,11 +722,11 @@ export default function SystemSettingsPage() {
   async function updateModule(module: string, value: boolean) {
     const updatedModules = {
       ...modules,
-      [module]: value
+      [module]: value,
     }
 
     setModules(updatedModules)
-    toast.info("Modules UI is shown only here until backend module save is implemented")
+    toast.info(t.toastModuleUiOnly)
   }
 
   /* =====================================================
@@ -489,50 +735,46 @@ export default function SystemSettingsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div dir={direction} className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading system settings...
+          <span>{t.loading}</span>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6 p-1">
+    <div dir={direction} className="space-y-6 p-1 sm:p-2">
       {/* HEADER */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">System Settings</h1>
-          <p className="text-muted-foreground">
-            Primey HR Cloud — Platform Governance & Email Configuration
-          </p>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{t.pageTitle}</h1>
+          <p className="text-sm text-muted-foreground sm:text-base">{t.pageSubtitle}</p>
         </div>
 
         <Button
           variant="outline"
           onClick={loadSettings}
-          className="w-full md:w-auto"
+          className="w-full sm:w-auto"
           disabled={isBusy}
         >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Refresh
+          <RefreshCw className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4`} />
+          {t.refresh}
         </Button>
       </div>
 
       {/* PLATFORM CONTROL */}
       <Card className="rounded-2xl border-border/60 shadow-sm">
         <CardHeader>
-          <CardTitle>Platform Control</CardTitle>
+          <CardTitle>{t.platformControl}</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label>Platform Active</Label>
-              <p className="text-sm text-muted-foreground">
-                Global kill switch for the whole platform
-              </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <Label>{t.platformActive}</Label>
+              <p className="text-sm text-muted-foreground">{t.platformActiveDesc}</p>
             </div>
 
             <Switch
@@ -547,12 +789,10 @@ export default function SystemSettingsPage() {
 
           <Separator />
 
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label>Maintenance Mode</Label>
-              <p className="text-sm text-muted-foreground">
-                Only super admin can access when enabled
-              </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <Label>{t.maintenanceMode}</Label>
+              <p className="text-sm text-muted-foreground">{t.maintenanceModeDesc}</p>
             </div>
 
             <Switch
@@ -567,12 +807,10 @@ export default function SystemSettingsPage() {
 
           <Separator />
 
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label>Readonly Mode</Label>
-              <p className="text-sm text-muted-foreground">
-                Blocks write actions and keeps read-only access
-              </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <Label>{t.readonlyMode}</Label>
+              <p className="text-sm text-muted-foreground">{t.readonlyModeDesc}</p>
             </div>
 
             <Switch
@@ -587,12 +825,10 @@ export default function SystemSettingsPage() {
 
           <Separator />
 
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label>Billing Enabled</Label>
-              <p className="text-sm text-muted-foreground">
-                Enable or disable billing system access
-              </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <Label>{t.billingEnabled}</Label>
+              <p className="text-sm text-muted-foreground">{t.billingEnabledDesc}</p>
             </div>
 
             <Switch
@@ -608,23 +844,21 @@ export default function SystemSettingsPage() {
       </Card>
 
       {/* EMAIL STATUS */}
-      <div className="grid gap-4 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="rounded-2xl border-border/60 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Mail className="h-4 w-4" />
-              Email Status
+              {t.emailStatus}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant={emailSettings.is_ready ? "default" : "secondary"}>
-              {emailSettings.is_ready ? "Ready" : "Incomplete"}
+              {emailSettings.is_ready ? t.ready : t.incomplete}
             </Badge>
 
             <p className="mt-3 text-sm text-muted-foreground">
-              {emailSettings.is_ready
-                ? "SMTP configuration is ready for sending."
-                : "Some required email fields are still missing."}
+              {emailSettings.is_ready ? t.emailReadyDesc : t.emailIncompleteDesc}
             </p>
           </CardContent>
         </Card>
@@ -633,16 +867,14 @@ export default function SystemSettingsPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Server className="h-4 w-4" />
-              From Email
+              {t.fromEmail}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm font-medium break-all">
-              {emailSettings.from_email || "Not configured"}
+            <p className="break-all text-sm font-medium" dir="ltr">
+              {emailSettings.from_email || t.notConfigured}
             </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Sender used for test email and outbound SMTP
-            </p>
+            <p className="mt-2 text-sm text-muted-foreground">{t.fromEmailDesc}</p>
           </CardContent>
         </Card>
 
@@ -650,14 +882,14 @@ export default function SystemSettingsPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <ShieldCheck className="h-4 w-4" />
-              Validation
+              {t.validation}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {emailMissingFields.length === 0 && emailValidationErrors.length === 0 ? (
               <div className="flex items-start gap-2 text-sm">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
-                <span>All required SMTP fields are valid.</span>
+                <span>{t.allValid}</span>
               </div>
             ) : (
               <div className="space-y-2 text-sm">
@@ -665,7 +897,7 @@ export default function SystemSettingsPage() {
                   <>
                     <div className="flex items-start gap-2">
                       <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
-                      <span>Missing fields:</span>
+                      <span>{t.missingFields}</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {emailMissingFields.map((item) => (
@@ -696,28 +928,26 @@ export default function SystemSettingsPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Clock3 className="h-4 w-4" />
-              Last Updated
+              {t.lastUpdated}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm font-medium">
-              {formatDateTime(emailSettings.updated_at)}
+            <p className="text-sm font-medium" dir="ltr">
+              {formatDateTimeEnglish(emailSettings.updated_at, t.notAvailable)}
             </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Latest saved email configuration time
-            </p>
+            <p className="mt-2 text-sm text-muted-foreground">{t.lastUpdatedDesc}</p>
           </CardContent>
         </Card>
       </div>
 
       {/* EMAIL SETTINGS */}
       <Card className="rounded-2xl border-border/60 shadow-sm">
-        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <CardTitle>Email Settings</CardTitle>
+        <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <CardTitle>{t.emailSettings}</CardTitle>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Badge variant={hasEmailChanges ? "secondary" : "outline"}>
-              {hasEmailChanges ? "Unsaved Changes" : "Saved"}
+              {hasEmailChanges ? t.unsavedChanges : t.saved}
             </Badge>
 
             <Button
@@ -725,22 +955,24 @@ export default function SystemSettingsPage() {
               variant="outline"
               onClick={handleResetEmailChanges}
               disabled={!hasEmailChanges || isBusy}
+              className="w-full sm:w-auto"
             >
-              <RotateCcw className="mr-2 h-4 w-4" />
-              Reset Changes
+              <RotateCcw className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4`} />
+              {t.resetChanges}
             </Button>
 
             <Button
               type="button"
               onClick={handleSaveAllEmail}
               disabled={!canSaveAllEmail}
+              className="w-full sm:w-auto"
             >
               {savingAll ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4 animate-spin`} />
               ) : (
-                <Save className="mr-2 h-4 w-4" />
+                <Save className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4`} />
               )}
-              Save All
+              {t.saveAll}
             </Button>
           </div>
         </CardHeader>
@@ -748,14 +980,16 @@ export default function SystemSettingsPage() {
         <CardContent className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>SMTP Host</Label>
+              <Label>{t.smtpHost}</Label>
               <Input
+                dir="ltr"
+                inputMode="text"
                 value={emailSettings.smtp_server}
                 disabled={isBusy}
                 onChange={(e) =>
                   setEmailSettings((prev) => ({
                     ...prev,
-                    smtp_server: e.target.value
+                    smtp_server: e.target.value,
                   }))
                 }
                 onBlur={() => {
@@ -763,20 +997,22 @@ export default function SystemSettingsPage() {
                     updateEmailSetting("smtp_server", emailSettings.smtp_server)
                   }
                 }}
-                placeholder="smtp.gmail.com"
+                placeholder={t.placeholders.smtpHost}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>SMTP Port</Label>
+              <Label>{t.smtpPort}</Label>
               <Input
+                dir="ltr"
                 type="number"
-                value={emailSettings.smtp_port}
+                inputMode="numeric"
+                value={normalizeDigitsToEnglish(emailSettings.smtp_port)}
                 disabled={isBusy}
                 onChange={(e) =>
                   setEmailSettings((prev) => ({
                     ...prev,
-                    smtp_port: Number(e.target.value || 0)
+                    smtp_port: Number(normalizeDigitsToEnglish(e.target.value || 0)),
                   }))
                 }
                 onBlur={() => {
@@ -784,20 +1020,22 @@ export default function SystemSettingsPage() {
                     updateEmailSetting("smtp_port", emailSettings.smtp_port)
                   }
                 }}
-                placeholder="587"
+                placeholder={t.placeholders.smtpPort}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Username / Sender Email</Label>
+              <Label>{t.usernameSender}</Label>
               <Input
+                dir="ltr"
                 type="email"
+                inputMode="email"
                 value={emailSettings.username}
                 disabled={isBusy}
                 onChange={(e) =>
                   setEmailSettings((prev) => ({
                     ...prev,
-                    username: e.target.value
+                    username: e.target.value,
                   }))
                 }
                 onBlur={() => {
@@ -805,21 +1043,22 @@ export default function SystemSettingsPage() {
                     updateEmailSetting("username", emailSettings.username)
                   }
                 }}
-                placeholder="info@yourdomain.com"
+                placeholder={t.placeholders.username}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Password / App Password</Label>
+              <Label>{t.passwordLabel}</Label>
               <div className="relative">
                 <Input
+                  dir="ltr"
                   type={showPassword ? "text" : "password"}
                   value={emailSettings.password}
                   disabled={isBusy}
                   onChange={(e) =>
                     setEmailSettings((prev) => ({
                       ...prev,
-                      password: e.target.value
+                      password: e.target.value,
                     }))
                   }
                   onBlur={() => {
@@ -827,15 +1066,17 @@ export default function SystemSettingsPage() {
                       updateEmailSetting("password", emailSettings.password)
                     }
                   }}
-                  placeholder="Enter SMTP password"
-                  className="pr-11"
+                  placeholder={t.placeholders.password}
+                  className={direction === "rtl" ? "pl-11" : "pr-11"}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground disabled:pointer-events-none disabled:opacity-50"
+                  className={`absolute top-1/2 -translate-y-1/2 text-muted-foreground disabled:pointer-events-none disabled:opacity-50 ${
+                    direction === "rtl" ? "left-3" : "right-3"
+                  }`}
                   disabled={isBusy}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? t.hidePassword : t.showPassword}
                 >
                   {showPassword ? (
                     <EyeOff className="h-4 w-4" />
@@ -849,12 +1090,10 @@ export default function SystemSettingsPage() {
 
           <Separator />
 
-          <div className="flex items-center justify-between rounded-xl border p-4">
+          <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
-              <Label>Use TLS</Label>
-              <p className="text-sm text-muted-foreground">
-                Recommended for Gmail and most secure SMTP providers
-              </p>
+              <Label>{t.useTls}</Label>
+              <p className="text-sm text-muted-foreground">{t.useTlsDesc}</p>
             </div>
 
             <Switch
@@ -863,49 +1102,51 @@ export default function SystemSettingsPage() {
               onCheckedChange={(v) => {
                 setEmailSettings((prev) => ({
                   ...prev,
-                  use_tls: v
+                  use_tls: v,
                 }))
                 updateEmailSetting("use_tls", v)
               }}
             />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
             <div className="space-y-2">
-              <Label>Test Email Recipient</Label>
+              <Label>{t.testEmailRecipient}</Label>
               <Input
+                dir="ltr"
                 type="email"
+                inputMode="email"
                 value={testEmail}
                 disabled={isBusy}
                 onChange={(e) => setTestEmail(e.target.value)}
-                placeholder="example@domain.com"
+                placeholder={t.placeholders.testEmail}
               />
             </div>
 
-            <div className="flex items-end gap-2">
+            <div className="flex items-end">
               <Button
                 variant="outline"
                 onClick={handleTestEmail}
                 disabled={testingEmail || !emailSettings.is_ready || isBusy}
-                className="w-full md:w-auto"
+                className="w-full lg:w-auto"
               >
                 {testingEmail ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4 animate-spin`} />
                 ) : (
-                  <Mail className="mr-2 h-4 w-4" />
+                  <Mail className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4`} />
                 )}
-                Test Email
+                {t.testEmail}
               </Button>
             </div>
           </div>
 
           <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Notes</p>
+            <p className="font-medium text-foreground">{t.notes}</p>
             <ul className="mt-2 space-y-1">
-              <li>• For Gmail, use App Password instead of your normal password.</li>
-              <li>• Save happens automatically when you leave each field.</li>
-              <li>• Save All is useful when editing multiple fields together.</li>
-              <li>• Test Email uses the saved SMTP values from backend.</li>
+              <li>• {t.note1}</li>
+              <li>• {t.note2}</li>
+              <li>• {t.note3}</li>
+              <li>• {t.note4}</li>
             </ul>
           </div>
         </CardContent>
@@ -914,25 +1155,21 @@ export default function SystemSettingsPage() {
       {/* MODULES */}
       <Card className="rounded-2xl border-border/60 shadow-sm">
         <CardHeader>
-          <CardTitle>System Modules</CardTitle>
+          <CardTitle>{t.systemModules}</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-5">
           {Object.keys(modules).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No module flags returned from backend.
-            </p>
+            <p className="text-sm text-muted-foreground">{t.noModules}</p>
           ) : (
             Object.entries(modules).map(([moduleKey, enabled]) => (
               <div
                 key={moduleKey}
-                className="flex items-center justify-between gap-4"
+                className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
               >
-                <div>
-                  <Label className="capitalize">{moduleKey}</Label>
-                  <p className="text-sm text-muted-foreground">
-                    UI preview only for now
-                  </p>
+                <div className="min-w-0">
+                  <Label className="block">{toModuleLabel(moduleKey)}</Label>
+                  <p className="text-sm text-muted-foreground">{t.uiPreviewOnly}</p>
                 </div>
 
                 <Switch
@@ -947,18 +1184,14 @@ export default function SystemSettingsPage() {
       </Card>
 
       {/* FOOTER ACTIONS */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          variant="outline"
-          onClick={loadSettings}
-          disabled={isBusy}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Reload
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <Button variant="outline" onClick={loadSettings} disabled={isBusy} className="w-full sm:w-auto">
+          <RefreshCw className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4`} />
+          {t.reload}
         </Button>
 
-        <Badge variant={hasEmailChanges ? "secondary" : "outline"}>
-          {hasEmailChanges ? "There are unsaved email changes" : "All email changes are saved"}
+        <Badge variant={hasEmailChanges ? "secondary" : "outline"} className="w-fit">
+          {hasEmailChanges ? t.footerUnsaved : t.footerSaved}
         </Badge>
       </div>
     </div>

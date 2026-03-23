@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Clock3,
   FileText,
   Globe,
   Loader2,
@@ -23,6 +24,7 @@ import {
   WifiOff,
   X,
   XCircle,
+  AlertCircle,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -186,6 +188,9 @@ const translations = {
     isDefault: "افتراضي",
     isActive: "نشط",
     requiredFieldsHint: "الحقول الأساسية: رمز الحدث، المفتاح، اللغة، النوع، النص.",
+    loadingTemplates: "جاري تحميل القوالب...",
+    fieldRequired: "مطلوب",
+    badgeTitle: "WhatsApp Templates",
   },
   en: {
     title: "System WhatsApp Templates",
@@ -267,6 +272,9 @@ const translations = {
     isActive: "Active",
     requiredFieldsHint:
       "Required fields: event code, template key, language, type, body.",
+    loadingTemplates: "Loading templates...",
+    fieldRequired: "is required",
+    badgeTitle: "WhatsApp Templates",
   },
 } as const
 
@@ -392,16 +400,23 @@ async function postJson<T>(path: string, body: Record<string, unknown>): Promise
   throw lastError || new Error(`Failed to post ${path}`)
 }
 
-function formatDate(value: string | null | undefined, locale: Locale) {
+function formatDate(value: string | null | undefined) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return "—"
 
-  return new Intl.DateTimeFormat(locale === "ar" ? "en-GB" : "en-GB", {
+  return new Intl.DateTimeFormat("en-GB", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    numberingSystem: "latn",
   }).format(d)
+}
+
+function formatNumber(value: number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    useGrouping: false,
+  }).format(Number(value ?? 0))
 }
 
 function normalizeStatus(status?: string) {
@@ -424,16 +439,6 @@ function normalizeTemplate(item: WhatsAppTemplateItem): WhatsAppTemplateItem {
   }
 }
 
-function statusVariant(
-  status?: string
-): "default" | "secondary" | "destructive" | "outline" {
-  const v = normalizeStatus(status)
-  if (v === "APPROVED") return "default"
-  if (v === "REJECTED") return "destructive"
-  if (v === "PENDING") return "secondary"
-  return "outline"
-}
-
 function statusLabel(status: string | undefined, locale: Locale) {
   const v = normalizeStatus(status)
   const map: Record<string, { ar: string; en: string }> = {
@@ -442,17 +447,7 @@ function statusLabel(status: string | undefined, locale: Locale) {
     PENDING: { ar: "قيد المراجعة", en: "Pending Review" },
     DRAFT: { ar: "مسودة", en: "Draft" },
   }
-  return map[v]?.[locale] || status || translations[locale].unknown
-}
-
-function syncVariant(
-  status?: string
-): "default" | "secondary" | "destructive" | "outline" {
-  const v = normalizeStatus(status)
-  if (v === "SYNCED") return "default"
-  if (v === "FAILED") return "destructive"
-  if (v === "NOT_SYNCED") return "secondary"
-  return "outline"
+  return map[v]?.[locale] || translations[locale].unknown
 }
 
 function syncLabel(status: string | undefined, locale: Locale) {
@@ -462,7 +457,7 @@ function syncLabel(status: string | undefined, locale: Locale) {
     NOT_SYNCED: { ar: "غير متزامن", en: "Not Synced" },
     FAILED: { ar: "فشل التزامن", en: "Sync Failed" },
   }
-  return map[v]?.[locale] || status || translations[locale].unknown
+  return map[v]?.[locale] || translations[locale].unknown
 }
 
 function getStatusButtonClass(active: boolean) {
@@ -470,6 +465,112 @@ function getStatusButtonClass(active: boolean) {
     return "border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
   }
   return "border-border/60 bg-background text-foreground hover:bg-muted/70"
+}
+
+function getApprovalTone(status?: string) {
+  const value = normalizeStatus(status)
+
+  if (value === "APPROVED") {
+    return {
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      icon: CheckCircle2,
+    }
+  }
+
+  if (value === "REJECTED") {
+    return {
+      className: "border-red-200 bg-red-50 text-red-700",
+      icon: XCircle,
+    }
+  }
+
+  if (value === "PENDING") {
+    return {
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+      icon: Clock3,
+    }
+  }
+
+  return {
+    className: "border-slate-200 bg-slate-50 text-slate-700",
+    icon: FileText,
+  }
+}
+
+function getSyncTone(status?: string) {
+  const value = normalizeStatus(status)
+
+  if (value === "SYNCED") {
+    return {
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      icon: Wifi,
+    }
+  }
+
+  if (value === "FAILED") {
+    return {
+      className: "border-red-200 bg-red-50 text-red-700",
+      icon: AlertCircle,
+    }
+  }
+
+  if (value === "NOT_SYNCED") {
+    return {
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+      icon: WifiOff,
+    }
+  }
+
+  return {
+    className: "border-slate-200 bg-slate-50 text-slate-700",
+    icon: Globe,
+  }
+}
+
+function StatusBadge({
+  status,
+  locale,
+}: {
+  status?: string
+  locale: Locale
+}) {
+  const tone = getApprovalTone(status)
+  const Icon = tone.icon
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        tone.className,
+      ].join(" ")}
+    >
+      <Icon className="me-1 h-3.5 w-3.5" />
+      {statusLabel(status, locale)}
+    </span>
+  )
+}
+
+function SyncBadge({
+  status,
+  locale,
+}: {
+  status?: string
+  locale: Locale
+}) {
+  const tone = getSyncTone(status)
+  const Icon = tone.icon
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        tone.className,
+      ].join(" ")}
+    >
+      <Icon className="me-1 h-3.5 w-3.5" />
+      {syncLabel(status, locale)}
+    </span>
+  )
 }
 
 function mapTemplateToForm(template: WhatsAppTemplateItem): TemplateFormState {
@@ -643,6 +744,7 @@ export default function SystemWhatsAppTemplatesPage() {
     setForm(defaultFormState)
     setEditingTemplateId(null)
     setShowForm(true)
+    window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
   const openEditForm = (template: WhatsAppTemplateItem) => {
@@ -666,23 +768,23 @@ export default function SystemWhatsAppTemplatesPage() {
 
   const validateForm = () => {
     if (!form.event_code.trim()) {
-      toast.error(`${t.eventCode} مطلوب`)
+      toast.error(`${t.eventCode} ${t.fieldRequired}`)
       return false
     }
     if (!form.template_key.trim()) {
-      toast.error(`${t.templateKey} مطلوب`)
+      toast.error(`${t.templateKey} ${t.fieldRequired}`)
       return false
     }
     if (!form.language_code.trim()) {
-      toast.error(`${t.language} مطلوب`)
+      toast.error(`${t.language} ${t.fieldRequired}`)
       return false
     }
     if (!form.message_type.trim()) {
-      toast.error(`${t.type} مطلوب`)
+      toast.error(`${t.type} ${t.fieldRequired}`)
       return false
     }
     if (!form.body_text.trim()) {
-      toast.error(`${t.bodyText} مطلوب`)
+      toast.error(`${t.bodyText} ${t.fieldRequired}`)
       return false
     }
     return true
@@ -782,7 +884,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-3">
                 <div className="inline-flex items-center gap-2 rounded-full border bg-background/80 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
                   <MessageSquareText className="h-3.5 w-3.5 text-primary" />
-                  <span>WhatsApp Templates</span>
+                  <span>{t.badgeTitle}</span>
                 </div>
 
                 <div className="space-y-1">
@@ -863,6 +965,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-2">
                 <Label>{t.eventCode}</Label>
                 <Input
+                  dir="ltr"
                   value={form.event_code}
                   onChange={(e) => handleFormChange("event_code", e.target.value)}
                   placeholder="company_created"
@@ -872,6 +975,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-2">
                 <Label>{t.templateKey}</Label>
                 <Input
+                  dir="ltr"
                   value={form.template_key}
                   onChange={(e) => handleFormChange("template_key", e.target.value)}
                   placeholder="system_company_created_ar"
@@ -883,13 +987,14 @@ export default function SystemWhatsAppTemplatesPage() {
                 <Input
                   value={form.template_name}
                   onChange={(e) => handleFormChange("template_name", e.target.value)}
-                  placeholder="إنشاء شركة جديدة"
+                  placeholder={locale === "ar" ? "إنشاء شركة جديدة" : "Create company"}
                 />
               </div>
 
               <div className="space-y-2">
                 <Label>{t.language}</Label>
                 <select
+                  dir="ltr"
                   value={form.language_code}
                   onChange={(e) => handleFormChange("language_code", e.target.value)}
                   className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none"
@@ -902,6 +1007,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-2">
                 <Label>{t.type}</Label>
                 <select
+                  dir="ltr"
                   value={form.message_type}
                   onChange={(e) => handleFormChange("message_type", e.target.value)}
                   className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none"
@@ -915,6 +1021,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-2">
                 <Label>{t.status}</Label>
                 <select
+                  dir="ltr"
                   value={form.approval_status}
                   onChange={(e) => handleFormChange("approval_status", e.target.value)}
                   className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none"
@@ -929,6 +1036,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-2">
                 <Label>{t.providerSync}</Label>
                 <select
+                  dir="ltr"
                   value={form.provider_status}
                   onChange={(e) => handleFormChange("provider_status", e.target.value)}
                   className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none"
@@ -942,6 +1050,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-2">
                 <Label>{t.metaTemplateName}</Label>
                 <Input
+                  dir="ltr"
                   value={form.meta_template_name}
                   onChange={(e) =>
                     handleFormChange("meta_template_name", e.target.value)
@@ -953,6 +1062,7 @@ export default function SystemWhatsAppTemplatesPage() {
               <div className="space-y-2">
                 <Label>{t.metaTemplateNamespace}</Label>
                 <Input
+                  dir="ltr"
                   value={form.meta_template_namespace}
                   onChange={(e) =>
                     handleFormChange("meta_template_namespace", e.target.value)
@@ -984,13 +1094,14 @@ export default function SystemWhatsAppTemplatesPage() {
                 <Input
                   value={form.button_text}
                   onChange={(e) => handleFormChange("button_text", e.target.value)}
-                  placeholder="Open"
+                  placeholder={locale === "ar" ? "فتح" : "Open"}
                 />
               </div>
 
               <div className="space-y-2 md:col-span-2 xl:col-span-3">
                 <Label>{t.buttonUrl}</Label>
                 <Input
+                  dir="ltr"
                   value={form.button_url}
                   onChange={(e) => handleFormChange("button_url", e.target.value)}
                   placeholder="https://example.com"
@@ -1002,7 +1113,7 @@ export default function SystemWhatsAppTemplatesPage() {
                 <textarea
                   value={form.body_text}
                   onChange={(e) => handleFormChange("body_text", e.target.value)}
-                  placeholder="مرحبًا {{company_name}} ..."
+                  placeholder={locale === "ar" ? "مرحبًا {{company_name}} ..." : "Hello {{company_name}} ..."}
                   className="min-h-[140px] w-full rounded-2xl border border-border bg-background px-3 py-3 text-sm outline-none"
                 />
               </div>
@@ -1014,7 +1125,7 @@ export default function SystemWhatsAppTemplatesPage() {
                   onChange={(e) =>
                     handleFormChange("rejection_reason", e.target.value)
                   }
-                  placeholder="سبب الرفض عند الحاجة"
+                  placeholder={locale === "ar" ? "سبب الرفض عند الحاجة" : "Rejection reason if needed"}
                   className="min-h-[90px] w-full rounded-2xl border border-border bg-background px-3 py-3 text-sm outline-none"
                 />
               </div>
@@ -1078,7 +1189,9 @@ export default function SystemWhatsAppTemplatesPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">{t.totalTemplates}</p>
-                <p className="text-3xl font-bold tracking-tight">{stats.total}</p>
+                <p className="text-3xl font-bold tracking-tight tabular-nums" dir="ltr">
+                  {formatNumber(stats.total)}
+                </p>
               </div>
               <div className="rounded-2xl bg-primary/10 p-2.5 text-primary">
                 <FileText className="h-5 w-5" />
@@ -1092,7 +1205,9 @@ export default function SystemWhatsAppTemplatesPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">{t.approved}</p>
-                <p className="text-3xl font-bold tracking-tight">{stats.approved}</p>
+                <p className="text-3xl font-bold tracking-tight tabular-nums" dir="ltr">
+                  {formatNumber(stats.approved)}
+                </p>
               </div>
               <div className="rounded-2xl bg-emerald-500/10 p-2.5 text-emerald-600">
                 <CheckCircle2 className="h-5 w-5" />
@@ -1106,7 +1221,9 @@ export default function SystemWhatsAppTemplatesPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">{t.pending}</p>
-                <p className="text-3xl font-bold tracking-tight">{stats.pending}</p>
+                <p className="text-3xl font-bold tracking-tight tabular-nums" dir="ltr">
+                  {formatNumber(stats.pending)}
+                </p>
               </div>
               <div className="rounded-2xl bg-amber-500/10 p-2.5 text-amber-600">
                 <Sparkles className="h-5 w-5" />
@@ -1120,7 +1237,9 @@ export default function SystemWhatsAppTemplatesPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">{t.rejected}</p>
-                <p className="text-3xl font-bold tracking-tight">{stats.rejected}</p>
+                <p className="text-3xl font-bold tracking-tight tabular-nums" dir="ltr">
+                  {formatNumber(stats.rejected)}
+                </p>
               </div>
               <div className="rounded-2xl bg-destructive/10 p-2.5 text-destructive">
                 <XCircle className="h-5 w-5" />
@@ -1142,8 +1261,8 @@ export default function SystemWhatsAppTemplatesPage() {
 
             <div className="inline-flex w-fit items-center rounded-full border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground">
               {t.currentResults}:{" "}
-              <span className="ms-1.5 font-bold text-foreground">
-                {filteredTemplates.length}
+              <span className="ms-1.5 font-bold text-foreground tabular-nums" dir="ltr">
+                {formatNumber(filteredTemplates.length)}
               </span>
             </div>
           </div>
@@ -1181,13 +1300,14 @@ export default function SystemWhatsAppTemplatesPage() {
                     >
                       <span>{option.label}</span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
+                        className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${
                           active
                             ? "bg-primary-foreground/15 text-primary-foreground"
                             : "bg-muted text-muted-foreground"
                         }`}
+                        dir="ltr"
                       >
-                        {option.count}
+                        {formatNumber(option.count)}
                       </span>
                     </button>
                   )
@@ -1204,7 +1324,7 @@ export default function SystemWhatsAppTemplatesPage() {
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="h-7 w-7 animate-spin text-primary" />
               <p className="text-sm text-muted-foreground">
-                {locale === "ar" ? "جاري تحميل القوالب..." : "Loading templates..."}
+                {t.loadingTemplates}
               </p>
             </div>
           </CardContent>
@@ -1234,7 +1354,7 @@ export default function SystemWhatsAppTemplatesPage() {
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <CardTitle className="truncate text-lg font-semibold">
-                          {template.name || `Template #${template.id}`}
+                          {template.name || `Template #${formatNumber(template.id)}`}
                         </CardTitle>
 
                         {template.is_default ? (
@@ -1251,25 +1371,14 @@ export default function SystemWhatsAppTemplatesPage() {
                         </Badge>
                       </div>
 
-                      <CardDescription className="text-xs md:text-sm">
-                        {t.lastUpdate}: {formatDate(template.updated_at, locale)}
+                      <CardDescription className="text-xs md:text-sm" dir="ltr">
+                        {t.lastUpdate}: {formatDate(template.updated_at)}
                       </CardDescription>
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <Badge
-                        variant={statusVariant(template.status)}
-                        className="w-fit rounded-full px-3 py-1 text-xs"
-                      >
-                        {statusLabel(template.status, locale)}
-                      </Badge>
-
-                      <Badge
-                        variant={syncVariant(template.provider_status)}
-                        className="w-fit rounded-full px-3 py-1 text-xs"
-                      >
-                        {syncLabel(template.provider_status, locale)}
-                      </Badge>
+                      <StatusBadge status={template.status} locale={locale} />
+                      <SyncBadge status={template.provider_status} locale={locale} />
                     </div>
                   </div>
 
@@ -1324,14 +1433,14 @@ export default function SystemWhatsAppTemplatesPage() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-2xl border bg-background p-4 shadow-sm">
                     <p className="text-xs text-muted-foreground">{t.type}</p>
-                    <p className="mt-1.5 text-sm font-semibold">
+                    <p className="mt-1.5 text-sm font-semibold" dir="ltr">
                       {template.template_type || "—"}
                     </p>
                   </div>
 
                   <div className="rounded-2xl border bg-background p-4 shadow-sm">
                     <p className="text-xs text-muted-foreground">{t.language}</p>
-                    <div className="mt-1.5 flex items-center gap-2 text-sm font-semibold">
+                    <div className="mt-1.5 flex items-center gap-2 text-sm font-semibold" dir="ltr">
                       <Globe className="h-4 w-4 text-primary" />
                       <span>{template.language || "—"}</span>
                     </div>
@@ -1339,7 +1448,7 @@ export default function SystemWhatsAppTemplatesPage() {
 
                   <div className="rounded-2xl border bg-background p-4 shadow-sm">
                     <p className="text-xs text-muted-foreground">{t.category}</p>
-                    <p className="mt-1.5 text-sm font-semibold break-words">
+                    <p className="mt-1.5 break-words text-sm font-semibold" dir="ltr">
                       {template.category || "—"}
                     </p>
                   </div>
@@ -1348,29 +1457,22 @@ export default function SystemWhatsAppTemplatesPage() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-2xl border bg-background p-4 shadow-sm">
                     <p className="text-xs text-muted-foreground">{t.providerSync}</p>
-                    <div className="mt-1.5 flex items-center gap-2 text-sm font-semibold">
-                      {normalizeStatus(template.provider_status) === "SYNCED" ? (
-                        <Wifi className="h-4 w-4 text-emerald-600" />
-                      ) : normalizeStatus(template.provider_status) === "FAILED" ? (
-                        <AlertTriangle className="h-4 w-4 text-destructive" />
-                      ) : (
-                        <WifiOff className="h-4 w-4 text-amber-600" />
-                      )}
-                      <span>{syncLabel(template.provider_status, locale)}</span>
+                    <div className="mt-1.5">
+                      <SyncBadge status={template.provider_status} locale={locale} />
                     </div>
                   </div>
 
                   <div className="rounded-2xl border bg-background p-4 shadow-sm">
                     <p className="text-xs text-muted-foreground">{t.lastSyncedAt}</p>
-                    <p className="mt-1.5 text-sm font-semibold">
-                      {formatDate(template.last_synced_at, locale)}
+                    <p className="mt-1.5 text-sm font-semibold" dir="ltr">
+                      {formatDate(template.last_synced_at)}
                     </p>
                   </div>
 
                   <div className="rounded-2xl border bg-background p-4 shadow-sm">
                     <p className="text-xs text-muted-foreground">{t.version}</p>
-                    <p className="mt-1.5 text-sm font-semibold">
-                      {template.version || 1}
+                    <p className="mt-1.5 text-sm font-semibold tabular-nums" dir="ltr">
+                      {formatNumber(template.version || 1)}
                     </p>
                   </div>
                 </div>

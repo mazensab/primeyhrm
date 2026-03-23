@@ -4,36 +4,36 @@ import Image from "next/image"
 import { useEffect, useMemo, useState, type ComponentType } from "react"
 import { useRouter } from "next/navigation"
 import {
+  Activity,
   ArrowLeftRight,
+  Bell,
+  Briefcase,
   Building2,
-  Loader2,
-  Users,
-  Clock3,
   CalendarDays,
+  CheckCircle2,
+  CircleDollarSign,
+  ClipboardCheck,
+  Clock3,
   Fingerprint,
+  Loader2,
+  Plane,
+  Receipt,
+  Shield,
+  Sparkles,
+  Timer,
+  TimerReset,
+  TrendingUp,
   UserCheck,
   UserX,
-  Briefcase,
-  Receipt,
-  Bell,
-  TrendingUp,
-  ClipboardCheck,
-  CircleDollarSign,
-  Sparkles,
-  TimerReset,
-  Shield,
-  Activity,
+  Users,
+  XCircle,
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -42,11 +42,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar"
 
 /* =========================================
    LANGUAGE / TRANSLATIONS
@@ -60,6 +55,7 @@ const translations = {
     failedReturnToSystem: "فشل في الرجوع إلى النظام",
     returnedToSystem: "تم الرجوع إلى النظام بنجاح",
     serverErrorReturn: "خطأ في الخادم أثناء الرجوع إلى النظام",
+    statusCopied: "تم تجهيز عرض الحالة الجديد بنجاح",
 
     company: "الشركة",
     companyDashboard: "لوحة الشركة",
@@ -173,7 +169,7 @@ const translations = {
     activityLeaveRequestMeta: "إجازة سنوية • الموظف: أحمد الحربي",
 
     activityPayrollPending: "دورة الرواتب بانتظار المراجعة",
-    activityPayrollPendingMeta: "مارس 2026 • تم إنشاء المسودة",
+    activityPayrollPendingMeta: "March 2026 • تم إنشاء المسودة",
 
     activityAttendanceSync: "اكتملت مزامنة الحضور",
     activityAttendanceSyncMeta: "انتهت مزامنة BioTime بنجاح",
@@ -181,10 +177,10 @@ const translations = {
     activityEmployeeAdded: "تمت إضافة موظف جديد",
     activityEmployeeAddedMeta: "القسم: العمليات",
 
-    time10MinAgo: "قبل 10 دقائق",
-    time35MinAgo: "قبل 35 دقيقة",
-    time1HourAgo: "قبل ساعة",
-    time2HoursAgo: "قبل ساعتين",
+    time10MinAgo: "10 min ago",
+    time35MinAgo: "35 min ago",
+    time1HourAgo: "1 hour ago",
+    time2HoursAgo: "2 hours ago",
   },
   en: {
     loading: "Loading company dashboard...",
@@ -192,6 +188,7 @@ const translations = {
     failedReturnToSystem: "Failed to return to system",
     returnedToSystem: "Returned to system successfully",
     serverErrorReturn: "Server error while returning to system",
+    statusCopied: "The new status badge style is ready",
 
     company: "Company",
     companyDashboard: "Company Dashboard",
@@ -435,6 +432,12 @@ type ActivityItem = {
   icon: ComponentType<{ className?: string }>
 }
 
+type StatusMeta = {
+  label: string
+  icon: ComponentType<{ className?: string }>
+  className: string
+}
+
 /* =========================================
    MOCK DATA
 ========================================= */
@@ -487,15 +490,80 @@ const employeePreviewRows: EmployeePreview[] = [
 function getStatusClasses(status: EmployeeStatusKey) {
   switch (status) {
     case "PRESENT":
-      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
+      return [
+        "border-emerald-200/80",
+        "bg-emerald-50",
+        "text-emerald-700",
+        "dark:border-emerald-500/20",
+        "dark:bg-emerald-500/10",
+        "dark:text-emerald-300",
+      ].join(" ")
     case "LATE":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-700"
+      return [
+        "border-amber-200/80",
+        "bg-amber-50",
+        "text-amber-700",
+        "dark:border-amber-500/20",
+        "dark:bg-amber-500/10",
+        "dark:text-amber-300",
+      ].join(" ")
     case "ON_LEAVE":
-      return "border-sky-500/20 bg-sky-500/10 text-sky-700"
+      return [
+        "border-sky-200/80",
+        "bg-sky-50",
+        "text-sky-700",
+        "dark:border-sky-500/20",
+        "dark:bg-sky-500/10",
+        "dark:text-sky-300",
+      ].join(" ")
     case "ABSENT":
-      return "border-rose-500/20 bg-rose-500/10 text-rose-700"
+      return [
+        "border-rose-200/80",
+        "bg-rose-50",
+        "text-rose-700",
+        "dark:border-rose-500/20",
+        "dark:bg-rose-500/10",
+        "dark:text-rose-300",
+      ].join(" ")
     default:
       return "border-border bg-muted text-foreground"
+  }
+}
+
+function getStatusMeta(status: EmployeeStatusKey, lang: Lang): StatusMeta {
+  const t = translations[lang]
+
+  switch (status) {
+    case "PRESENT":
+      return {
+        label: t.statusPresent,
+        icon: CheckCircle2,
+        className: getStatusClasses(status),
+      }
+    case "LATE":
+      return {
+        label: t.statusLate,
+        icon: Timer,
+        className: getStatusClasses(status),
+      }
+    case "ON_LEAVE":
+      return {
+        label: t.statusOnLeave,
+        icon: Plane,
+        className: getStatusClasses(status),
+      }
+    case "ABSENT":
+      return {
+        label: t.statusAbsent,
+        icon: XCircle,
+        className: getStatusClasses(status),
+      }
+    default:
+      return {
+        label: String(status || ""),
+        icon: Activity,
+        className: "border-border bg-muted text-foreground",
+      }
   }
 }
 
@@ -504,15 +572,15 @@ function getDepartmentClasses(department?: DepartmentKey | null) {
 
   switch (safe) {
     case "HR":
-      return "border-violet-500/20 bg-violet-500/10 text-violet-700"
+      return "border-violet-500/20 bg-violet-500/10 text-violet-700 dark:text-violet-300"
     case "PAYROLL":
-      return "border-blue-500/20 bg-blue-500/10 text-blue-700"
+      return "border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-300"
     case "OPERATIONS":
-      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
+      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
     case "ADMINISTRATION":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-700"
+      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300"
     case "FINANCE":
-      return "border-cyan-500/20 bg-cyan-500/10 text-cyan-700"
+      return "border-cyan-500/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
     default:
       return "border-border bg-muted text-foreground"
   }
@@ -563,13 +631,13 @@ function getRoleBadgeClass(role?: string | null) {
 
   switch (safe) {
     case "OWNER":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-700"
+      return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
     case "HR":
-      return "border-violet-500/30 bg-violet-500/10 text-violet-700"
+      return "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300"
     case "MANAGER":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
     case "ADMIN":
-      return "border-blue-500/30 bg-blue-500/10 text-blue-700"
+      return "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
     default:
       return "border-primary/20 bg-primary/10 text-primary"
   }
@@ -628,6 +696,36 @@ function getJobTitleLabel(key: EmployeePreview["titleKey"], lang: Lang) {
     default:
       return key
   }
+}
+
+/* =========================================
+   REUSABLE STATUS BADGE
+========================================= */
+function StatusBadge({
+  status,
+  lang,
+}: {
+  status: EmployeeStatusKey
+  lang: Lang
+}) {
+  const meta = getStatusMeta(status, lang)
+  const Icon = meta.icon
+  const isArabic = lang === "ar"
+
+  return (
+    <Badge
+      variant="outline"
+      dir={isArabic ? "rtl" : "ltr"}
+      className={[
+        "inline-flex h-8 min-w-[112px] items-center justify-center gap-1.5 rounded-full px-3 text-xs font-semibold shadow-sm transition-colors",
+        "whitespace-nowrap",
+        meta.className,
+      ].join(" ")}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span>{meta.label}</span>
+    </Badge>
+  )
 }
 
 export default function CompanyPage() {
@@ -875,7 +973,10 @@ export default function CompanyPage() {
 
           <Button
             variant="outline"
-            onClick={() => router.refresh()}
+            onClick={() => {
+              router.refresh()
+              toast.success(t.statusCopied)
+            }}
             className="h-10 rounded-xl px-4"
           >
             {t.refreshSession}
@@ -1173,79 +1274,82 @@ export default function CompanyPage() {
 
           <CardContent className="pt-5">
             <div className="overflow-hidden rounded-2xl border bg-background">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-b bg-muted/30 hover:bg-muted/30">
-                    <TableHead className="h-12 min-w-[280px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {t.employee}
-                    </TableHead>
-                    <TableHead className="h-12 min-w-[150px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {t.department}
-                    </TableHead>
-                    <TableHead className="h-12 min-w-[180px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {t.jobTitle}
-                    </TableHead>
-                    <TableHead className="h-12 min-w-[120px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {t.status}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
+              <div className="w-full overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-b bg-muted/30 hover:bg-muted/30">
+                      <TableHead className="h-12 min-w-[280px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t.employee}
+                      </TableHead>
+                      <TableHead className="h-12 min-w-[150px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t.department}
+                      </TableHead>
+                      <TableHead className="h-12 min-w-[180px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t.jobTitle}
+                      </TableHead>
+                      <TableHead className="h-12 min-w-[140px] px-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t.status}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
 
-                <TableBody>
-                  {employeePreviewRows.map((employee) => (
-                    <TableRow
-                      key={employee.id}
-                      className="group border-b last:border-b-0 hover:bg-muted/20"
-                    >
-                      <TableCell className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-11 w-11 shrink-0 rounded-xl border">
-                            <AvatarImage
-                              src={employee.avatar || ""}
-                              alt={employee.name}
-                            />
-                            <AvatarFallback className="rounded-xl text-xs font-semibold">
-                              {getInitials(employee.name)}
-                            </AvatarFallback>
-                          </Avatar>
+                  <TableBody>
+                    {employeePreviewRows.map((employee) => (
+                      <TableRow
+                        key={employee.id}
+                        className="group border-b last:border-b-0 hover:bg-muted/20"
+                      >
+                        <TableCell className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-11 w-11 shrink-0 rounded-xl border">
+                              <AvatarImage
+                                src={employee.avatar || ""}
+                                alt={employee.name}
+                              />
+                              <AvatarFallback className="rounded-xl text-xs font-semibold">
+                                {getInitials(employee.name)}
+                              </AvatarFallback>
+                            </Avatar>
 
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-foreground">
-                              {employee.name}
-                            </div>
-                            <div
-                              dir="ltr"
-                              className="mt-0.5 truncate text-xs text-muted-foreground"
-                            >
-                              EMP-{String(employee.id).padStart(4, "0")}
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-foreground">
+                                {employee.name}
+                              </div>
+                              <div
+                                dir="ltr"
+                                className="mt-0.5 truncate text-xs text-muted-foreground"
+                              >
+                                EMP-{String(employee.id).padStart(4, "0")}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </TableCell>
+                        </TableCell>
 
-                      <TableCell className="px-5 py-4">
-                        <span
-                          className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getDepartmentClasses(employee.departmentKey)}`}
-                        >
-                          {getDepartmentLabel(employee.departmentKey, lang)}
-                        </span>
-                      </TableCell>
+                        <TableCell className="px-5 py-4">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getDepartmentClasses(
+                              employee.departmentKey
+                            )}`}
+                          >
+                            {getDepartmentLabel(employee.departmentKey, lang)}
+                          </span>
+                        </TableCell>
 
-                      <TableCell className="px-5 py-4 text-sm text-muted-foreground">
-                        {getJobTitleLabel(employee.titleKey, lang)}
-                      </TableCell>
+                        <TableCell className="px-5 py-4 text-sm text-muted-foreground">
+                          {getJobTitleLabel(employee.titleKey, lang)}
+                        </TableCell>
 
-                      <TableCell className="px-5 py-4">
-                        <span
-                          className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusClasses(employee.statusKey)}`}
-                        >
-                          {getEmployeeStatusLabel(employee.statusKey, lang)}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                        <TableCell className="px-5 py-4">
+                          <StatusBadge
+                            status={employee.statusKey}
+                            lang={lang}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1282,7 +1386,10 @@ export default function CompanyPage() {
                         <p className="text-sm font-semibold leading-6">
                           {item.title}
                         </p>
-                        <span className="shrink-0 text-[11px] text-muted-foreground">
+                        <span
+                          dir="ltr"
+                          className="shrink-0 text-[11px] text-muted-foreground"
+                        >
                           {formatTimeLabel(item.time)}
                         </span>
                       </div>

@@ -38,12 +38,22 @@ def env_int(key: str, default: int = 0) -> int:
 
 
 # ============================================================
+# 🌍 ENVIRONMENT
+# ============================================================
+
+DJANGO_ENV = env("DJANGO_ENV", "local").strip().lower()
+IS_LOCAL = DJANGO_ENV in ("local", "development", "dev")
+IS_PRODUCTION = DJANGO_ENV in ("production", "prod")
+
+# ============================================================
 # ⚙️ SECURITY & HOSTS
 # ============================================================
 
 SECRET_KEY = env("DJANGO_SECRET_KEY", "")
 
-DEBUG = env_bool("DJANGO_DEBUG", False)
+# في اللوكل نجبر DEBUG=True افتراضيًا
+# وفي الإنتاج يبقى منضبطًا من .env
+DEBUG = env_bool("DJANGO_DEBUG", True if IS_LOCAL else False)
 
 ALLOWED_HOSTS = [
     "localhost",
@@ -53,14 +63,26 @@ ALLOWED_HOSTS = [
     ".primeyride.com",
 ]
 
-SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", not DEBUG)
-SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 31536000 if not DEBUG else 0)
-SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", not DEBUG)
-SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", not DEBUG)
 SECURE_CONTENT_TYPE_NOSNIFF = env_bool("SECURE_CONTENT_TYPE_NOSNIFF", True)
 SECURE_BROWSER_XSS_FILTER = env_bool("SECURE_BROWSER_XSS_FILTER", True)
 X_FRAME_OPTIONS = env("X_FRAME_OPTIONS", "DENY")
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ------------------------------------------------------------
+# HTTPS / SSL
+# ------------------------------------------------------------
+if IS_PRODUCTION:
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", True)
+    SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 31536000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
+    SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", True)
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+else:
+    # حماية صريحة للبيئة المحلية حتى لو دخلت قيم إنتاج في .env بالغلط
+    SECURE_SSL_REDIRECT = False
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+    SECURE_PROXY_SSL_HEADER = None
 
 # ============================================================
 # 🌐 FRONTEND (Next.js)
@@ -357,24 +379,16 @@ SESSION_ENGINE = "django.contrib.sessions.backends.db"
 # -----------------------------
 SESSION_COOKIE_NAME = "sessionid"
 SESSION_COOKIE_HTTPONLY = True
-
-# مهم جدًا: Lax مناسب للحالة الحالية
 SESSION_COOKIE_SAMESITE = "Lax"
-
-# Secure فقط في HTTPS (الإنتاج)
-SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", not DEBUG)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", True) if IS_PRODUCTION else False
 
 # -----------------------------
 # CSRF Cookie
 # -----------------------------
 CSRF_COOKIE_NAME = "csrftoken"
-
-# لازم False عشان Next.js يقرأه
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
-
-# Secure فقط في HTTPS (الإنتاج)
-CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", True) if IS_PRODUCTION else False
 
 # -----------------------------
 # CSRF Behavior

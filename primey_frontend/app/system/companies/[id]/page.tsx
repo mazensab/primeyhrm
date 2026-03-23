@@ -1,11 +1,12 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { toast } from "sonner"
 import {
   Card,
   CardContent,
@@ -14,7 +15,7 @@ import {
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -47,32 +48,35 @@ import {
   TableRow
 } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-
 import {
-  Building2,
-  Users,
-  Calendar,
-  Crown,
   Activity,
-  Mail,
-  Phone,
-  MapPin,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Crown,
   FileText,
+  KeyRound,
   Landmark,
+  Loader2,
+  LogIn,
+  Mail,
+  MapPin,
   MoreHorizontal,
-  UserCog,
+  PencilLine,
+  Phone,
   Power,
   Shield,
-  Loader2,
-  PencilLine,
-  CheckCircle2,
-  XCircle,
-  KeyRound,
-  LogIn
+  UserCog,
+  Users,
+  XCircle
 } from "lucide-react"
+
 /* =========================================================
    Types
 ========================================================= */
+
+type Locale = "ar" | "en"
+type Dir = "rtl" | "ltr"
 
 interface CompanyNationalAddress {
   building_number?: string | null
@@ -93,16 +97,13 @@ interface CompanyDetails {
   phone?: string | null
   email?: string | null
   national_address?: CompanyNationalAddress
-
   owner?: {
     email?: string
   }
-
   subscription?: {
     plan?: string
     status?: string
   }
-
   users_count: number
 }
 
@@ -169,17 +170,337 @@ interface CompanyUserApiResponse {
 
 type CompanyUserRole = "OWNER" | "ADMIN" | "HR" | "MANAGER" | "EMPLOYEE"
 
-const COMPANY_USER_ROLE_OPTIONS: { value: CompanyUserRole; label: string }[] = [
-  { value: "OWNER", label: "Owner" },
-  { value: "ADMIN", label: "Admin" },
-  { value: "HR", label: "HR" },
-  { value: "MANAGER", label: "Manager" },
-  { value: "EMPLOYEE", label: "Employee" }
+const COMPANY_USER_ROLE_OPTIONS: { value: CompanyUserRole; labelAr: string; labelEn: string }[] = [
+  { value: "OWNER", labelAr: "المالك", labelEn: "Owner" },
+  { value: "ADMIN", labelAr: "المدير", labelEn: "Admin" },
+  { value: "HR", labelAr: "الموارد البشرية", labelEn: "HR" },
+  { value: "MANAGER", labelAr: "المدير المباشر", labelEn: "Manager" },
+  { value: "EMPLOYEE", labelAr: "الموظف", labelEn: "Employee" }
 ]
+
+/* =========================================================
+   i18n
+========================================================= */
+
+const messages = {
+  ar: {
+    pageSubtitle: "إدارة الشركة واستخدام المنصة",
+    active: "نشطة",
+    disabled: "معطلة",
+
+    tabs: {
+      overview: "نظرة عامة",
+      users: "المستخدمون",
+      subscription: "الاشتراك",
+      invoices: "الفواتير",
+      activity: "النشاط"
+    },
+
+    companyInfoTitle: "بيانات الشركة",
+    companyInfoDesc: "البيانات الرئيسية للشركة، والبيانات الضريبية، والعنوان الوطني.",
+    edit: "تعديل",
+    cancel: "إلغاء",
+    saveChanges: "حفظ التغييرات",
+    saving: "جارٍ الحفظ...",
+
+    basicInfo: "المعلومات الأساسية",
+    nationalAddress: "العنوان الوطني",
+    status: "الحالة",
+    metadata: "البيانات التعريفية",
+    subscriptionTitle: "الاشتراك",
+
+    fields: {
+      companyName: "اسم الشركة",
+      owner: "المالك",
+      companyEmail: "البريد الإلكتروني للشركة",
+      phone: "الهاتف",
+      commercialNo: "السجل التجاري",
+      vatNo: "الرقم الضريبي",
+      buildingNo: "رقم المبنى",
+      street: "الشارع",
+      district: "الحي",
+      city: "المدينة",
+      postalCode: "الرمز البريدي",
+      shortAddress: "العنوان المختصر",
+      plan: "الخطة",
+      users: "المستخدمون",
+      created: "تاريخ الإنشاء",
+      currentStatus: "الحالة الحالية",
+      companyId: "رقم الشركة",
+      billingCycle: "دورة الفوترة",
+      startDate: "تاريخ البداية",
+      endDate: "تاريخ النهاية",
+      role: "الدور",
+      contact: "التواصل",
+      user: "المستخدم",
+      password: "كلمة المرور"
+    },
+
+    usersTitle: "مستخدمو الشركة",
+    usersDesc: "إدارة مستخدمي الشركة والصلاحيات وحالة التفعيل.",
+    refresh: "تحديث",
+    refreshing: "جارٍ التحديث...",
+    noUsersFound: "لا يوجد مستخدمون",
+    reset: "إعادة تعيين",
+    editUser: "تعديل المستخدم",
+    changeRole: "تغيير الدور",
+    enterAsUser: "الدخول كمستخدم",
+    resetPassword: "إعادة تعيين كلمة المرور",
+    disableUser: "تعطيل المستخدم",
+    enableUser: "تفعيل المستخدم",
+    actions: "الإجراءات",
+
+    noSubscriptionFound: "لا يوجد اشتراك",
+    subscriptionDetails: "تفاصيل الاشتراك",
+    subscriptionExpiresInDays: "ينتهي الاشتراك خلال {days} يوم",
+    renewSubscription: "تجديد الاشتراك",
+
+    invoicesTitle: "فواتير الشركة",
+    noInvoicesFound: "لا توجد فواتير",
+
+    activityTitle: "سجل النشاط",
+    noActivityYet: "لا يوجد نشاط حتى الآن",
+
+    dialog: {
+      editUserTitle: "تعديل مستخدم الشركة",
+      editUserDesc: "تحديث بيانات المستخدم الأساسية دون التأثير على بيانات الشركة الأخرى.",
+      roleTitle: "تغيير دور المستخدم",
+      roleDesc: "تحديث مستوى الصلاحية لهذا المستخدم داخل الشركة.",
+      toggleDisableTitle: "تعطيل المستخدم",
+      toggleEnableTitle: "تفعيل المستخدم",
+      toggleDisableDesc: "سيتم منع هذا المستخدم من الدخول حتى إعادة تفعيله.",
+      toggleEnableDesc: "سيستعيد هذا المستخدم إمكانية الوصول إلى منصة الشركة.",
+      resetPasswordTitle: "تغيير كلمة المرور",
+      resetPasswordDesc: "أدخل كلمة المرور الجديدة لهذا المستخدم.",
+      currentRole: "الدور الحالي",
+      username: "اسم المستخدم",
+      email: "البريد الإلكتروني",
+      newPassword: "كلمة المرور الجديدة",
+      confirmPassword: "تأكيد كلمة المرور",
+      selectRole: "اختر الدور",
+      saveRole: "حفظ الدور",
+      processing: "جارٍ التنفيذ...",
+      updating: "جارٍ التحديث..."
+    },
+
+    placeholders: {
+      companyName: "اسم الشركة",
+      companyEmail: "البريد الإلكتروني للشركة",
+      phone: "الهاتف",
+      commercialNumber: "رقم السجل التجاري",
+      vatNumber: "الرقم الضريبي",
+      buildingNumber: "رقم المبنى",
+      street: "الشارع",
+      district: "الحي",
+      city: "المدينة",
+      postalCode: "الرمز البريدي",
+      shortAddress: "العنوان المختصر",
+      username: "اسم المستخدم",
+      email: "البريد الإلكتروني",
+      newPassword: "أدخل كلمة المرور الجديدة",
+      confirmPassword: "أكد كلمة المرور"
+    },
+
+    companyNotFound: "الشركة غير موجودة",
+
+    toasts: {
+      loadUsersFailed: "فشل تحميل مستخدمي الشركة",
+      usernameRequired: "اسم المستخدم مطلوب",
+      emailRequired: "البريد الإلكتروني مطلوب",
+      userUpdateFailed: "فشل تحديث المستخدم",
+      userUpdated: "تم تحديث المستخدم بنجاح",
+      userUpdateServerError: "خطأ في الخادم أثناء تحديث المستخدم",
+      roleChangeFailed: "فشل تغيير دور المستخدم",
+      roleUpdated: "تم تحديث دور المستخدم بنجاح",
+      roleServerError: "خطأ في الخادم أثناء تغيير الدور",
+      statusChangeFailed: "فشل تغيير حالة المستخدم",
+      userEnabled: "تم تفعيل المستخدم بنجاح",
+      userDisabled: "تم تعطيل المستخدم بنجاح",
+      statusServerError: "خطأ في الخادم أثناء تغيير حالة المستخدم",
+      enterFailed: "فشل الدخول إلى جلسة الشركة",
+      enteredAs: "تم الدخول كمستخدم {username}",
+      enterServerError: "خطأ في الخادم أثناء الدخول كمستخدم",
+      passwordMin: "يجب أن تكون كلمة المرور 6 أحرف على الأقل",
+      passwordsMismatch: "كلمتا المرور غير متطابقتين",
+      passwordUpdateFailed: "فشل تحديث كلمة المرور",
+      passwordUpdated: "تم تحديث كلمة المرور بنجاح",
+      passwordServerError: "خطأ في الخادم أثناء تحديث كلمة المرور",
+      companyUpdateFailed: "فشل تحديث بيانات الشركة",
+      companyUpdated: "تم تحديث بيانات الشركة بنجاح",
+      companyServerError: "خطأ في الخادم أثناء تحديث بيانات الشركة",
+      renewFailed: "فشل التجديد",
+      renewalInvoiceCreated: "تم إنشاء فاتورة التجديد",
+      serverError: "خطأ في الخادم",
+      companyFetchFailed: "فشل تحميل بيانات الشركة"
+    }
+  },
+  en: {
+    pageSubtitle: "Company administration and platform usage",
+    active: "ACTIVE",
+    disabled: "DISABLED",
+
+    tabs: {
+      overview: "Overview",
+      users: "Users",
+      subscription: "Subscription",
+      invoices: "Invoices",
+      activity: "Activity"
+    },
+
+    companyInfoTitle: "Company Information",
+    companyInfoDesc: "Main company data, tax details, and national address.",
+    edit: "Edit",
+    cancel: "Cancel",
+    saveChanges: "Save Changes",
+    saving: "Saving...",
+
+    basicInfo: "Basic Information",
+    nationalAddress: "National Address",
+    status: "Status",
+    metadata: "Metadata",
+    subscriptionTitle: "Subscription",
+
+    fields: {
+      companyName: "Company Name",
+      owner: "Owner",
+      companyEmail: "Company Email",
+      phone: "Phone",
+      commercialNo: "Commercial No.",
+      vatNo: "VAT No.",
+      buildingNo: "Building No.",
+      street: "Street",
+      district: "District",
+      city: "City",
+      postalCode: "Postal Code",
+      shortAddress: "Short Address",
+      plan: "Plan",
+      users: "Users",
+      created: "Created",
+      currentStatus: "Current Status",
+      companyId: "Company ID",
+      billingCycle: "Billing Cycle",
+      startDate: "Start Date",
+      endDate: "End Date",
+      role: "Role",
+      contact: "Contact",
+      user: "User",
+      password: "Password"
+    },
+
+    usersTitle: "Company Users",
+    usersDesc: "Manage company users, permissions, and activation status.",
+    refresh: "Refresh",
+    refreshing: "Refreshing...",
+    noUsersFound: "No users found",
+    reset: "Reset",
+    editUser: "Edit User",
+    changeRole: "Change Role",
+    enterAsUser: "Enter as User",
+    resetPassword: "Reset Password",
+    disableUser: "Disable User",
+    enableUser: "Enable User",
+    actions: "Actions",
+
+    noSubscriptionFound: "No subscription found",
+    subscriptionDetails: "Subscription Details",
+    subscriptionExpiresInDays: "Subscription expires in {days} days",
+    renewSubscription: "Renew Subscription",
+
+    invoicesTitle: "Company Invoices",
+    noInvoicesFound: "No invoices found",
+
+    activityTitle: "Activity Logs",
+    noActivityYet: "No activity yet",
+
+    dialog: {
+      editUserTitle: "Edit Company User",
+      editUserDesc: "Update basic user information without affecting other company data.",
+      roleTitle: "Change User Role",
+      roleDesc: "Update the company permission level for this user.",
+      toggleDisableTitle: "Disable User",
+      toggleEnableTitle: "Enable User",
+      toggleDisableDesc: "This user will lose access until re-enabled.",
+      toggleEnableDesc: "This user will regain access to the company platform.",
+      resetPasswordTitle: "Change Password",
+      resetPasswordDesc: "Enter the new password for this company user.",
+      currentRole: "Current role",
+      username: "Username",
+      email: "Email",
+      newPassword: "New Password",
+      confirmPassword: "Confirm Password",
+      selectRole: "Select role",
+      saveRole: "Save Role",
+      processing: "Processing...",
+      updating: "Updating..."
+    },
+
+    placeholders: {
+      companyName: "Company Name",
+      companyEmail: "Company Email",
+      phone: "Phone",
+      commercialNumber: "Commercial Number",
+      vatNumber: "VAT Number",
+      buildingNumber: "Building Number",
+      street: "Street",
+      district: "District",
+      city: "City",
+      postalCode: "Postal Code",
+      shortAddress: "Short Address",
+      username: "Username",
+      email: "Email address",
+      newPassword: "Enter new password",
+      confirmPassword: "Confirm password"
+    },
+
+    companyNotFound: "Company not found",
+
+    toasts: {
+      loadUsersFailed: "Failed to load company users",
+      usernameRequired: "Username is required",
+      emailRequired: "Email is required",
+      userUpdateFailed: "Failed to update company user",
+      userUpdated: "User updated successfully",
+      userUpdateServerError: "Server error while updating company user",
+      roleChangeFailed: "Failed to change user role",
+      roleUpdated: "User role updated successfully",
+      roleServerError: "Server error while changing user role",
+      statusChangeFailed: "Failed to change user status",
+      userEnabled: "User enabled successfully",
+      userDisabled: "User disabled successfully",
+      statusServerError: "Server error while changing user status",
+      enterFailed: "Failed to enter company session",
+      enteredAs: "Entered as {username}",
+      enterServerError: "Server error while entering company session",
+      passwordMin: "Password must be at least 6 characters",
+      passwordsMismatch: "Passwords do not match",
+      passwordUpdateFailed: "Failed to update password",
+      passwordUpdated: "Password updated successfully",
+      passwordServerError: "Server error while updating password",
+      companyUpdateFailed: "Failed to update company information",
+      companyUpdated: "Company information updated successfully",
+      companyServerError: "Server error while updating company information",
+      renewFailed: "Renew failed",
+      renewalInvoiceCreated: "Renewal invoice created",
+      serverError: "Server error",
+      companyFetchFailed: "Failed to fetch company"
+    }
+  }
+} as const
 
 /* =========================================================
    Helpers
 ========================================================= */
+
+function detectLocale(): Locale {
+  if (typeof document === "undefined") return "en"
+  const lang = (document.documentElement.lang || "").toLowerCase()
+  return lang.startsWith("ar") ? "ar" : "en"
+}
+
+function detectDir(): Dir {
+  if (typeof document === "undefined") return "ltr"
+  return document.documentElement.dir === "rtl" ? "rtl" : "ltr"
+}
 
 function displayValue(value?: string | null) {
   if (value === null || value === undefined) return "-"
@@ -198,6 +519,28 @@ function getCookie(name: string) {
   }
 
   return null
+}
+
+function getApiBase() {
+  const envBase = process.env.NEXT_PUBLIC_BACKEND_ORIGIN?.trim()
+  if (envBase) return envBase.replace(/\/+$/, "")
+
+  if (typeof window === "undefined") return ""
+
+  const { hostname } = window.location
+  const isLocal =
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "0.0.0.0"
+
+  if (isLocal) return "http://localhost:8000"
+
+  return ""
+}
+
+function apiUrl(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+  return `${getApiBase()}${normalizedPath}`
 }
 
 function buildCompanyInfoForm(companyData: CompanyDetails): CompanyInfoForm {
@@ -223,26 +566,46 @@ function buildEditCompanyUserForm(user: CompanyUser): EditCompanyUserForm {
   }
 }
 
-function OverviewField({
-  label,
-  value,
-  icon
-}: {
-  label: string
-  value: string
-  icon?: React.ReactNode
-}) {
-  return (
-    <div className="rounded-xl border bg-muted/20 px-4 py-3">
-      <div className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        {icon}
-        <span>{label}</span>
-      </div>
-      <div className="break-words text-sm font-semibold text-foreground">
-        {value}
-      </div>
-    </div>
-  )
+function formatNumber(value?: number | string | null) {
+  if (value === null || value === undefined || value === "") return "-"
+  const num = typeof value === "number" ? value : Number(value)
+  if (Number.isNaN(num)) return String(value)
+
+  return new Intl.NumberFormat("en-US", {
+    numberingSystem: "latn",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  }).format(num)
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "--"
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    numberingSystem: "latn"
+  }).format(date)
+}
+
+function daysRemaining(date?: string) {
+  if (!date) return null
+
+  const end = new Date(date)
+  const today = new Date()
+
+  if (Number.isNaN(end.getTime())) return null
+
+  const diff = end.getTime() - today.getTime()
+  return Math.ceil(diff / (1000 * 60 * 60 * 24))
+}
+
+function replaceVars(template: string, vars: Record<string, string | number>) {
+  return template.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""))
 }
 
 function normalizeCompanyUserRole(role?: string | null): CompanyUserRole {
@@ -256,10 +619,11 @@ function normalizeCompanyUserRole(role?: string | null): CompanyUserRole {
   return "EMPLOYEE"
 }
 
-function getCompanyUserRoleLabel(role?: string | null) {
+function getCompanyUserRoleLabel(role: string | null | undefined, locale: Locale) {
   const normalized = normalizeCompanyUserRole(role)
   const found = COMPANY_USER_ROLE_OPTIONS.find((item) => item.value === normalized)
-  return found?.label || normalized
+  if (!found) return normalized
+  return locale === "ar" ? found.labelAr : found.labelEn
 }
 
 function getCompanyUserRoleBadgeClass(role?: string | null) {
@@ -293,46 +657,46 @@ function getInitials(value?: string | null) {
   )
 }
 
-function getCompanyUserStatusBadge(isActive: boolean) {
+function OverviewField({
+  label,
+  value,
+  icon,
+  alignClass = "text-start"
+}: {
+  label: string
+  value: string
+  icon?: ReactNode
+  alignClass?: string
+}) {
+  return (
+    <div className={`rounded-xl border bg-muted/20 px-4 py-3 ${alignClass}`}>
+      <div className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className="break-words text-sm font-semibold text-foreground">
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function getCompanyUserStatusBadge(isActive: boolean, t: typeof messages.en) {
   if (isActive) {
     return (
       <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
         <CheckCircle2 className="h-3.5 w-3.5" />
-        Active
+        {t.active}
       </Badge>
     )
   }
 
   return (
     <Badge className="gap-1 border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300">
-        <XCircle className="h-3.5 w-3.5" />
-        Disabled
-      </Badge>
+      <XCircle className="h-3.5 w-3.5" />
+      {t.disabled}
+    </Badge>
   )
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return "--"
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit"
-  }).format(date)
-}
-
-function daysRemaining(date?: string) {
-  if (!date) return null
-
-  const end = new Date(date)
-  const today = new Date()
-
-  const diff = end.getTime() - today.getTime()
-
-  return Math.ceil(diff / (1000 * 60 * 60 * 24))
 }
 
 /* =========================================================
@@ -342,15 +706,26 @@ function daysRemaining(date?: string) {
 export default function CompanyDetailsPage() {
   const params = useParams()
   const router = useRouter()
-  const companyId = params.id
+
+  const companyId = useMemo(() => {
+    const rawId = params?.id
+    return Array.isArray(rawId) ? rawId[0] : String(rawId || "")
+  }, [params])
+
+  const [locale, setLocale] = useState<Locale>("en")
+  const [dir, setDir] = useState<Dir>("ltr")
+
+  const t = messages[locale]
+  const textAlignClass = dir === "rtl" ? "text-right" : "text-left"
 
   const [company, setCompany] = useState<CompanyDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [users, setUsers] = useState<CompanyUser[]>([])
   const [subscription, setSubscription] = useState<CompanySubscription | null>(null)
-  const remainingDays = daysRemaining(subscription?.ends_at)
   const [invoices, setInvoices] = useState<CompanyInvoice[]>([])
   const [activityLogs, setActivityLogs] = useState<any[]>([])
+
+  const remainingDays = daysRemaining(subscription?.ends_at)
 
   const [isEditingCompanyInfo, setIsEditingCompanyInfo] = useState(false)
   const [savingCompanyInfo, setSavingCompanyInfo] = useState(false)
@@ -368,14 +743,10 @@ export default function CompanyDetailsPage() {
     short_address: ""
   })
 
-  /* =========================================================
-     Company Users State
-  ========================================================= */
-
   const [usersLoading, setUsersLoading] = useState(false)
   const [selectedUser, setSelectedUser] = useState<CompanyUser | null>(null)
   const [enteringUserId, setEnteringUserId] = useState<number | null>(null)
-  
+
   const [editUserDialogOpen, setEditUserDialogOpen] = useState(false)
   const [editUserForm, setEditUserForm] = useState<EditCompanyUserForm>({
     username: "",
@@ -396,32 +767,57 @@ export default function CompanyDetailsPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [resettingPassword, setResettingPassword] = useState(false)
 
+  useEffect(() => {
+    const syncDocumentLanguage = () => {
+      setLocale(detectLocale())
+      setDir(detectDir())
+    }
+
+    syncDocumentLanguage()
+
+    const observer = new MutationObserver(() => {
+      syncDocumentLanguage()
+    })
+
+    if (typeof document !== "undefined") {
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["lang", "dir"]
+      })
+    }
+
+    return () => observer.disconnect()
+  }, [])
+
   const usersCountLabel = useMemo(() => {
-    return `${users.length} users`
-  }, [users])
+    const count = formatNumber(users.length)
+    return locale === "ar" ? `${count} مستخدم` : `${count} users`
+  }, [users.length, locale])
 
   /* =========================================================
      Company Users Helpers
   ========================================================= */
 
   async function loadCompanyUsers() {
+    if (!companyId) return
+
     setUsersLoading(true)
 
     try {
       const usersRes = await fetch(
-        `http://localhost:8000/api/system/companies/${companyId}/users/`,
+        apiUrl(`/api/system/companies/${companyId}/users/`),
         { credentials: "include" }
       )
 
       if (!usersRes.ok) {
-        throw new Error("Failed to fetch company users")
+        throw new Error(t.toasts.loadUsersFailed)
       }
 
       const usersData = await usersRes.json()
-      setUsers(usersData.results || [])
+      setUsers(Array.isArray(usersData.results) ? usersData.results : [])
     } catch (error) {
       console.error("Company users fetch error:", error)
-      toast.error("Failed to load company users")
+      toast.error(t.toasts.loadUsersFailed)
     } finally {
       setUsersLoading(false)
     }
@@ -463,18 +859,18 @@ export default function CompanyDetailsPage() {
   }
 
   async function handleSaveUserEdit() {
-    if (!selectedUser) return
+    if (!selectedUser || !companyId) return
 
     const username = editUserForm.username.trim()
     const email = editUserForm.email.trim()
 
     if (!username) {
-      toast.error("Username is required")
+      toast.error(t.toasts.usernameRequired)
       return
     }
 
     if (!email) {
-      toast.error("Email is required")
+      toast.error(t.toasts.emailRequired)
       return
     }
 
@@ -484,7 +880,7 @@ export default function CompanyDetailsPage() {
       const csrftoken = getCookie("csrftoken")
 
       const res = await fetch(
-        `http://localhost:8000/api/system/companies/${companyId}/users/${selectedUser.id}/update/`,
+        apiUrl(`/api/system/companies/${companyId}/users/${selectedUser.id}/update/`),
         {
           method: "POST",
           credentials: "include",
@@ -502,21 +898,17 @@ export default function CompanyDetailsPage() {
       const data: CompanyUserApiResponse = await res.json()
 
       if (!res.ok) {
-        const rawFirstError = data?.errors
-          ? Object.values(data.errors)[0]
-          : null
-
-        const firstError = Array.isArray(rawFirstError)
-          ? rawFirstError[0]
-          : rawFirstError
+        const rawFirstError = data?.errors ? Object.values(data.errors)[0] : null
+        const firstError = Array.isArray(rawFirstError) ? rawFirstError[0] : rawFirstError
 
         toast.error(
           typeof firstError === "string"
             ? firstError
-            : data.error || "Failed to update company user"
+            : data.error || t.toasts.userUpdateFailed
         )
         return
-      }      
+      }
+
       setUsers((prev) =>
         prev.map((item) =>
           item.id === selectedUser.id
@@ -539,17 +931,17 @@ export default function CompanyDetailsPage() {
 
       setEditUserDialogOpen(false)
       setSelectedUser(null)
-      toast.success(data.message || "User updated successfully")
+      toast.success(data.message || t.toasts.userUpdated)
     } catch (error) {
       console.error("Update company user error:", error)
-      toast.error("Server error while updating company user")
+      toast.error(t.toasts.userUpdateServerError)
     } finally {
       setSavingUserEdit(false)
     }
   }
 
   async function handleChangeUserRole() {
-    if (!selectedUser) return
+    if (!selectedUser || !companyId) return
 
     setSavingRoleChange(true)
 
@@ -557,7 +949,7 @@ export default function CompanyDetailsPage() {
       const csrftoken = getCookie("csrftoken")
 
       const res = await fetch(
-        `http://localhost:8000/api/system/companies/${companyId}/users/${selectedUser.id}/change-role/`,
+        apiUrl(`/api/system/companies/${companyId}/users/${selectedUser.id}/change-role/`),
         {
           method: "POST",
           credentials: "include",
@@ -574,7 +966,7 @@ export default function CompanyDetailsPage() {
       const data: CompanyUserApiResponse = await res.json()
 
       if (!res.ok) {
-        toast.error(data.error || "Failed to change user role")
+        toast.error(data.error || t.toasts.roleChangeFailed)
         return
       }
 
@@ -591,17 +983,17 @@ export default function CompanyDetailsPage() {
 
       setRoleDialogOpen(false)
       setSelectedUser(null)
-      toast.success(data.message || "User role updated successfully")
+      toast.success(data.message || t.toasts.roleUpdated)
     } catch (error) {
       console.error("Change company user role error:", error)
-      toast.error("Server error while changing user role")
+      toast.error(t.toasts.roleServerError)
     } finally {
       setSavingRoleChange(false)
     }
   }
 
   async function handleToggleUserStatus() {
-    if (!selectedUser) return
+    if (!selectedUser || !companyId) return
 
     setTogglingUserStatus(true)
 
@@ -609,7 +1001,7 @@ export default function CompanyDetailsPage() {
       const csrftoken = getCookie("csrftoken")
 
       const res = await fetch(
-        `http://localhost:8000/api/system/companies/${companyId}/users/${selectedUser.id}/toggle-status/`,
+        apiUrl(`/api/system/companies/${companyId}/users/${selectedUser.id}/toggle-status/`),
         {
           method: "POST",
           credentials: "include",
@@ -623,7 +1015,7 @@ export default function CompanyDetailsPage() {
       const data: CompanyUserApiResponse = await res.json()
 
       if (!res.ok) {
-        toast.error(data.error || "Failed to change user status")
+        toast.error(data.error || t.toasts.statusChangeFailed)
         return
       }
 
@@ -647,18 +1039,18 @@ export default function CompanyDetailsPage() {
       setSelectedUser(null)
       toast.success(
         data.message ||
-          (nextIsActive ? "User enabled successfully" : "User disabled successfully")
+          (nextIsActive ? t.toasts.userEnabled : t.toasts.userDisabled)
       )
     } catch (error) {
       console.error("Toggle company user status error:", error)
-      toast.error("Server error while changing user status")
+      toast.error(t.toasts.statusServerError)
     } finally {
       setTogglingUserStatus(false)
     }
   }
 
-    async function handleEnterAsUser(user: CompanyUser) {
-    if (!user?.id) return
+  async function handleEnterAsUser(user: CompanyUser) {
+    if (!user?.id || !companyId) return
 
     setEnteringUserId(user.id)
 
@@ -666,7 +1058,7 @@ export default function CompanyDetailsPage() {
       const csrftoken = getCookie("csrftoken")
 
       const res = await fetch(
-        `http://localhost:8000/api/system/companies/${companyId}/users/${user.id}/enter/`,
+        apiUrl(`/api/system/companies/${companyId}/users/${user.id}/enter/`),
         {
           method: "POST",
           credentials: "include",
@@ -680,33 +1072,34 @@ export default function CompanyDetailsPage() {
       const data: CompanyUserApiResponse = await res.json()
 
       if (!res.ok) {
-        toast.error(data.error || "Failed to enter company session")
+        toast.error(data.error || t.toasts.enterFailed)
         return
       }
 
       toast.success(
-        data.message || `Entered as ${user.username}`
+        data.message ||
+          replaceVars(t.toasts.enteredAs, { username: user.username })
       )
 
       window.location.href = data.redirect_to || "/company"
     } catch (error) {
       console.error("Enter as company user error:", error)
-      toast.error("Server error while entering company session")
+      toast.error(t.toasts.enterServerError)
     } finally {
       setEnteringUserId(null)
     }
   }
 
   async function handleResetPassword() {
-    if (!resetUserId || !selectedUser) return
+    if (!resetUserId || !selectedUser || !companyId) return
 
     if (!newPassword || newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters")
+      toast.error(t.toasts.passwordMin)
       return
     }
 
     if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match")
+      toast.error(t.toasts.passwordsMismatch)
       return
     }
 
@@ -716,7 +1109,7 @@ export default function CompanyDetailsPage() {
       const csrftoken = getCookie("csrftoken")
 
       const res = await fetch(
-        `http://localhost:8000/api/system/companies/${companyId}/users/${resetUserId}/reset-password/`,
+        apiUrl(`/api/system/companies/${companyId}/users/${resetUserId}/reset-password/`),
         {
           method: "POST",
           credentials: "include",
@@ -733,11 +1126,11 @@ export default function CompanyDetailsPage() {
       const data: CompanyUserApiResponse = await res.json()
 
       if (!res.ok) {
-        toast.error(data.error || "Failed to update password")
+        toast.error(data.error || t.toasts.passwordUpdateFailed)
         return
       }
 
-      toast.success(data.message || "Password updated successfully")
+      toast.success(data.message || t.toasts.passwordUpdated)
 
       setResetPasswordDialogOpen(false)
       setResetUserId(null)
@@ -746,7 +1139,7 @@ export default function CompanyDetailsPage() {
       setSelectedUser(null)
     } catch (error) {
       console.error("Reset company user password error:", error)
-      toast.error("Server error while updating password")
+      toast.error(t.toasts.passwordServerError)
     } finally {
       setResettingPassword(false)
     }
@@ -757,18 +1150,26 @@ export default function CompanyDetailsPage() {
   ========================================================= */
 
   useEffect(() => {
+    if (!companyId) return
+
+    let isMounted = true
+
     async function loadCompany() {
+      setLoading(true)
+
       try {
         const res = await fetch(
-          `http://localhost:8000/api/system/companies/${companyId}/`,
+          apiUrl(`/api/system/companies/${companyId}/`),
           { credentials: "include" }
         )
 
         if (!res.ok) {
-          throw new Error("Failed to fetch company")
+          throw new Error(t.toasts.companyFetchFailed)
         }
 
         const data = await res.json()
+
+        if (!isMounted) return
 
         const companyData: CompanyDetails = {
           id: data.company.id,
@@ -792,45 +1193,63 @@ export default function CompanyDetailsPage() {
       } finally {
         await loadCompanyUsers()
 
-        const subRes = await fetch(
-          `http://localhost:8000/api/system/companies/${companyId}/subscription/`,
-          { credentials: "include" }
-        )
+        try {
+          const subRes = await fetch(
+            apiUrl(`/api/system/companies/${companyId}/subscription/`),
+            { credentials: "include" }
+          )
 
-        if (subRes.ok) {
-          const subData = await subRes.json()
-          setSubscription(subData.subscription || null)
+          if (subRes.ok && isMounted) {
+            const subData = await subRes.json()
+            setSubscription(subData.subscription || null)
+          }
+        } catch (error) {
+          console.error("Subscription fetch error:", error)
         }
 
-        const invoicesRes = await fetch(
-          `http://localhost:8000/api/system/companies/${companyId}/invoices/`,
-          { credentials: "include" }
-        )
+        try {
+          const invoicesRes = await fetch(
+            apiUrl(`/api/system/companies/${companyId}/invoices/`),
+            { credentials: "include" }
+          )
 
-        if (invoicesRes.ok) {
-          const invoicesData = await invoicesRes.json()
-          setInvoices(invoicesData.data?.results || [])
+          if (invoicesRes.ok && isMounted) {
+            const invoicesData = await invoicesRes.json()
+            setInvoices(Array.isArray(invoicesData.data?.results) ? invoicesData.data.results : [])
+          }
+        } catch (error) {
+          console.error("Invoices fetch error:", error)
         }
 
-        const activityRes = await fetch(
-          `http://localhost:8000/api/system/companies/${companyId}/activity/`,
-          { credentials: "include" }
-        )
+        try {
+          const activityRes = await fetch(
+            apiUrl(`/api/system/companies/${companyId}/activity/`),
+            { credentials: "include" }
+          )
 
-        if (activityRes.ok) {
-          const activityData = await activityRes.json()
-          setActivityLogs(activityData.data?.results || [])
+          if (activityRes.ok && isMounted) {
+            const activityData = await activityRes.json()
+            setActivityLogs(Array.isArray(activityData.data?.results) ? activityData.data.results : [])
+          }
+        } catch (error) {
+          console.error("Activity fetch error:", error)
         }
 
-        setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+        }
       }
     }
 
     loadCompany()
-  }, [companyId])
+
+    return () => {
+      isMounted = false
+    }
+  }, [companyId, t.toasts.companyFetchFailed])
 
   /* =========================================================
-   Company Info Editing
+     Company Info Editing
   ========================================================= */
 
   function handleCompanyInfoInputChange(
@@ -860,7 +1279,7 @@ export default function CompanyDetailsPage() {
   }
 
   async function handleSaveCompanyInfo() {
-    if (!company) return
+    if (!company || !companyId) return
 
     setSavingCompanyInfo(true)
 
@@ -884,7 +1303,7 @@ export default function CompanyDetailsPage() {
       }
 
       const res = await fetch(
-        `http://localhost:8000/api/system/companies/${companyId}/update/`,
+        apiUrl(`/api/system/companies/${companyId}/update/`),
         {
           method: "POST",
           credentials: "include",
@@ -899,7 +1318,7 @@ export default function CompanyDetailsPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        toast.error(data.error || "Failed to update company information")
+        toast.error(data.error || t.toasts.companyUpdateFailed)
         return
       }
 
@@ -939,17 +1358,17 @@ export default function CompanyDetailsPage() {
       })
 
       setIsEditingCompanyInfo(false)
-      toast.success(data.message || "Company information updated successfully")
+      toast.success(data.message || t.toasts.companyUpdated)
     } catch (error) {
       console.error("Update company info error:", error)
-      toast.error("Server error while updating company information")
+      toast.error(t.toasts.companyServerError)
     } finally {
       setSavingCompanyInfo(false)
     }
   }
 
   /* =========================================================
-   Renew Subscription
+     Renew Subscription
   ========================================================= */
 
   async function handleRenew() {
@@ -957,7 +1376,7 @@ export default function CompanyDetailsPage() {
 
     try {
       const res = await fetch(
-        `http://localhost:8000/api/system/subscriptions/${subscription.id}/renew/`,
+        apiUrl(`/api/system/subscriptions/${subscription.id}/renew/`),
         {
           method: "POST",
           credentials: "include"
@@ -967,24 +1386,25 @@ export default function CompanyDetailsPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        toast.error(data.error || "Renew failed")
+        toast.error(data.error || t.toasts.renewFailed)
         return
       }
 
-      toast.success("Renewal invoice created")
+      toast.success(t.toasts.renewalInvoiceCreated)
       router.push(`/system/invoices/${data.invoice_id}`)
-    } catch {
-      toast.error("Server error")
+    } catch (error) {
+      console.error("Renew subscription error:", error)
+      toast.error(t.toasts.serverError)
     }
   }
 
   /* =========================================================
-     Loading
+     Loading / Empty
   ========================================================= */
 
   if (loading) {
     return (
-      <div className="space-y-4">
+      <div dir={dir} className="space-y-4">
         <Skeleton className="h-8 w-60" />
         <Skeleton className="h-56 w-full" />
         <Skeleton className="h-40 w-full" />
@@ -995,8 +1415,8 @@ export default function CompanyDetailsPage() {
 
   if (!company) {
     return (
-      <div className="text-muted-foreground">
-        Company not found
+      <div dir={dir} className={`text-muted-foreground ${textAlignClass}`}>
+        {t.companyNotFound}
       </div>
     )
   }
@@ -1007,10 +1427,10 @@ export default function CompanyDetailsPage() {
 
   return (
     <>
-      <div className="space-y-6">
-        <div className="rounded-2xl border bg-background p-6 shadow-sm">
+      <div dir={dir} className="space-y-6">
+        <div className="rounded-2xl border bg-background p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-2">
+            <div className={`space-y-2 ${textAlignClass}`}>
               <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
                 <Building2 className="h-6 w-6" />
               </div>
@@ -1021,7 +1441,7 @@ export default function CompanyDetailsPage() {
                 </h1>
 
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Company administration and platform usage
+                  {t.pageSubtitle}
                 </p>
               </div>
             </div>
@@ -1031,45 +1451,33 @@ export default function CompanyDetailsPage() {
                 variant={company.is_active ? "secondary" : "destructive"}
                 className="px-3 py-1 text-sm"
               >
-                {company.is_active ? "ACTIVE" : "DISABLED"}
+                {company.is_active ? t.active : t.disabled}
               </Badge>
             </div>
           </div>
         </div>
 
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-5 md:max-w-2xl">
-            <TabsTrigger value="overview">
-              Overview
-            </TabsTrigger>
-
-            <TabsTrigger value="users">
-              Users
-            </TabsTrigger>
-
-            <TabsTrigger value="subscription">
-              Subscription
-            </TabsTrigger>
-
-            <TabsTrigger value="invoices">
-              Invoices
-            </TabsTrigger>
-
-            <TabsTrigger value="activity">
-              Activity
-            </TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto">
+            <TabsList className="inline-flex min-w-full gap-1 sm:grid sm:w-full sm:grid-cols-5 md:max-w-2xl">
+              <TabsTrigger value="overview">{t.tabs.overview}</TabsTrigger>
+              <TabsTrigger value="users">{t.tabs.users}</TabsTrigger>
+              <TabsTrigger value="subscription">{t.tabs.subscription}</TabsTrigger>
+              <TabsTrigger value="invoices">{t.tabs.invoices}</TabsTrigger>
+              <TabsTrigger value="activity">{t.tabs.activity}</TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="overview" className="mt-6 space-y-6">
             <Card className="border shadow-sm">
               <CardHeader className="flex flex-col gap-4 border-b bg-muted/20 pb-5 sm:flex-row sm:items-center sm:justify-between">
-                <div>
+                <div className={textAlignClass}>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Building2 className="h-5 w-5" />
-                    Company Information
+                    {t.companyInfoTitle}
                   </CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Main company data, tax details, and national address.
+                    {t.companyInfoDesc}
                   </p>
                 </div>
 
@@ -1079,7 +1487,7 @@ export default function CompanyDetailsPage() {
                     size="sm"
                     onClick={handleStartEditCompanyInfo}
                   >
-                    Edit
+                    {t.edit}
                   </Button>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -1089,7 +1497,7 @@ export default function CompanyDetailsPage() {
                       onClick={handleCancelEditCompanyInfo}
                       disabled={savingCompanyInfo}
                     >
-                      Cancel
+                      {t.cancel}
                     </Button>
 
                     <Button
@@ -1097,7 +1505,7 @@ export default function CompanyDetailsPage() {
                       onClick={handleSaveCompanyInfo}
                       disabled={savingCompanyInfo}
                     >
-                      {savingCompanyInfo ? "Saving..." : "Save Changes"}
+                      {savingCompanyInfo ? t.saving : t.saveChanges}
                     </Button>
                   </div>
                 )}
@@ -1107,95 +1515,107 @@ export default function CompanyDetailsPage() {
                 {!isEditingCompanyInfo ? (
                   <>
                     <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                      <div className={`flex items-center gap-2 text-sm font-semibold text-muted-foreground ${textAlignClass}`}>
                         <FileText className="h-4 w-4" />
-                        Basic Information
+                        {t.basicInfo}
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <OverviewField
-                          label="Company Name"
+                          label={t.fields.companyName}
                           value={displayValue(company.name)}
                           icon={<Building2 className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="Owner"
+                          label={t.fields.owner}
                           value={displayValue(company.owner?.email)}
                           icon={<Users className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="Company Email"
+                          label={t.fields.companyEmail}
                           value={displayValue(company.email)}
                           icon={<Mail className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="Phone"
+                          label={t.fields.phone}
                           value={displayValue(company.phone)}
                           icon={<Phone className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="Commercial No."
+                          label={t.fields.commercialNo}
                           value={displayValue(company.commercial_number)}
                           icon={<FileText className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="VAT No."
+                          label={t.fields.vatNo}
                           value={displayValue(company.vat_number)}
                           icon={<Landmark className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                       </div>
                     </div>
 
                     <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                      <div className={`flex items-center gap-2 text-sm font-semibold text-muted-foreground ${textAlignClass}`}>
                         <MapPin className="h-4 w-4" />
-                        National Address
+                        {t.nationalAddress}
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <OverviewField
-                          label="Building No."
+                          label={t.fields.buildingNo}
                           value={displayValue(company.national_address?.building_number)}
                           icon={<MapPin className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="Street"
+                          label={t.fields.street}
                           value={displayValue(company.national_address?.street)}
                           icon={<MapPin className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="District"
+                          label={t.fields.district}
                           value={displayValue(company.national_address?.district)}
                           icon={<MapPin className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="City"
+                          label={t.fields.city}
                           value={displayValue(company.national_address?.city)}
                           icon={<MapPin className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="Postal Code"
+                          label={t.fields.postalCode}
                           value={displayValue(company.national_address?.postal_code)}
                           icon={<MapPin className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                         <OverviewField
-                          label="Short Address"
+                          label={t.fields.shortAddress}
                           value={displayValue(company.national_address?.short_address)}
                           icon={<MapPin className="h-3.5 w-3.5" />}
+                          alignClass={textAlignClass}
                         />
                       </div>
                     </div>
 
-                    <div className="rounded-xl border bg-muted/20 px-4 py-3">
+                    <div className={`rounded-xl border bg-muted/20 px-4 py-3 ${textAlignClass}`}>
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-sm font-medium text-muted-foreground">
-                          Status
+                          {t.status}
                         </span>
 
                         <Badge
                           variant={company.is_active ? "secondary" : "destructive"}
                         >
-                          {company.is_active ? "ACTIVE" : "DISABLED"}
+                          {company.is_active ? t.active : t.disabled}
                         </Badge>
                       </div>
                     </div>
@@ -1203,28 +1623,28 @@ export default function CompanyDetailsPage() {
                 ) : (
                   <>
                     <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                      <div className={`flex items-center gap-2 text-sm font-semibold text-muted-foreground ${textAlignClass}`}>
                         <FileText className="h-4 w-4" />
-                        Basic Information
+                        {t.basicInfo}
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Company Name
+                            {t.fields.companyName}
                           </span>
                           <Input
                             value={companyInfoForm.name}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("name", e.target.value)
                             }
-                            placeholder="Company Name"
+                            placeholder={t.placeholders.companyName}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Owner
+                            {t.fields.owner}
                           </span>
                           <Input
                             value={displayValue(company.owner?.email)}
@@ -1232,9 +1652,9 @@ export default function CompanyDetailsPage() {
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Company Email
+                            {t.fields.companyEmail}
                           </span>
                           <Input
                             type="email"
@@ -1242,148 +1662,148 @@ export default function CompanyDetailsPage() {
                             onChange={(e) =>
                               handleCompanyInfoInputChange("email", e.target.value)
                             }
-                            placeholder="Company Email"
+                            placeholder={t.placeholders.companyEmail}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Phone
+                            {t.fields.phone}
                           </span>
                           <Input
                             value={companyInfoForm.phone}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("phone", e.target.value)
                             }
-                            placeholder="Phone"
+                            placeholder={t.placeholders.phone}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Commercial No.
+                            {t.fields.commercialNo}
                           </span>
                           <Input
                             value={companyInfoForm.commercial_number}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("commercial_number", e.target.value)
                             }
-                            placeholder="Commercial Number"
+                            placeholder={t.placeholders.commercialNumber}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            VAT No.
+                            {t.fields.vatNo}
                           </span>
                           <Input
                             value={companyInfoForm.vat_number}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("vat_number", e.target.value)
                             }
-                            placeholder="VAT Number"
+                            placeholder={t.placeholders.vatNumber}
                           />
                         </div>
                       </div>
                     </div>
 
                     <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                      <div className={`flex items-center gap-2 text-sm font-semibold text-muted-foreground ${textAlignClass}`}>
                         <MapPin className="h-4 w-4" />
-                        National Address
+                        {t.nationalAddress}
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Building No.
+                            {t.fields.buildingNo}
                           </span>
                           <Input
                             value={companyInfoForm.building_number}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("building_number", e.target.value)
                             }
-                            placeholder="Building Number"
+                            placeholder={t.placeholders.buildingNumber}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Street
+                            {t.fields.street}
                           </span>
                           <Input
                             value={companyInfoForm.street}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("street", e.target.value)
                             }
-                            placeholder="Street"
+                            placeholder={t.placeholders.street}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            District
+                            {t.fields.district}
                           </span>
                           <Input
                             value={companyInfoForm.district}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("district", e.target.value)
                             }
-                            placeholder="District"
+                            placeholder={t.placeholders.district}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            City
+                            {t.fields.city}
                           </span>
                           <Input
                             value={companyInfoForm.city}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("city", e.target.value)
                             }
-                            placeholder="City"
+                            placeholder={t.placeholders.city}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Postal Code
+                            {t.fields.postalCode}
                           </span>
                           <Input
                             value={companyInfoForm.postal_code}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("postal_code", e.target.value)
                             }
-                            placeholder="Postal Code"
+                            placeholder={t.placeholders.postalCode}
                           />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${textAlignClass}`}>
                           <span className="text-sm text-muted-foreground">
-                            Short Address
+                            {t.fields.shortAddress}
                           </span>
                           <Input
                             value={companyInfoForm.short_address}
                             onChange={(e) =>
                               handleCompanyInfoInputChange("short_address", e.target.value)
                             }
-                            placeholder="Short Address"
+                            placeholder={t.placeholders.shortAddress}
                           />
                         </div>
                       </div>
                     </div>
 
-                    <div className="rounded-xl border bg-muted/20 px-4 py-3">
+                    <div className={`rounded-xl border bg-muted/20 px-4 py-3 ${textAlignClass}`}>
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-sm font-medium text-muted-foreground">
-                          Status
+                          {t.status}
                         </span>
 
                         <Badge
                           variant={company.is_active ? "secondary" : "destructive"}
                         >
-                          {company.is_active ? "ACTIVE" : "DISABLED"}
+                          {company.is_active ? t.active : t.disabled}
                         </Badge>
                       </div>
                     </div>
@@ -1396,26 +1816,29 @@ export default function CompanyDetailsPage() {
               <CardHeader className="border-b bg-muted/20">
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <Crown className="h-5 w-5" />
-                  Subscription
+                  {t.subscriptionTitle}
                 </CardTitle>
               </CardHeader>
 
               <CardContent className="pt-6">
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   <OverviewField
-                    label="Plan"
+                    label={t.fields.plan}
                     value={company.subscription?.plan || "-"}
                     icon={<Crown className="h-3.5 w-3.5" />}
+                    alignClass={textAlignClass}
                   />
                   <OverviewField
-                    label="Users"
-                    value={String(company.users_count)}
+                    label={t.fields.users}
+                    value={formatNumber(company.users_count)}
                     icon={<Users className="h-3.5 w-3.5" />}
+                    alignClass={textAlignClass}
                   />
                   <OverviewField
-                    label="Status"
+                    label={t.status}
                     value={company.subscription?.status || "-"}
                     icon={<Calendar className="h-3.5 w-3.5" />}
+                    alignClass={textAlignClass}
                   />
                 </div>
               </CardContent>
@@ -1425,26 +1848,29 @@ export default function CompanyDetailsPage() {
               <CardHeader className="border-b bg-muted/20">
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <Calendar className="h-5 w-5" />
-                  Metadata
+                  {t.metadata}
                 </CardTitle>
               </CardHeader>
 
               <CardContent className="pt-6">
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   <OverviewField
-                    label="Company ID"
-                    value={String(company.id)}
+                    label={t.fields.companyId}
+                    value={formatNumber(company.id)}
                     icon={<Building2 className="h-3.5 w-3.5" />}
+                    alignClass={textAlignClass}
                   />
                   <OverviewField
-                    label="Created"
-                    value={new Date(company.created_at).toLocaleDateString("en-CA")}
+                    label={t.fields.created}
+                    value={formatDate(company.created_at)}
                     icon={<Calendar className="h-3.5 w-3.5" />}
+                    alignClass={textAlignClass}
                   />
                   <OverviewField
-                    label="Current Status"
-                    value={company.is_active ? "ACTIVE" : "DISABLED"}
+                    label={t.fields.currentStatus}
+                    value={company.is_active ? t.active : t.disabled}
                     icon={<Activity className="h-3.5 w-3.5" />}
+                    alignClass={textAlignClass}
                   />
                 </div>
               </CardContent>
@@ -1455,13 +1881,13 @@ export default function CompanyDetailsPage() {
             <Card className="mt-4 border shadow-sm">
               <CardHeader className="border-b bg-muted/20">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
+                  <div className={textAlignClass}>
                     <CardTitle className="flex items-center gap-2 text-lg">
                       <Users className="h-5 w-5" />
-                      Company Users
+                      {t.usersTitle}
                     </CardTitle>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Manage company users, permissions, and activation status.
+                      {t.usersDesc}
                     </p>
                   </div>
 
@@ -1478,11 +1904,11 @@ export default function CompanyDetailsPage() {
                     >
                       {usersLoading ? (
                         <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Refreshing...
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>{t.refreshing}</span>
                         </>
                       ) : (
-                        "Refresh"
+                        t.refresh
                       )}
                     </Button>
                   </div>
@@ -1501,13 +1927,13 @@ export default function CompanyDetailsPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="min-w-[240px]">User</TableHead>
-                          <TableHead className="min-w-[220px]">Contact</TableHead>
-                          <TableHead className="min-w-[140px]">Role</TableHead>
-                          <TableHead className="min-w-[120px]">Status</TableHead>
-                          <TableHead className="min-w-[120px]">Created</TableHead>
-                          <TableHead className="min-w-[120px]">Password</TableHead>
-                          <TableHead className="min-w-[100px]">Edit</TableHead>
+                          <TableHead className="min-w-[240px]">{t.fields.user}</TableHead>
+                          <TableHead className="min-w-[220px]">{t.fields.contact}</TableHead>
+                          <TableHead className="min-w-[140px]">{t.fields.role}</TableHead>
+                          <TableHead className="min-w-[120px]">{t.status}</TableHead>
+                          <TableHead className="min-w-[120px]">{t.fields.created}</TableHead>
+                          <TableHead className="min-w-[120px]">{t.fields.password}</TableHead>
+                          <TableHead className="min-w-[100px]">{t.edit}</TableHead>
                           <TableHead className="min-w-[70px]"></TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1516,15 +1942,14 @@ export default function CompanyDetailsPage() {
                         {users.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={8} className="text-center text-muted-foreground">
-                              No users found
+                              {t.noUsersFound}
                             </TableCell>
                           </TableRow>
                         )}
 
                         {users.map((user) => {
-                          const displayName = displayValue(user.full_name) !== "-"
-                            ? displayValue(user.full_name)
-                            : user.username
+                          const preferredName = displayValue(user.full_name)
+                          const displayName = preferredName !== "-" ? preferredName : user.username
 
                           return (
                             <TableRow key={user.id}>
@@ -1571,17 +1996,15 @@ export default function CompanyDetailsPage() {
 
                               <TableCell>
                                 <Badge className={getCompanyUserRoleBadgeClass(user.role)}>
-                                  {getCompanyUserRoleLabel(user.role)}
+                                  {getCompanyUserRoleLabel(user.role, locale)}
                                 </Badge>
                               </TableCell>
 
                               <TableCell>
-                                {getCompanyUserStatusBadge(user.is_active)}
+                                {getCompanyUserStatusBadge(user.is_active, t)}
                               </TableCell>
 
-                              <TableCell>
-                                {formatDate(user.created_at)}
-                              </TableCell>
+                              <TableCell>{formatDate(user.created_at)}</TableCell>
 
                               <TableCell>
                                 <Button
@@ -1591,11 +2014,11 @@ export default function CompanyDetailsPage() {
                                   disabled={resettingPassword && resetUserId === user.id}
                                 >
                                   {resettingPassword && resetUserId === user.id ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                   ) : (
-                                    <KeyRound className="mr-2 h-4 w-4" />
+                                    <KeyRound className="h-4 w-4" />
                                   )}
-                                  Reset
+                                  <span>{t.reset}</span>
                                 </Button>
                               </TableCell>
 
@@ -1605,8 +2028,8 @@ export default function CompanyDetailsPage() {
                                   variant="outline"
                                   onClick={() => openEditUserDialog(user)}
                                 >
-                                  <PencilLine className="mr-2 h-4 w-4" />
-                                  Edit
+                                  <PencilLine className="h-4 w-4" />
+                                  <span>{t.edit}</span>
                                 </Button>
                               </TableCell>
 
@@ -1619,17 +2042,17 @@ export default function CompanyDetailsPage() {
                                   </DropdownMenuTrigger>
 
                                   <DropdownMenuContent align="end">
-                                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                    <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
                                     <DropdownMenuSeparator />
 
                                     <DropdownMenuItem onClick={() => openEditUserDialog(user)}>
-                                      <PencilLine className="mr-2 h-4 w-4" />
-                                      Edit User
+                                      <PencilLine className="h-4 w-4" />
+                                      {t.editUser}
                                     </DropdownMenuItem>
 
                                     <DropdownMenuItem onClick={() => openRoleDialog(user)}>
-                                      <Shield className="mr-2 h-4 w-4" />
-                                      Change Role
+                                      <Shield className="h-4 w-4" />
+                                      {t.changeRole}
                                     </DropdownMenuItem>
 
                                     <DropdownMenuItem
@@ -1637,24 +2060,24 @@ export default function CompanyDetailsPage() {
                                       disabled={!user.is_active || enteringUserId === user.id}
                                     >
                                       {enteringUserId === user.id ? (
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        <Loader2 className="h-4 w-4 animate-spin" />
                                       ) : (
-                                        <LogIn className="mr-2 h-4 w-4" />
+                                        <LogIn className="h-4 w-4" />
                                       )}
-                                      Enter as User
+                                      {t.enterAsUser}
                                     </DropdownMenuItem>
 
                                     <DropdownMenuItem onClick={() => openResetPasswordDialog(user)}>
-                                      <KeyRound className="mr-2 h-4 w-4" />
-                                      Reset Password
+                                      <KeyRound className="h-4 w-4" />
+                                      {t.resetPassword}
                                     </DropdownMenuItem>
 
                                     <DropdownMenuSeparator />
 
                                     <DropdownMenuItem onClick={() => openToggleDialog(user)}>
-                                      <Power className="mr-2 h-4 w-4" />
-                                      {user.is_active ? "Disable User" : "Enable User"}
-                                    </DropdownMenuItem>                                    
+                                      <Power className="h-4 w-4" />
+                                      {user.is_active ? t.disableUser : t.enableUser}
+                                    </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </TableCell>
@@ -1670,71 +2093,65 @@ export default function CompanyDetailsPage() {
           </TabsContent>
 
           <TabsContent value="subscription">
-            <Card className="mt-4">
+            <Card className="mt-4 border shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Crown className="w-4 h-4" />
-                  Subscription Details
+                  <Crown className="h-4 w-4" />
+                  {t.subscriptionDetails}
                 </CardTitle>
               </CardHeader>
 
               <CardContent>
                 {!subscription ? (
-                  <div className="text-muted-foreground">
-                    No subscription found
+                  <div className={`text-muted-foreground ${textAlignClass}`}>
+                    {t.noSubscriptionFound}
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Plan</span>
-                      <span className="font-medium">{subscription.plan}</span>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-muted-foreground">{t.fields.plan}</span>
+                      <span className="font-medium">{subscription.plan || "-"}</span>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Status</span>
-                      <Badge variant="secondary">
-                        {subscription.status}
-                      </Badge>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-muted-foreground">{t.status}</span>
+                      <Badge variant="secondary">{subscription.status || "-"}</Badge>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Billing Cycle</span>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-muted-foreground">{t.fields.billingCycle}</span>
                       <span className="font-medium">
                         {subscription.billing_cycle || "-"}
                       </span>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Start Date</span>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-muted-foreground">{t.fields.startDate}</span>
                       <span className="font-medium">
-                        {subscription.started_at
-                          ? new Date(subscription.started_at).toLocaleDateString("en-CA")
-                          : "-"
-                        }  
-                    </span>
+                        {formatDate(subscription.started_at)}
+                      </span>
                     </div>
 
                     {remainingDays !== null && remainingDays <= 10 && (
                       <div className="text-sm font-medium text-amber-600">
-                        Subscription expires in {remainingDays} days
+                        {replaceVars(t.subscriptionExpiresInDays, {
+                          days: formatNumber(remainingDays)
+                        })}
                       </div>
                     )}
 
                     {remainingDays !== null && remainingDays <= 10 && (
-                      <div className="pt-4">
+                      <div className="pt-2">
                         <Button onClick={handleRenew}>
-                          Renew Subscription
+                          {t.renewSubscription}
                         </Button>
                       </div>
                     )}
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">End Date</span>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-muted-foreground">{t.fields.endDate}</span>
                       <span className="font-medium">
-                        {subscription.ends_at
-                          ? new Date(subscription.ends_at).toLocaleDateString("en-CA")
-                          : "-"
-                        }
+                        {formatDate(subscription.ends_at)}
                       </span>
                     </div>
                   </div>
@@ -1744,49 +2161,45 @@ export default function CompanyDetailsPage() {
           </TabsContent>
 
           <TabsContent value="invoices">
-            <Card className="mt-4">
+            <Card className="mt-4 border shadow-sm">
               <CardHeader>
-                <CardTitle>
-                  Company Invoices
-                </CardTitle>
+                <CardTitle>{t.invoicesTitle}</CardTitle>
               </CardHeader>
 
               <CardContent>
                 {invoices.length === 0 ? (
-                  <div className="text-muted-foreground">
-                    No invoices found
+                  <div className={`text-muted-foreground ${textAlignClass}`}>
+                    {t.noInvoicesFound}
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {invoices.map((inv) => (
                       <div
                         key={inv.id}
-                        className="flex items-center justify-between border-b pb-2"
+                        className="flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div>
+                        <div className={`min-w-0 ${textAlignClass}`}>
                           <Link
                             href={`/system/invoices/${inv.number}`}
-                            className="font-medium text-blue-600 hover:text-blue-700 hover:underline"
-                        >
-                           {inv.number || `Invoice #${inv.id}`}
-                         </Link>
+                            className="font-medium text-primary hover:underline"
+                          >
+                            {inv.number || `Invoice #${formatNumber(inv.id)}`}
+                          </Link>
+
                           <div className="text-sm text-muted-foreground">
-                            {inv.issue_date
-                              ? new Date(inv.issue_date).toLocaleDateString("en-US")
-                              : "-"
-                            }
+                            {formatDate(inv.issue_date)}
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
+
+                        <div className="flex items-center gap-3 self-start sm:self-auto">
                           <Badge variant="outline">
                             {inv.status}
                           </Badge>
 
                           <div className="font-medium">
-                            {inv.total_amount
-                              ? `${inv.total_amount} ${inv.currency || "SAR"}`
-                              : "-"
-                            }
+                            {inv.total_amount !== null && inv.total_amount !== undefined
+                              ? `${formatNumber(inv.total_amount)} ${inv.currency || "SAR"}`
+                              : "-"}
                           </div>
                         </div>
                       </div>
@@ -1798,41 +2211,38 @@ export default function CompanyDetailsPage() {
           </TabsContent>
 
           <TabsContent value="activity">
-            <Card className="mt-4">
+            <Card className="mt-4 border shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-4 h-4" />
-                  Activity Logs
+                  <Activity className="h-4 w-4" />
+                  {t.activityTitle}
                 </CardTitle>
               </CardHeader>
 
               <CardContent>
                 {activityLogs.length === 0 ? (
-                  <div className="text-muted-foreground">
-                    No activity yet
+                  <div className={`text-muted-foreground ${textAlignClass}`}>
+                    {t.noActivityYet}
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {activityLogs.map((log, i) => (
                       <div
-                        key={i}
-                        className="flex items-center justify-between border-b pb-2"
+                        key={log.id || `${log.created_at || "log"}-${i}`}
+                        className="flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div>
+                        <div className={`min-w-0 ${textAlignClass}`}>
                           <div className="font-medium">
-                            {log.title}
+                            {displayValue(log.title)}
                           </div>
 
                           <div className="text-sm text-muted-foreground">
-                            {log.message}
+                            {displayValue(log.message)}
                           </div>
                         </div>
 
                         <div className="text-sm text-muted-foreground">
-                          {log.created_at
-                            ? new Date(log.created_at).toLocaleDateString("en-US")
-                            : "-"
-                          }
+                          {formatDate(log.created_at)}
                         </div>
                       </div>
                     ))}
@@ -1845,46 +2255,50 @@ export default function CompanyDetailsPage() {
       </div>
 
       <Dialog open={editUserDialogOpen} onOpenChange={setEditUserDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent dir={dir} className="sm:max-w-lg">
+          <DialogHeader className={textAlignClass}>
             <DialogTitle className="flex items-center gap-2">
               <UserCog className="h-5 w-5" />
-              Edit Company User
+              {t.dialog.editUserTitle}
             </DialogTitle>
             <DialogDescription>
-              Update basic user information without affecting other company data.
+              {t.dialog.editUserDesc}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <span className="text-sm text-muted-foreground">Username</span>
+            <div className={`space-y-2 ${textAlignClass}`}>
+              <span className="text-sm text-muted-foreground">
+                {t.dialog.username}
+              </span>
               <Input
                 value={editUserForm.username}
                 onChange={(e) =>
                   handleEditUserInputChange("username", e.target.value)
                 }
-                placeholder="Username"
+                placeholder={t.placeholders.username}
               />
             </div>
 
-            <div className="space-y-2">
-              <span className="text-sm text-muted-foreground">Email</span>
+            <div className={`space-y-2 ${textAlignClass}`}>
+              <span className="text-sm text-muted-foreground">
+                {t.dialog.email}
+              </span>
               <Input
                 type="email"
                 value={editUserForm.email}
                 onChange={(e) =>
                   handleEditUserInputChange("email", e.target.value)
                 }
-                placeholder="Email address"
+                placeholder={t.placeholders.email}
               />
             </div>
 
             {selectedUser && (
-              <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                Current role:{" "}
+              <div className={`rounded-xl border bg-muted/20 px-4 py-3 text-sm text-muted-foreground ${textAlignClass}`}>
+                {t.dialog.currentRole}:{" "}
                 <span className="font-medium text-foreground">
-                  {getCompanyUserRoleLabel(selectedUser.role)}
+                  {getCompanyUserRoleLabel(selectedUser.role, locale)}
                 </span>
               </div>
             )}
@@ -1896,7 +2310,7 @@ export default function CompanyDetailsPage() {
               onClick={() => setEditUserDialogOpen(false)}
               disabled={savingUserEdit}
             >
-              Cancel
+              {t.cancel}
             </Button>
 
             <Button
@@ -1905,11 +2319,11 @@ export default function CompanyDetailsPage() {
             >
               {savingUserEdit ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t.saving}
                 </>
               ) : (
-                "Save Changes"
+                t.saveChanges
               )}
             </Button>
           </DialogFooter>
@@ -1917,20 +2331,20 @@ export default function CompanyDetailsPage() {
       </Dialog>
 
       <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent dir={dir} className="sm:max-w-lg">
+          <DialogHeader className={textAlignClass}>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5" />
-              Change User Role
+              {t.dialog.roleTitle}
             </DialogTitle>
             <DialogDescription>
-              Update the company permission level for this user.
+              {t.dialog.roleDesc}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {selectedUser && (
-              <div className="rounded-xl border bg-muted/20 px-4 py-3">
+              <div className={`rounded-xl border bg-muted/20 px-4 py-3 ${textAlignClass}`}>
                 <div className="font-medium">
                   {displayValue(selectedUser.full_name) !== "-"
                     ? displayValue(selectedUser.full_name)
@@ -1942,8 +2356,10 @@ export default function CompanyDetailsPage() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <span className="text-sm text-muted-foreground">Role</span>
+            <div className={`space-y-2 ${textAlignClass}`}>
+              <span className="text-sm text-muted-foreground">
+                {t.fields.role}
+              </span>
               <Select
                 value={selectedRole}
                 onValueChange={(value) =>
@@ -1951,13 +2367,13 @@ export default function CompanyDetailsPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select role" />
+                  <SelectValue placeholder={t.dialog.selectRole} />
                 </SelectTrigger>
 
                 <SelectContent>
                   {COMPANY_USER_ROLE_OPTIONS.map((role) => (
                     <SelectItem key={role.value} value={role.value}>
-                      {role.label}
+                      {locale === "ar" ? role.labelAr : role.labelEn}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1971,7 +2387,7 @@ export default function CompanyDetailsPage() {
               onClick={() => setRoleDialogOpen(false)}
               disabled={savingRoleChange}
             >
-              Cancel
+              {t.cancel}
             </Button>
 
             <Button
@@ -1980,11 +2396,11 @@ export default function CompanyDetailsPage() {
             >
               {savingRoleChange ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t.saving}
                 </>
               ) : (
-                "Save Role"
+                t.dialog.saveRole
               )}
             </Button>
           </DialogFooter>
@@ -1992,21 +2408,19 @@ export default function CompanyDetailsPage() {
       </Dialog>
 
       <Dialog open={toggleDialogOpen} onOpenChange={setToggleDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent dir={dir} className="sm:max-w-lg">
+          <DialogHeader className={textAlignClass}>
             <DialogTitle className="flex items-center gap-2">
               <Power className="h-5 w-5" />
-              {selectedUser?.is_active ? "Disable User" : "Enable User"}
+              {selectedUser?.is_active ? t.dialog.toggleDisableTitle : t.dialog.toggleEnableTitle}
             </DialogTitle>
             <DialogDescription>
-              {selectedUser?.is_active
-                ? "This user will lose access until re-enabled."
-                : "This user will regain access to the company platform."}
+              {selectedUser?.is_active ? t.dialog.toggleDisableDesc : t.dialog.toggleEnableDesc}
             </DialogDescription>
           </DialogHeader>
 
           {selectedUser && (
-            <div className="rounded-xl border bg-muted/20 px-4 py-3">
+            <div className={`rounded-xl border bg-muted/20 px-4 py-3 ${textAlignClass}`}>
               <div className="font-medium">
                 {displayValue(selectedUser.full_name) !== "-"
                   ? displayValue(selectedUser.full_name)
@@ -2024,7 +2438,7 @@ export default function CompanyDetailsPage() {
               onClick={() => setToggleDialogOpen(false)}
               disabled={togglingUserStatus}
             >
-              Cancel
+              {t.cancel}
             </Button>
 
             <Button
@@ -2034,13 +2448,13 @@ export default function CompanyDetailsPage() {
             >
               {togglingUserStatus ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t.dialog.processing}
                 </>
               ) : selectedUser?.is_active ? (
-                "Disable User"
+                t.disableUser
               ) : (
-                "Enable User"
+                t.enableUser
               )}
             </Button>
           </DialogFooter>
@@ -2048,20 +2462,20 @@ export default function CompanyDetailsPage() {
       </Dialog>
 
       <Dialog open={resetPasswordDialogOpen} onOpenChange={setResetPasswordDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent dir={dir} className="sm:max-w-md">
+          <DialogHeader className={textAlignClass}>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-5 w-5" />
-              Change Password
+              {t.dialog.resetPasswordTitle}
             </DialogTitle>
             <DialogDescription>
-              Enter the new password for this company user.
+              {t.dialog.resetPasswordDesc}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {selectedUser && (
-              <div className="rounded-xl border bg-muted/20 px-4 py-3">
+              <div className={`rounded-xl border bg-muted/20 px-4 py-3 ${textAlignClass}`}>
                 <div className="font-medium">
                   {displayValue(selectedUser.full_name) !== "-"
                     ? displayValue(selectedUser.full_name)
@@ -2073,29 +2487,29 @@ export default function CompanyDetailsPage() {
               </div>
             )}
 
-            <div className="space-y-2">
+            <div className={`space-y-2 ${textAlignClass}`}>
               <label className="text-sm font-medium">
-                New Password
+                {t.dialog.newPassword}
               </label>
 
               <Input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Enter new password"
+                placeholder={t.placeholders.newPassword}
               />
             </div>
 
-            <div className="space-y-2">
+            <div className={`space-y-2 ${textAlignClass}`}>
               <label className="text-sm font-medium">
-                Confirm Password
+                {t.dialog.confirmPassword}
               </label>
 
               <Input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm password"
+                placeholder={t.placeholders.confirmPassword}
               />
             </div>
           </div>
@@ -2106,7 +2520,7 @@ export default function CompanyDetailsPage() {
               onClick={() => setResetPasswordDialogOpen(false)}
               disabled={resettingPassword}
             >
-              Cancel
+              {t.cancel}
             </Button>
 
             <Button
@@ -2115,11 +2529,11 @@ export default function CompanyDetailsPage() {
             >
               {resettingPassword ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Updating...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t.dialog.updating}
                 </>
               ) : (
-                "Update Password"
+                t.resetPassword
               )}
             </Button>
           </DialogFooter>

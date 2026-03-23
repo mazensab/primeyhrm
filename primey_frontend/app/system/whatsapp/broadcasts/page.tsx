@@ -17,6 +17,10 @@ import {
   TrendingUp,
   Users,
   XCircle,
+  CheckCircle2,
+  Clock3,
+  AlertCircle,
+  FileText,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -241,6 +245,9 @@ const translations = {
     readStatus: "تمت القراءة",
     failedStatus: "فشل",
     cancelledStatus: "ملغي",
+    draftStatus: "مسودة",
+    loading: "جاري تحميل الحملات...",
+    badgeTitle: "WhatsApp Broadcasts",
   },
   en: {
     title: "System Broadcasts",
@@ -334,6 +341,9 @@ const translations = {
     readStatus: "Read",
     failedStatus: "Failed",
     cancelledStatus: "Cancelled",
+    draftStatus: "Draft",
+    loading: "Loading broadcasts...",
+    badgeTitle: "WhatsApp Broadcasts",
   },
 } as const
 
@@ -460,17 +470,67 @@ function formatDate(value: string | null | undefined) {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    numberingSystem: "latn",
   }).format(d)
 }
 
-function statusVariant(
-  status?: string
-): "default" | "secondary" | "destructive" | "outline" {
+function formatNumber(value: number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    useGrouping: false,
+  }).format(Number(value ?? 0))
+}
+
+function getStatusTone(status?: string) {
   const v = (status || "").toUpperCase()
-  if (["COMPLETED", "SENT", "DELIVERED", "READ"].includes(v)) return "default"
-  if (["RUNNING", "SCHEDULED", "DRAFT", "QUEUED"].includes(v)) return "secondary"
-  if (["FAILED", "CANCELLED"].includes(v)) return "destructive"
-  return "outline"
+
+  if (["COMPLETED", "SENT", "DELIVERED", "READ"].includes(v)) {
+    return {
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      icon: CheckCircle2,
+    }
+  }
+
+  if (["RUNNING", "SCHEDULED", "QUEUED"].includes(v)) {
+    return {
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+      icon: Clock3,
+    }
+  }
+
+  if (["FAILED", "CANCELLED"].includes(v)) {
+    return {
+      className: "border-red-200 bg-red-50 text-red-700",
+      icon: AlertCircle,
+    }
+  }
+
+  return {
+    className: "border-slate-200 bg-slate-50 text-slate-700",
+    icon: FileText,
+  }
+}
+
+function StatusBadge({
+  status,
+  locale,
+}: {
+  status?: string
+  locale: Locale
+}) {
+  const tone = getStatusTone(status)
+  const Icon = tone.icon
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        tone.className,
+      ].join(" ")}
+    >
+      <Icon className="me-1 h-3.5 w-3.5" />
+      {statusLabel(status, locale)}
+    </span>
+  )
 }
 
 function statusLabel(status: string | undefined, locale: Locale) {
@@ -487,7 +547,7 @@ function statusLabel(status: string | undefined, locale: Locale) {
     DELIVERED: { ar: "تم التسليم", en: "Delivered" },
     READ: { ar: "تمت القراءة", en: "Read" },
   }
-  return map[v]?.[locale] || status || translations[locale].unknown
+  return map[v]?.[locale] || translations[locale].unknown
 }
 
 function recipientTypeLabel(value: string | undefined, locale: Locale) {
@@ -498,6 +558,16 @@ function recipientTypeLabel(value: string | undefined, locale: Locale) {
     COMPANY_ADMIN: { ar: "مدير شركة", en: "Company Admin" },
     USER: { ar: "مستخدم", en: "User" },
     EMPLOYEE: { ar: "موظف", en: "Employee" },
+  }
+  return map[v]?.[locale] || value || translations[locale].unknown
+}
+
+function audienceLabel(value: string | undefined, locale: Locale) {
+  const v = (value || "").toUpperCase()
+  const map: Record<string, { ar: string; en: string }> = {
+    ALL_COMPANIES: { ar: "كل الشركات", en: "All Companies" },
+    SYSTEM_USERS: { ar: "مستخدمو النظام", en: "System Users" },
+    RAW_NUMBERS: { ar: "أرقام مخصصة", en: "Raw Numbers" },
   }
   return map[v]?.[locale] || value || translations[locale].unknown
 }
@@ -726,209 +796,233 @@ export default function SystemWhatsAppBroadcastsPage() {
 
   return (
     <div dir={isArabic ? "rtl" : "ltr"} className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold md:text-3xl">{t.title}</h1>
-          <p className="text-muted-foreground">{t.description}</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" className="gap-2">
-            <Link href="/system/whatsapp">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Link>
-          </Button>
-
-          <Button
-            variant="outline"
-            onClick={() => loadBroadcasts(true)}
-            disabled={refreshing}
-            className="gap-2"
-          >
-            {refreshing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            {t.refresh}
-          </Button>
-
-          <Dialog
-            open={createOpen}
-            onOpenChange={(open) => {
-              setCreateOpen(open)
-              if (!open) resetCreateForm()
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button className="gap-2">
-                <Plus className="h-4 w-4" />
-                {t.createBroadcast}
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent className="sm:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>{t.createDialogTitle}</DialogTitle>
-                <DialogDescription>{t.createDialogDesc}</DialogDescription>
-              </DialogHeader>
-
-              <div className="grid gap-4 py-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="broadcast-title">{t.titleLabel}</Label>
-                  <Input
-                    id="broadcast-title"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={t.titlePlaceholder}
-                  />
+      <Card className="overflow-hidden border-0 shadow-sm">
+        <CardContent className="p-0">
+          <div className="relative bg-gradient-to-br from-background via-background to-muted/40 p-5 md:p-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 rounded-full border bg-background/80 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
+                  <Megaphone className="h-3.5 w-3.5 text-primary" />
+                  <span>{t.badgeTitle}</span>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="broadcast-message">{t.messageLabel}</Label>
-                  <Textarea
-                    id="broadcast-message"
-                    value={messageBody}
-                    onChange={(e) => setMessageBody(e.target.value)}
-                    placeholder={t.messagePlaceholder}
-                    className="min-h-[140px]"
-                  />
+                <div className="space-y-1">
+                  <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{t.title}</h1>
+                  <p className="max-w-2xl text-sm leading-6 text-muted-foreground md:text-base">
+                    {t.description}
+                  </p>
                 </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>{t.audienceLabel}</Label>
-                    <Select
-                      value={audienceType}
-                      onValueChange={(value: AudienceType) => setAudienceType(value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={t.audiencePlaceholder} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ALL_COMPANIES">
-                          {t.audienceAllCompanies}
-                        </SelectItem>
-                        <SelectItem value="SYSTEM_USERS">
-                          {t.audienceSystemUsers}
-                        </SelectItem>
-                        <SelectItem value="RAW_NUMBERS">
-                          {t.audienceRawNumbers}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>{t.statusLabel}</Label>
-                    <Select
-                      value={status}
-                      onValueChange={(value: BroadcastStatus) => setStatus(value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={t.statusPlaceholder} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DRAFT">{t.draftLabel}</SelectItem>
-                        <SelectItem value="SCHEDULED">{t.scheduledLabel}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {audienceType === "RAW_NUMBERS" ? (
-                  <div className="grid gap-2">
-                    <Label htmlFor="broadcast-raw-numbers">{t.rawNumbersLabel}</Label>
-                    <Textarea
-                      id="broadcast-raw-numbers"
-                      value={rawNumbers}
-                      onChange={(e) => setRawNumbers(e.target.value)}
-                      placeholder={t.rawNumbersPlaceholder}
-                      className="min-h-[120px]"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {t.rawNumbersDesc}
-                    </p>
-                  </div>
-                ) : null}
               </div>
 
-              <DialogFooter className="gap-2 sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setCreateOpen(false)
-                    resetCreateForm()
-                  }}
-                  disabled={creating}
-                >
-                  {t.cancel}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button asChild variant="outline" className="gap-2">
+                  <Link href="/system/whatsapp">
+                    <ArrowLeft className="h-4 w-4" />
+                    {t.back}
+                  </Link>
                 </Button>
 
                 <Button
-                  type="button"
-                  onClick={handleCreateBroadcast}
-                  disabled={creating}
+                  variant="outline"
+                  onClick={() => loadBroadcasts(true)}
+                  disabled={refreshing}
                   className="gap-2"
                 >
-                  {creating ? (
+                  {refreshing ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Send className="h-4 w-4" />
+                    <RefreshCw className="h-4 w-4" />
                   )}
-                  {creating ? t.creating : t.save}
+                  {t.refresh}
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
+
+                <Dialog
+                  open={createOpen}
+                  onOpenChange={(open) => {
+                    setCreateOpen(open)
+                    if (!open) resetCreateForm()
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button className="gap-2">
+                      <Plus className="h-4 w-4" />
+                      {t.createBroadcast}
+                    </Button>
+                  </DialogTrigger>
+
+                  <DialogContent className="sm:max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>{t.createDialogTitle}</DialogTitle>
+                      <DialogDescription>{t.createDialogDesc}</DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid gap-4 py-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="broadcast-title">{t.titleLabel}</Label>
+                        <Input
+                          id="broadcast-title"
+                          value={title}
+                          onChange={(e) => setTitle(e.target.value)}
+                          placeholder={t.titlePlaceholder}
+                        />
+                      </div>
+
+                      <div className="grid gap-2">
+                        <Label htmlFor="broadcast-message">{t.messageLabel}</Label>
+                        <Textarea
+                          id="broadcast-message"
+                          value={messageBody}
+                          onChange={(e) => setMessageBody(e.target.value)}
+                          placeholder={t.messagePlaceholder}
+                          className="min-h-[140px]"
+                        />
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="grid gap-2">
+                          <Label>{t.audienceLabel}</Label>
+                          <Select
+                            value={audienceType}
+                            onValueChange={(value: AudienceType) => setAudienceType(value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={t.audiencePlaceholder} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ALL_COMPANIES">
+                                {t.audienceAllCompanies}
+                              </SelectItem>
+                              <SelectItem value="SYSTEM_USERS">
+                                {t.audienceSystemUsers}
+                              </SelectItem>
+                              <SelectItem value="RAW_NUMBERS">
+                                {t.audienceRawNumbers}
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label>{t.statusLabel}</Label>
+                          <Select
+                            value={status}
+                            onValueChange={(value: BroadcastStatus) => setStatus(value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={t.statusPlaceholder} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="DRAFT">{t.draftLabel}</SelectItem>
+                              <SelectItem value="SCHEDULED">{t.scheduledLabel}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {audienceType === "RAW_NUMBERS" ? (
+                        <div className="grid gap-2">
+                          <Label htmlFor="broadcast-raw-numbers">{t.rawNumbersLabel}</Label>
+                          <Textarea
+                            id="broadcast-raw-numbers"
+                            dir="ltr"
+                            value={rawNumbers}
+                            onChange={(e) => setRawNumbers(e.target.value)}
+                            placeholder={t.rawNumbersPlaceholder}
+                            className="min-h-[120px]"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {t.rawNumbersDesc}
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setCreateOpen(false)
+                          resetCreateForm()
+                        }}
+                        disabled={creating}
+                      >
+                        {t.cancel}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        onClick={handleCreateBroadcast}
+                        disabled={creating}
+                        className="gap-2"
+                      >
+                        {creating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        {creating ? t.creating : t.save}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="border-0 shadow-lg">
+        <Card className="border-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">{t.totalCampaigns}</span>
               <Megaphone className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-3 text-2xl font-bold">{stats.total}</p>
+            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+              {formatNumber(stats.total)}
+            </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg">
+        <Card className="border-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">{t.completed}</span>
               <Send className="h-4 w-4 text-emerald-600" />
             </div>
-            <p className="mt-3 text-2xl font-bold">{stats.completed}</p>
+            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+              {formatNumber(stats.completed)}
+            </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg">
+        <Card className="border-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">{t.running}</span>
               <TrendingUp className="h-4 w-4 text-amber-600" />
             </div>
-            <p className="mt-3 text-2xl font-bold">{stats.running}</p>
+            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+              {formatNumber(stats.running)}
+            </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg">
+        <Card className="border-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">{t.totalRecipients}</span>
               <Users className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-3 text-2xl font-bold">{stats.recipients}</p>
+            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+              {formatNumber(stats.recipients)}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="border-0 shadow-lg">
+      <Card className="border-0 shadow-sm">
         <CardHeader>
           <CardTitle>{t.searchTitle}</CardTitle>
           <CardDescription>{t.searchDesc}</CardDescription>
@@ -948,13 +1042,16 @@ export default function SystemWhatsAppBroadcastsPage() {
 
       <div className="grid gap-4 xl:grid-cols-2">
         {loading ? (
-          <Card className="col-span-full border-0 shadow-lg">
+          <Card className="col-span-full border-0 shadow-sm">
             <CardContent className="flex min-h-[260px] items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">{t.loading}</p>
+              </div>
             </CardContent>
           </Card>
         ) : filtered.length === 0 ? (
-          <Card className="col-span-full border-0 shadow-lg">
+          <Card className="col-span-full border-0 shadow-sm">
             <CardContent className="p-10 text-center">
               <BellRing className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
               <p className="font-medium">{t.noCampaigns}</p>
@@ -969,21 +1066,22 @@ export default function SystemWhatsAppBroadcastsPage() {
             const canForceExecute = ["COMPLETED", "RUNNING", "FAILED", "CANCELLED"].includes(currentStatus)
 
             return (
-              <Card key={item.id} className="border-0 shadow-lg">
+              <Card
+                key={item.id}
+                className="border-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+              >
                 <CardHeader>
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <CardTitle className="text-lg">
-                        {item.title || `Broadcast #${item.id}`}
+                        {item.title || `Broadcast #${formatNumber(item.id)}`}
                       </CardTitle>
-                      <CardDescription className="mt-1">
+                      <CardDescription className="mt-1" dir="ltr">
                         {t.createdAt}: {formatDate(item.created_at)}
                       </CardDescription>
                     </div>
 
-                    <Badge variant={statusVariant(item.status)}>
-                      {statusLabel(item.status, locale)}
-                    </Badge>
+                    <StatusBadge status={item.status} locale={locale} />
                   </div>
                 </CardHeader>
 
@@ -991,20 +1089,20 @@ export default function SystemWhatsAppBroadcastsPage() {
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">{t.recipients}</p>
-                      <p className="mt-1 text-sm font-semibold">
-                        {item.recipient_count ?? 0}
+                      <p className="mt-1 text-sm font-semibold tabular-nums" dir="ltr">
+                        {formatNumber(item.recipient_count ?? 0)}
                       </p>
                     </div>
                     <div className="rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">{t.sent}</p>
-                      <p className="mt-1 text-sm font-semibold">
-                        {item.sent_count ?? 0}
+                      <p className="mt-1 text-sm font-semibold tabular-nums" dir="ltr">
+                        {formatNumber(item.sent_count ?? 0)}
                       </p>
                     </div>
                     <div className="rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">{t.failed}</p>
-                      <p className="mt-1 text-sm font-semibold text-destructive">
-                        {item.failed_count ?? 0}
+                      <p className="mt-1 text-sm font-semibold text-destructive tabular-nums" dir="ltr">
+                        {formatNumber(item.failed_count ?? 0)}
                       </p>
                     </div>
                   </div>
@@ -1102,34 +1200,41 @@ export default function SystemWhatsAppBroadcastsPage() {
             <div className="space-y-6">
               <Card className="border-0 shadow-sm">
                 <CardHeader>
-                  <CardTitle>{detailData.title || `Broadcast #${detailData.id}`}</CardTitle>
-                  <CardDescription>
-                    {t.createdAt}: {formatDate(detailData.created_at)}
-                  </CardDescription>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <CardTitle>{detailData.title || `Broadcast #${formatNumber(detailData.id)}`}</CardTitle>
+                      <CardDescription dir="ltr">
+                        {t.createdAt}: {formatDate(detailData.created_at)}
+                      </CardDescription>
+                    </div>
+
+                    <StatusBadge status={detailData.status} locale={locale} />
+                  </div>
                 </CardHeader>
+
                 <CardContent className="space-y-4">
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">{t.audienceType}</p>
                       <p className="mt-1 text-sm font-semibold">
-                        {detailData.audience_type || "—"}
+                        {audienceLabel(detailData.audience_type, locale)}
                       </p>
                     </div>
                     <div className="rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">{t.messageType}</p>
-                      <p className="mt-1 text-sm font-semibold">
+                      <p className="mt-1 text-sm font-semibold" dir="ltr">
                         {detailData.message_type || "—"}
                       </p>
                     </div>
                     <div className="rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">{t.startedAt}</p>
-                      <p className="mt-1 text-sm font-semibold">
+                      <p className="mt-1 text-sm font-semibold" dir="ltr">
                         {formatDate(detailData.started_at)}
                       </p>
                     </div>
                     <div className="rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">{t.completedAt}</p>
-                      <p className="mt-1 text-sm font-semibold">
+                      <p className="mt-1 text-sm font-semibold" dir="ltr">
                         {formatDate(detailData.completed_at)}
                       </p>
                     </div>
@@ -1140,20 +1245,20 @@ export default function SystemWhatsAppBroadcastsPage() {
                     <div className="mt-3 grid gap-3 md:grid-cols-3">
                       <div className="rounded-xl border p-3">
                         <p className="text-xs text-muted-foreground">{t.totalCount}</p>
-                        <p className="mt-1 text-sm font-semibold">
-                          {detailData.total_recipients ?? detailData.recipient_count ?? 0}
+                        <p className="mt-1 text-sm font-semibold tabular-nums" dir="ltr">
+                          {formatNumber(detailData.total_recipients ?? detailData.recipient_count ?? 0)}
                         </p>
                       </div>
                       <div className="rounded-xl border p-3">
                         <p className="text-xs text-muted-foreground">{t.sentCount}</p>
-                        <p className="mt-1 text-sm font-semibold">
-                          {detailData.sent_count ?? 0}
+                        <p className="mt-1 text-sm font-semibold tabular-nums" dir="ltr">
+                          {formatNumber(detailData.sent_count ?? 0)}
                         </p>
                       </div>
                       <div className="rounded-xl border p-3">
                         <p className="text-xs text-muted-foreground">{t.failedCount}</p>
-                        <p className="mt-1 text-sm font-semibold text-destructive">
-                          {detailData.failed_count ?? 0}
+                        <p className="mt-1 text-sm font-semibold text-destructive tabular-nums" dir="ltr">
+                          {formatNumber(detailData.failed_count ?? 0)}
                         </p>
                       </div>
                     </div>
@@ -1171,8 +1276,8 @@ export default function SystemWhatsAppBroadcastsPage() {
               <Card className="border-0 shadow-sm">
                 <CardHeader>
                   <CardTitle>{t.recipients}</CardTitle>
-                  <CardDescription>
-                    {detailRecipients.length > 0 ? `${detailRecipients.length}` : t.noRecipients}
+                  <CardDescription dir="ltr">
+                    {detailRecipients.length > 0 ? formatNumber(detailRecipients.length) : t.noRecipients}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1192,7 +1297,7 @@ export default function SystemWhatsAppBroadcastsPage() {
                               <p className="text-sm font-semibold">
                                 {recipient.recipient_name || "—"}
                               </p>
-                              <p className="text-xs text-muted-foreground">
+                              <p className="text-xs text-muted-foreground" dir="ltr">
                                 {t.recipientPhone}: {recipient.recipient_phone || "—"}
                               </p>
                               <p className="text-xs text-muted-foreground">
@@ -1206,9 +1311,7 @@ export default function SystemWhatsAppBroadcastsPage() {
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant={statusVariant(recipient.delivery_status)}>
-                                {statusLabel(recipient.delivery_status, locale)}
-                              </Badge>
+                              <StatusBadge status={recipient.delivery_status} locale={locale} />
                             </div>
                           </div>
                         </div>

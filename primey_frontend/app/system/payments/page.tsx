@@ -4,7 +4,16 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 
 import * as XLSX from "xlsx"
-import { Printer, Landmark, FileText, Loader2 } from "lucide-react"
+import {
+  Printer,
+  Landmark,
+  FileText,
+  Loader2,
+  ShieldCheck,
+  ShieldX,
+  Clock3,
+} from "lucide-react"
+import { toast } from "sonner"
 
 import {
   Card,
@@ -27,6 +36,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+type Locale = "ar" | "en"
+type Direction = "rtl" | "ltr"
 
 interface Payment {
   id: number
@@ -84,7 +96,192 @@ interface RawPendingDraft {
   } | null
 }
 
+const translations = {
+  ar: {
+    loadingPayments: "جارٍ تحميل المدفوعات...",
+    totalRevenue: "إجمالي الإيرادات",
+    paymentsToday: "مدفوعات اليوم",
+    thisMonth: "هذا الشهر",
+    successRate: "معدل النجاح",
+    pendingRequests: "طلبات التسجيل البنكي المعلقة",
+    pendingRequestsDesc:
+      "طلبات التسجيل عبر التحويل البنكي التي تنتظر المراجعة الداخلية.",
+    pendingCount: "معلق",
+    loadingPending: "جارٍ تحميل طلبات التسجيل المعلقة...",
+    noPendingRequests: "لا توجد حاليًا طلبات تسجيل بنكي معلقة.",
+    draft: "المسودة",
+    company: "الشركة",
+    plan: "الخطة",
+    duration: "المدة",
+    method: "الطريقة",
+    amount: "المبلغ",
+    status: "الحالة",
+    created: "تاريخ الإنشاء",
+    action: "الإجراء",
+    review: "مراجعة",
+    platformPayments: "مدفوعات المنصة",
+    printedAt: "تاريخ الطباعة",
+    totalPayments: "إجمالي المدفوعات",
+    paymentMethod: "طريقة الدفع",
+    dateRange: "الفترة",
+    allMethods: "كل الطرق",
+    allDates: "كل التواريخ",
+    searchPlaceholder: "ابحث باسم الشركة أو رقم الفاتورة...",
+    resetFilters: "إعادة التصفية",
+    exportExcel: "تصدير Excel",
+    print: "طباعة",
+    id: "المعرف",
+    invoice: "الفاتورة",
+    date: "التاريخ",
+    details: "التفاصيل",
+    view: "عرض",
+    noPaymentsFound: "لا توجد مدفوعات مطابقة للفلاتر المحددة.",
+    draftStatus: "مسودة",
+    confirmedStatus: "مؤكد",
+    paidStatus: "مدفوع",
+    monthly: "شهري",
+    yearly: "سنوي",
+    allMethodsOption: "كل الطرق",
+    exportSuccess: "تم تصدير الملف بنجاح",
+    exportError: "تعذر تصدير الملف",
+    printStarted: "تم فتح نافذة الطباعة",
+    printError: "تعذر تنفيذ الطباعة",
+    filtersReset: "تمت إعادة تعيين الفلاتر",
+    paymentsLoadError: "تعذر تحميل المدفوعات",
+    pendingLoadError: "تعذر تحميل الطلبات المعلقة",
+  },
+  en: {
+    loadingPayments: "Loading payments...",
+    totalRevenue: "Total Revenue",
+    paymentsToday: "Payments Today",
+    thisMonth: "This Month",
+    successRate: "Success Rate",
+    pendingRequests: "Pending Onboarding Requests",
+    pendingRequestsDesc:
+      "Bank transfer registration requests waiting for internal approval.",
+    pendingCount: "pending",
+    loadingPending: "Loading pending onboarding requests...",
+    noPendingRequests: "No pending bank transfer onboarding requests found.",
+    draft: "Draft",
+    company: "Company",
+    plan: "Plan",
+    duration: "Duration",
+    method: "Method",
+    amount: "Amount",
+    status: "Status",
+    created: "Created",
+    action: "Action",
+    review: "Review",
+    platformPayments: "Platform Payments",
+    printedAt: "Printed at",
+    totalPayments: "Total payments",
+    paymentMethod: "Payment method",
+    dateRange: "Date range",
+    allMethods: "All Methods",
+    allDates: "All Dates",
+    searchPlaceholder: "Search company or invoice...",
+    resetFilters: "Reset Filters",
+    exportExcel: "Export Excel",
+    print: "Print",
+    id: "ID",
+    invoice: "Invoice",
+    date: "Date",
+    details: "Details",
+    view: "View",
+    noPaymentsFound: "No payments found for the selected filters.",
+    draftStatus: "Draft",
+    confirmedStatus: "Confirmed",
+    paidStatus: "Paid",
+    monthly: "Monthly",
+    yearly: "Yearly",
+    allMethodsOption: "All Methods",
+    exportSuccess: "File exported successfully",
+    exportError: "Failed to export file",
+    printStarted: "Print dialog opened",
+    printError: "Failed to print",
+    filtersReset: "Filters have been reset",
+    paymentsLoadError: "Failed to load payments",
+    pendingLoadError: "Failed to load pending requests",
+  },
+} as const
+
+function getDocumentLocale(): Locale {
+  if (typeof document === "undefined") return "en"
+  const lang = (document.documentElement.lang || "en").toLowerCase()
+  return lang.startsWith("ar") ? "ar" : "en"
+}
+
+function getDocumentDirection(locale: Locale): Direction {
+  if (typeof document === "undefined") {
+    return locale === "ar" ? "rtl" : "ltr"
+  }
+
+  const dir = (document.documentElement.dir || "").toLowerCase()
+  if (dir === "rtl" || dir === "ltr") return dir as Direction
+  return locale === "ar" ? "rtl" : "ltr"
+}
+
+function normalizeStatus(status: string) {
+  return (status || "").trim().toUpperCase()
+}
+
+function getStatusClasses(status: string) {
+  const normalized = normalizeStatus(status)
+
+  if (normalized === "ACTIVE" || normalized === "PAID" || normalized === "CONFIRMED") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  }
+
+  if (
+    normalized === "EXPIRED" ||
+    normalized === "FAILED" ||
+    normalized === "REJECTED" ||
+    normalized === "CANCELLED" ||
+    normalized === "CANCELED"
+  ) {
+    return "border-red-200 bg-red-50 text-red-700"
+  }
+
+  return "border-amber-200 bg-amber-50 text-amber-700"
+}
+
+function StatusPill({
+  status,
+  label,
+}: {
+  status: string
+  label: string
+}) {
+  const normalized = normalizeStatus(status)
+
+  const Icon =
+    normalized === "ACTIVE" || normalized === "PAID" || normalized === "CONFIRMED"
+      ? ShieldCheck
+      : normalized === "EXPIRED" ||
+          normalized === "FAILED" ||
+          normalized === "REJECTED" ||
+          normalized === "CANCELLED" ||
+          normalized === "CANCELED"
+        ? ShieldX
+        : Clock3
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        getStatusClasses(status),
+      ].join(" ")}
+    >
+      <Icon className="me-1 h-3.5 w-3.5" />
+      {label}
+    </span>
+  )
+}
+
 export default function SystemPaymentsPage() {
+  const [locale, setLocale] = useState<Locale>("en")
+  const [direction, setDirection] = useState<Direction>("ltr")
+
   const [payments, setPayments] = useState<Payment[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -97,6 +294,37 @@ export default function SystemPaymentsPage() {
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
 
+  const t = translations[locale]
+
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = getDocumentLocale()
+      const nextDirection = getDocumentDirection(nextLocale)
+      setLocale(nextLocale)
+      setDirection(nextDirection)
+    }
+
+    syncLocale()
+
+    if (typeof document === "undefined") return
+
+    const observer = new MutationObserver(() => {
+      syncLocale()
+    })
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["lang", "dir"],
+    })
+
+    window.addEventListener("languagechange", syncLocale)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("languagechange", syncLocale)
+    }
+  }, [])
+
   useEffect(() => {
     async function fetchPayments() {
       try {
@@ -104,6 +332,10 @@ export default function SystemPaymentsPage() {
           credentials: "include",
           cache: "no-store",
         })
+
+        if (!res.ok) {
+          throw new Error(`Payments request failed with status ${res.status}`)
+        }
 
         const data = await res.json()
 
@@ -117,13 +349,14 @@ export default function SystemPaymentsPage() {
         setStats(data?.stats || null)
       } catch (error) {
         console.error("Failed to load payments", error)
+        toast.error(t.paymentsLoadError)
       } finally {
         setLoading(false)
       }
     }
 
     fetchPayments()
-  }, [])
+  }, [t.paymentsLoadError])
 
   useEffect(() => {
     async function fetchPendingDrafts() {
@@ -169,10 +402,7 @@ export default function SystemPaymentsPage() {
                 payment_method: item?.payment_method || null,
                 status: item?.status || "-",
                 total_amount: Number(
-                  item?.total_amount ??
-                    item?.pricing?.total ??
-                    item?.total ??
-                    0
+                  item?.total_amount ?? item?.pricing?.total ?? item?.total ?? 0
                 ),
                 created_at: item?.created_at || null,
                 admin_name: item?.admin_name || item?.admin?.name || null,
@@ -191,7 +421,10 @@ export default function SystemPaymentsPage() {
             loaded = true
             break
           } catch (endpointError) {
-            console.error(`Failed to load pending drafts from ${endpoint}`, endpointError)
+            console.error(
+              `Failed to load pending drafts from ${endpoint}`,
+              endpointError
+            )
           }
         }
 
@@ -201,13 +434,14 @@ export default function SystemPaymentsPage() {
       } catch (error) {
         console.error("Failed to load pending onboarding drafts", error)
         setPendingDrafts([])
+        toast.error(t.pendingLoadError)
       } finally {
         setPendingDraftsLoading(false)
       }
     }
 
     fetchPendingDrafts()
-  }, [])
+  }, [t.pendingLoadError])
 
   function formatDate(date: string) {
     const parsed = new Date(date)
@@ -265,11 +499,11 @@ export default function SystemPaymentsPage() {
   function getDraftStatusLabel(status: string) {
     switch ((status || "").toUpperCase()) {
       case "DRAFT":
-        return "مسودة"
+        return t.draftStatus
       case "CONFIRMED":
-        return "مؤكد"
+        return t.confirmedStatus
       case "PAID":
-        return "مدفوع"
+        return t.paidStatus
       default:
         return status || "-"
     }
@@ -278,9 +512,9 @@ export default function SystemPaymentsPage() {
   function getDurationLabel(duration: string) {
     switch ((duration || "").toLowerCase()) {
       case "monthly":
-        return "شهري"
+        return t.monthly
       case "yearly":
-        return "سنوي"
+        return t.yearly
       default:
         return duration || "-"
     }
@@ -310,44 +544,45 @@ export default function SystemPaymentsPage() {
 
       const paymentDate = getDateOnly(payment.paid_at)
 
-      const matchesDateFrom =
-        !dateFrom || (paymentDate && paymentDate >= dateFrom)
+      const matchesDateFrom = !dateFrom || (paymentDate && paymentDate >= dateFrom)
 
-      const matchesDateTo =
-        !dateTo || (paymentDate && paymentDate <= dateTo)
+      const matchesDateTo = !dateTo || (paymentDate && paymentDate <= dateTo)
 
-      return (
-        matchesSearch &&
-        matchesMethod &&
-        matchesDateFrom &&
-        matchesDateTo
-      )
+      return matchesSearch && matchesMethod && matchesDateFrom && matchesDateTo
     })
   }, [payments, search, paymentMethod, dateFrom, dateTo])
 
   const exportExcel = () => {
-    const data = filteredPayments.map((payment) => ({
-      ID: payment.id,
-      Company: payment.company_name,
-      Invoice: payment.invoice_number,
-      Method: payment.method,
-      Amount: payment.amount,
-      Status: payment.status,
-      Date: formatDate(payment.paid_at),
-    }))
+    try {
+      const data = filteredPayments.map((payment) => ({
+        ID: payment.id,
+        Company: payment.company_name,
+        Invoice: payment.invoice_number,
+        Method: payment.method,
+        Amount: Number(payment.amount).toFixed(2),
+        Status: payment.status,
+        Date: formatDate(payment.paid_at),
+      }))
 
-    const worksheet = XLSX.utils.json_to_sheet(data)
-    const workbook = XLSX.utils.book_new()
+      const worksheet = XLSX.utils.json_to_sheet(data)
+      const workbook = XLSX.utils.book_new()
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Payments")
-    XLSX.writeFile(workbook, "primey_payments.xlsx")
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Payments")
+      XLSX.writeFile(workbook, "primey_payments.xlsx")
+      toast.success(t.exportSuccess)
+    } catch (error) {
+      console.error("Failed to export excel", error)
+      toast.error(t.exportError)
+    }
   }
 
   const handlePrint = () => {
     try {
       window.print()
+      toast.success(t.printStarted)
     } catch (error) {
       console.error("Failed to print", error)
+      toast.error(t.printError)
     }
   }
 
@@ -356,10 +591,18 @@ export default function SystemPaymentsPage() {
     setPaymentMethod("ALL")
     setDateFrom("")
     setDateTo("")
+    toast.success(t.filtersReset)
   }
 
   if (loading) {
-    return <div className="p-6">Loading payments...</div>
+    return (
+      <div
+        dir={direction}
+        className="p-6 text-sm text-muted-foreground"
+      >
+        {t.loadingPayments}
+      </div>
+    )
   }
 
   return (
@@ -533,8 +776,11 @@ export default function SystemPaymentsPage() {
 
           .print-amount,
           .print-date,
-          .print-invoice {
+          .print-invoice,
+          .force-en {
             white-space: nowrap !important;
+            direction: ltr !important;
+            unicode-bidi: embed !important;
           }
 
           .print-company {
@@ -544,26 +790,26 @@ export default function SystemPaymentsPage() {
         }
       `}</style>
 
-      <div className="space-y-6">
+      <div dir={direction} className="space-y-6">
         {stats && (
           <div className="no-print grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader>
-                <CardTitle>Total Revenue</CardTitle>
+                <CardTitle>{t.totalRevenue}</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {stats.total_revenue} SAR
+                <div className="text-2xl font-bold force-en" dir="ltr">
+                  {formatMoney(stats.total_revenue)}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Payments Today</CardTitle>
+                <CardTitle>{t.paymentsToday}</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold force-en" dir="ltr">
                   {stats.today_payments}
                 </div>
               </CardContent>
@@ -571,10 +817,10 @@ export default function SystemPaymentsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>This Month</CardTitle>
+                <CardTitle>{t.thisMonth}</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold force-en" dir="ltr">
                   {stats.month_payments}
                 </div>
               </CardContent>
@@ -582,35 +828,35 @@ export default function SystemPaymentsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Success Rate</CardTitle>
+                <CardTitle>{t.successRate}</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {stats.success_rate}%
+                <div className="text-2xl font-bold force-en" dir="ltr">
+                  {Number(stats.success_rate || 0).toFixed(2)}%
                 </div>
               </CardContent>
             </Card>
           </div>
         )}
 
-        {/* =====================================================
-            Pending Onboarding Drafts
-        ===================================================== */}
         <Card className="no-print">
           <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
               <CardTitle className="flex items-center gap-2">
                 <Landmark className="h-5 w-5" />
-                Pending Onboarding Requests
+                {t.pendingRequests}
               </CardTitle>
 
               <div className="text-sm text-muted-foreground">
-                Bank transfer registration requests waiting for internal approval.
+                {t.pendingRequestsDesc}
               </div>
             </div>
 
             <Badge variant="outline">
-              {pendingDrafts.length} pending
+              <span className="force-en" dir="ltr">
+                {pendingDrafts.length}
+              </span>{" "}
+              {t.pendingCount}
             </Badge>
           </CardHeader>
 
@@ -618,33 +864,35 @@ export default function SystemPaymentsPage() {
             {pendingDraftsLoading ? (
               <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading pending onboarding requests...
+                {t.loadingPending}
               </div>
             ) : pendingDrafts.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[90px]">Draft</TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead>Plan</TableHead>
-                    <TableHead className="w-[120px]">Duration</TableHead>
-                    <TableHead className="w-[150px]">Method</TableHead>
-                    <TableHead className="w-[130px]">Amount</TableHead>
-                    <TableHead className="w-[130px]">Status</TableHead>
-                    <TableHead className="w-[140px]">Created</TableHead>
-                    <TableHead className="w-[140px]">Action</TableHead>
+                    <TableHead className="w-[90px]">{t.draft}</TableHead>
+                    <TableHead>{t.company}</TableHead>
+                    <TableHead>{t.plan}</TableHead>
+                    <TableHead className="w-[120px]">{t.duration}</TableHead>
+                    <TableHead className="w-[150px]">{t.method}</TableHead>
+                    <TableHead className="w-[130px]">{t.amount}</TableHead>
+                    <TableHead className="w-[130px]">{t.status}</TableHead>
+                    <TableHead className="w-[140px]">{t.created}</TableHead>
+                    <TableHead className="w-[140px]">{t.action}</TableHead>
                   </TableRow>
                 </TableHeader>
 
                 <TableBody>
                   {pendingDrafts.map((draft) => (
                     <TableRow key={draft.draft_id}>
-                      <TableCell>#{draft.draft_id}</TableCell>
+                      <TableCell className="force-en" dir="ltr">
+                        #{draft.draft_id}
+                      </TableCell>
 
                       <TableCell>
                         <div className="font-medium">{draft.company_name}</div>
                         {draft.admin_email ? (
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-xs text-muted-foreground force-en" dir="ltr">
                             {draft.admin_email}
                           </div>
                         ) : null}
@@ -660,17 +908,18 @@ export default function SystemPaymentsPage() {
                         </Badge>
                       </TableCell>
 
-                      <TableCell>
+                      <TableCell className="force-en" dir="ltr">
                         {formatMoney(draft.total_amount)}
                       </TableCell>
 
                       <TableCell>
-                        <Badge variant="outline">
-                          {getDraftStatusLabel(draft.status)}
-                        </Badge>
+                        <StatusPill
+                          status={draft.status}
+                          label={getDraftStatusLabel(draft.status)}
+                        />
                       </TableCell>
 
-                      <TableCell>
+                      <TableCell className="force-en" dir="ltr">
                         {draft.created_at ? formatDate(draft.created_at) : "-"}
                       </TableCell>
 
@@ -678,7 +927,7 @@ export default function SystemPaymentsPage() {
                         <Button asChild size="sm" variant="outline" className="gap-2">
                           <Link href={`/system/payments/${draft.draft_id}`}>
                             <FileText className="h-4 w-4" />
-                            Review
+                            {t.review}
                           </Link>
                         </Button>
                       </TableCell>
@@ -688,7 +937,7 @@ export default function SystemPaymentsPage() {
               </Table>
             ) : (
               <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                No pending bank transfer onboarding requests found.
+                {t.noPendingRequests}
               </div>
             )}
           </CardContent>
@@ -705,27 +954,31 @@ export default function SystemPaymentsPage() {
                 />
 
                 <CardTitle className="print-title">
-                  Platform Payments
+                  {t.platformPayments}
                 </CardTitle>
 
-                <div className="hidden print-meta-line print:block">
-                  Printed at: {formatPrintDate()}
+                <div className="hidden print-meta-line print:block force-en" dir="ltr">
+                  {t.printedAt}: {formatPrintDate()}
+                </div>
+
+                <div className="hidden print-meta-line print:block force-en" dir="ltr">
+                  {t.totalPayments}: {filteredPayments.length}
                 </div>
 
                 <div className="hidden print-meta-line print:block">
-                  Total payments: {filteredPayments.length}
+                  {t.paymentMethod}:{" "}
+                  <span className="force-en" dir="ltr">
+                    {paymentMethod === "ALL" ? t.allMethods : paymentMethod}
+                  </span>
                 </div>
 
                 <div className="hidden print-meta-line print:block">
-                  Payment method:{" "}
-                  {paymentMethod === "ALL" ? "All Methods" : paymentMethod}
-                </div>
-
-                <div className="hidden print-meta-line print:block">
-                  Date range:{" "}
-                  {dateFrom || dateTo
-                    ? `${dateFrom || "—"} → ${dateTo || "—"}`
-                    : "All Dates"}
+                  {t.dateRange}:{" "}
+                  <span className="force-en" dir="ltr">
+                    {dateFrom || dateTo
+                      ? `${dateFrom || "—"} → ${dateTo || "—"}`
+                      : t.allDates}
+                  </span>
                 </div>
               </div>
 
@@ -733,7 +986,7 @@ export default function SystemPaymentsPage() {
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                   <div className="w-full xl:max-w-md">
                     <Input
-                      placeholder="Search company or invoice..."
+                      placeholder={t.searchPlaceholder}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                     />
@@ -741,11 +994,11 @@ export default function SystemPaymentsPage() {
 
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" onClick={resetFilters}>
-                      Reset Filters
+                      {t.resetFilters}
                     </Button>
 
                     <Button variant="outline" onClick={exportExcel}>
-                      Export Excel
+                      {t.exportExcel}
                     </Button>
 
                     <Button
@@ -754,7 +1007,7 @@ export default function SystemPaymentsPage() {
                       className="gap-2"
                     >
                       <Printer className="h-4 w-4" />
-                      Print
+                      {t.print}
                     </Button>
                   </div>
                 </div>
@@ -764,8 +1017,9 @@ export default function SystemPaymentsPage() {
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background outline-none transition placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                    dir={direction}
                   >
-                    <option value="ALL">All Methods</option>
+                    <option value="ALL">{t.allMethodsOption}</option>
                     {paymentMethods.map((method) => (
                       <option key={method} value={method}>
                         {method}
@@ -777,12 +1031,18 @@ export default function SystemPaymentsPage() {
                     type="date"
                     value={dateFrom}
                     onChange={(e) => setDateFrom(e.target.value)}
+                    dir="ltr"
+                    lang="en"
+                    className="force-en"
                   />
 
                   <Input
                     type="date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
+                    dir="ltr"
+                    lang="en"
+                    className="force-en"
                   />
                 </div>
               </div>
@@ -792,14 +1052,14 @@ export default function SystemPaymentsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[70px]">ID</TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead className="w-[190px]">Invoice</TableHead>
-                    <TableHead className="w-[120px]">Method</TableHead>
-                    <TableHead className="w-[120px]">Amount</TableHead>
-                    <TableHead className="w-[120px]">Status</TableHead>
-                    <TableHead className="w-[120px]">Date</TableHead>
-                    <TableHead className="no-print w-[110px]">Details</TableHead>
+                    <TableHead className="w-[70px]">{t.id}</TableHead>
+                    <TableHead>{t.company}</TableHead>
+                    <TableHead className="w-[190px]">{t.invoice}</TableHead>
+                    <TableHead className="w-[120px]">{t.method}</TableHead>
+                    <TableHead className="w-[120px]">{t.amount}</TableHead>
+                    <TableHead className="w-[120px]">{t.status}</TableHead>
+                    <TableHead className="w-[120px]">{t.date}</TableHead>
+                    <TableHead className="no-print w-[110px]">{t.details}</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -807,7 +1067,7 @@ export default function SystemPaymentsPage() {
                   {filteredPayments.length > 0 ? (
                     filteredPayments.map((payment) => (
                       <TableRow key={payment.id}>
-                        <TableCell>
+                        <TableCell className="force-en" dir="ltr">
                           #{payment.id}
                         </TableCell>
 
@@ -815,7 +1075,7 @@ export default function SystemPaymentsPage() {
                           {payment.company_name}
                         </TableCell>
 
-                        <TableCell className="print-invoice">
+                        <TableCell className="print-invoice force-en" dir="ltr">
                           <Link
                             href={`/system/invoices/${payment.invoice_number}`}
                             className="font-medium text-blue-600 hover:underline"
@@ -831,31 +1091,26 @@ export default function SystemPaymentsPage() {
                         </TableCell>
 
                         <TableCell>
-                          <span className="print-amount">
-                            {payment.amount} SAR
+                          <span className="print-amount force-en" dir="ltr">
+                            {formatMoney(payment.amount)}
                           </span>
                         </TableCell>
 
                         <TableCell>
-                          <Badge
-                            variant={
-                              payment.status === "PAID"
-                                ? "default"
-                                : "destructive"
-                            }
-                          >
-                            {payment.status}
-                          </Badge>
+                          <StatusPill
+                            status={payment.status}
+                            label={payment.status}
+                          />
                         </TableCell>
 
-                        <TableCell className="print-date">
+                        <TableCell className="print-date force-en" dir="ltr">
                           {formatDate(payment.paid_at)}
                         </TableCell>
 
                         <TableCell className="no-print">
                           <Button asChild variant="outline" size="sm">
                             <Link href={`/system/payments/pay/${payment.id}`}>
-                              View
+                              {t.view}
                             </Link>
                           </Button>
                         </TableCell>
@@ -867,7 +1122,7 @@ export default function SystemPaymentsPage() {
                         colSpan={8}
                         className="py-10 text-center text-muted-foreground"
                       >
-                        No payments found for the selected filters.
+                        {t.noPaymentsFound}
                       </TableCell>
                     </TableRow>
                   )}
