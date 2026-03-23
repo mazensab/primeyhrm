@@ -487,6 +487,8 @@ const messages = {
   }
 } as const
 
+type MessageDictionary = (typeof messages)[Locale]
+
 /* =========================================================
    Helpers
 ========================================================= */
@@ -681,7 +683,7 @@ function OverviewField({
   )
 }
 
-function getCompanyUserStatusBadge(isActive: boolean, t: typeof messages.en) {
+function getCompanyUserStatusBadge(isActive: boolean, t: MessageDictionary) {
   if (isActive) {
     return (
       <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
@@ -793,10 +795,6 @@ export default function CompanyDetailsPage() {
     const count = formatNumber(users.length)
     return locale === "ar" ? `${count} مستخدم` : `${count} users`
   }, [users.length, locale])
-
-  /* =========================================================
-     Company Users Helpers
-  ========================================================= */
 
   async function loadCompanyUsers() {
     if (!companyId) return
@@ -1145,10 +1143,6 @@ export default function CompanyDetailsPage() {
     }
   }
 
-  /* =========================================================
-     Fetch Company
-  ========================================================= */
-
   useEffect(() => {
     if (!companyId) return
 
@@ -1247,10 +1241,6 @@ export default function CompanyDetailsPage() {
       isMounted = false
     }
   }, [companyId, t.toasts.companyFetchFailed])
-
-  /* =========================================================
-     Company Info Editing
-  ========================================================= */
 
   function handleCompanyInfoInputChange(
     field: keyof CompanyInfoForm,
@@ -1367,10 +1357,6 @@ export default function CompanyDetailsPage() {
     }
   }
 
-  /* =========================================================
-     Renew Subscription
-  ========================================================= */
-
   async function handleRenew() {
     if (!subscription) return
 
@@ -1398,10 +1384,6 @@ export default function CompanyDetailsPage() {
     }
   }
 
-  /* =========================================================
-     Loading / Empty
-  ========================================================= */
-
   if (loading) {
     return (
       <div dir={dir} className="space-y-4">
@@ -1420,10 +1402,6 @@ export default function CompanyDetailsPage() {
       </div>
     )
   }
-
-  /* =========================================================
-     UI
-  ========================================================= */
 
   return (
     <>
