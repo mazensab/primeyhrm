@@ -12,6 +12,7 @@
 # - Broadcast Messaging
 # - Subscription Expiry Reminders
 # - WhatsApp Web Session (QR / Pairing Code)
+# - WhatsApp Contacts / Conversations / Messages
 # ============================================================
 
 from django.conf import settings
@@ -106,6 +107,22 @@ class RecipientType(models.TextChoices):
     USER = "USER", "User"
     EMPLOYEE = "EMPLOYEE", "Employee"
     RAW = "RAW", "Raw Number"
+
+
+# ============================================================
+# 💬 Conversation Choices
+# ============================================================
+
+class ConversationStatus(models.TextChoices):
+    OPEN = "OPEN", "Open"
+    CLOSED = "CLOSED", "Closed"
+    ARCHIVED = "ARCHIVED", "Archived"
+    SPAM = "SPAM", "Spam"
+
+
+class ConversationDirection(models.TextChoices):
+    INBOUND = "INBOUND", "Inbound"
+    OUTBOUND = "OUTBOUND", "Outbound"
 
 
 # ============================================================
@@ -615,6 +632,262 @@ class WhatsAppWebhookEvent(models.Model):
 
     def __str__(self) -> str:
         return f"Webhook {self.event_type or 'unknown'} #{self.pk}"
+
+
+# ============================================================
+# 💬 WhatsApp Contact
+# ============================================================
+
+class WhatsAppContact(models.Model):
+    """
+    جهة اتصال واتساب داخل Runtime Layer.
+
+    ملاحظات:
+    - System Scope: company = null
+    - Company Scope: company = الشركة المالكة
+    - phone_number هو الرقم الموحّد بعد normalize
+    """
+
+    scope_type = models.CharField(
+        max_length=20,
+        choices=ScopeType.choices,
+        default=ScopeType.SYSTEM,
+    )
+    company = models.ForeignKey(
+        COMPANY_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="whatsapp_contacts",
+    )
+
+    phone_number = models.CharField(max_length=20, validators=[phone_validator])
+    display_name = models.CharField(max_length=255, blank=True)
+    push_name = models.CharField(max_length=255, blank=True)
+
+    wa_jid = models.CharField(max_length=255, blank=True)
+    profile_name = models.CharField(max_length=255, blank=True)
+
+    is_blocked = models.BooleanField(default=False)
+    is_business = models.BooleanField(default=False)
+
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+
+    notes = models.TextField(blank=True)
+    extra_json = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "WhatsApp Contact"
+        verbose_name_plural = "WhatsApp Contacts"
+        ordering = ["-last_message_at", "-id"]
+        indexes = [
+            models.Index(fields=["scope_type", "phone_number"]),
+            models.Index(fields=["company", "phone_number"]),
+            models.Index(fields=["last_message_at"]),
+            models.Index(fields=["is_blocked"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.display_name or self.phone_number
+
+
+# ============================================================
+# 🧵 WhatsApp Conversation
+# ============================================================
+
+class WhatsAppConversation(models.Model):
+    """
+    محادثة واتساب فعلية.
+    """
+
+    scope_type = models.CharField(
+        max_length=20,
+        choices=ScopeType.choices,
+        default=ScopeType.SYSTEM,
+    )
+    company = models.ForeignKey(
+        COMPANY_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="whatsapp_conversations",
+    )
+    contact = models.ForeignKey(
+        WhatsAppContact,
+        on_delete=models.CASCADE,
+        related_name="conversations",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=ConversationStatus.choices,
+        default=ConversationStatus.OPEN,
+    )
+
+    subject = models.CharField(max_length=255, blank=True)
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_whatsapp_conversations",
+    )
+
+    session_name = models.CharField(max_length=255, blank=True)
+
+    unread_count = models.PositiveIntegerField(default=0)
+    last_message_preview = models.TextField(blank=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+
+    is_pinned = models.BooleanField(default=False)
+    is_muted = models.BooleanField(default=False)
+    is_resolved = models.BooleanField(default=False)
+
+    extra_json = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "WhatsApp Conversation"
+        verbose_name_plural = "WhatsApp Conversations"
+        ordering = ["-last_message_at", "-id"]
+        indexes = [
+            models.Index(fields=["scope_type", "status"]),
+            models.Index(fields=["company", "status"]),
+            models.Index(fields=["contact", "status"]),
+            models.Index(fields=["assigned_to"]),
+            models.Index(fields=["last_message_at"]),
+            models.Index(fields=["is_pinned"]),
+            models.Index(fields=["is_resolved"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.contact} | {self.status}"
+
+
+# ============================================================
+# 📨 WhatsApp Conversation Message
+# ============================================================
+
+class WhatsAppConversationMessage(models.Model):
+    """
+    رسالة فعلية داخل المحادثة.
+
+    هذه ليست بديلًا عن WhatsAppMessageLog:
+    - ConversationMessage = طبقة التشغيل للشات
+    - MessageLog = سجل الإرسال / التدقيق / التتبع
+    """
+
+    conversation = models.ForeignKey(
+        WhatsAppConversation,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+
+    scope_type = models.CharField(
+        max_length=20,
+        choices=ScopeType.choices,
+        default=ScopeType.SYSTEM,
+    )
+    company = models.ForeignKey(
+        COMPANY_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="whatsapp_conversation_messages",
+    )
+
+    direction = models.CharField(
+        max_length=20,
+        choices=ConversationDirection.choices,
+        default=ConversationDirection.INBOUND,
+    )
+
+    message_type = models.CharField(
+        max_length=20,
+        choices=MessageType.choices,
+        default=MessageType.TEXT,
+    )
+
+    external_message_id = models.CharField(max_length=255, blank=True)
+    provider = models.CharField(
+        max_length=50,
+        choices=WhatsAppProvider.choices,
+        default=WhatsAppProvider.WEB_SESSION,
+    )
+    provider_status = models.CharField(max_length=255, blank=True)
+    delivery_status = models.CharField(
+        max_length=20,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.QUEUED,
+    )
+
+    wa_jid = models.CharField(max_length=255, blank=True)
+    sender_phone = models.CharField(max_length=20, blank=True)
+    sender_name = models.CharField(max_length=255, blank=True)
+
+    body_text = models.TextField(blank=True)
+    caption = models.TextField(blank=True)
+
+    attachment_url = models.URLField(blank=True)
+    attachment_name = models.CharField(max_length=255, blank=True)
+    mime_type = models.CharField(max_length=100, blank=True)
+    media_type = models.CharField(max_length=50, blank=True)
+
+    is_read = models.BooleanField(default=False)
+    is_from_me = models.BooleanField(default=False)
+
+    replied_to_external_message_id = models.CharField(max_length=255, blank=True)
+
+    payload_json = models.JSONField(default=dict, blank=True)
+    extra_json = models.JSONField(default=dict, blank=True)
+
+    webhook_event = models.ForeignKey(
+        WhatsAppWebhookEvent,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversation_messages",
+    )
+    message_log = models.ForeignKey(
+        WhatsAppMessageLog,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversation_messages",
+    )
+
+    message_created_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    failed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "WhatsApp Conversation Message"
+        verbose_name_plural = "WhatsApp Conversation Messages"
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["conversation", "created_at"]),
+            models.Index(fields=["scope_type", "created_at"]),
+            models.Index(fields=["company", "created_at"]),
+            models.Index(fields=["direction"]),
+            models.Index(fields=["delivery_status"]),
+            models.Index(fields=["external_message_id"]),
+            models.Index(fields=["sender_phone"]),
+            models.Index(fields=["message_created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.direction} | {self.external_message_id or self.pk}"
 
 
 # ============================================================

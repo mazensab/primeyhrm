@@ -88,7 +88,7 @@ else:
 # 🌐 FRONTEND (Next.js)
 # ============================================================
 
-FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "http://localhost:3000")
+FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "https://primeyride.com")
 FRONTEND_LOGIN_URL = f"{FRONTEND_BASE_URL}/login"
 FRONTEND_HOME_URL = f"{FRONTEND_BASE_URL}/"
 

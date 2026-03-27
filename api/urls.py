@@ -77,6 +77,16 @@ from api.system.whatsapp.webhook import (
     system_whatsapp_webhook_receive,
 )
 
+from api.system.whatsapp.inbox import (
+    system_whatsapp_inbox_summary,
+    system_whatsapp_inbox_list,
+    system_whatsapp_conversation_detail,
+    system_whatsapp_conversation_messages,
+    system_whatsapp_mark_conversation_read,
+    system_whatsapp_update_conversation_status,
+    system_whatsapp_toggle_conversation_resolved,
+    system_whatsapp_toggle_conversation_pinned,
+)
 # ============================================================
 # 📦 SYSTEM — SUBSCRIPTIONS
 # ============================================================
@@ -560,6 +570,58 @@ urlpatterns = [
         "system/onboarding/pending-drafts/",
         pending_onboarding_drafts,
         name="pending_onboarding_drafts",
+    ),
+
+    # ============================================================
+    # 💬 SYSTEM — WHATSAPP INBOX
+    # ============================================================
+
+    path(
+        "system/whatsapp/inbox/summary/",
+        system_whatsapp_inbox_summary,
+        name="system_whatsapp_inbox_summary",
+    ),
+
+    path(
+        "system/whatsapp/inbox/",
+        system_whatsapp_inbox_list,
+        name="system_whatsapp_inbox_list",
+    ),
+
+    path(
+        "system/whatsapp/inbox/<int:conversation_id>/",
+        system_whatsapp_conversation_detail,
+        name="system_whatsapp_conversation_detail",
+    ),
+
+    path(
+        "system/whatsapp/inbox/<int:conversation_id>/messages/",
+        system_whatsapp_conversation_messages,
+        name="system_whatsapp_conversation_messages",
+    ),
+
+    path(
+        "system/whatsapp/inbox/<int:conversation_id>/mark-read/",
+        system_whatsapp_mark_conversation_read,
+        name="system_whatsapp_mark_conversation_read",
+    ),
+
+    path(
+        "system/whatsapp/inbox/<int:conversation_id>/status/",
+        system_whatsapp_update_conversation_status,
+        name="system_whatsapp_update_conversation_status",
+    ),
+
+    path(
+        "system/whatsapp/inbox/<int:conversation_id>/resolved/",
+        system_whatsapp_toggle_conversation_resolved,
+        name="system_whatsapp_toggle_conversation_resolved",
+    ),
+
+    path(
+        "system/whatsapp/inbox/<int:conversation_id>/pinned/",
+        system_whatsapp_toggle_conversation_pinned,
+        name="system_whatsapp_toggle_conversation_pinned",
     ),
 
 

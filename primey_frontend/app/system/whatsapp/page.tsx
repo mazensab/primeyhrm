@@ -1,27 +1,29 @@
 "use client"
 
+// ============================================================
+// 📂 الملف: app/system/whatsapp/page.tsx
+// 🟢 Primey HR Cloud - System WhatsApp Dashboard
+// ------------------------------------------------------------
+// ✅ الصفحة الرئيسية لموديول واتساب النظام
+// ✅ Dashboard نظيف واحترافي
+// ✅ مرتبط بصفحة المحادثات الجديدة
+// ✅ مبني على نفس الـ APIs الحالية
+// ============================================================
+
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Activity,
-  AlertCircle,
   ArrowUpRight,
   BellRing,
   Bot,
   Building2,
   CheckCircle2,
-  Clock3,
-  FileText,
-  Loader2,
   MessageCircle,
   MessageSquareText,
-  Power,
   RefreshCw,
-  Send,
   Settings2,
-  ShieldCheck,
   Sparkles,
-  Target,
   TrendingUp,
   Users,
   Wifi,
@@ -38,414 +40,34 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
 
-type Locale = "ar" | "en"
-
-type WhatsAppStatusPayload = {
-  success?: boolean
-  connected?: boolean
-  provider?: string
-  phone_number_id?: string | null
-  business_account_id?: string | null
-  webhook_verified?: boolean
-  mode?: string
-  last_check_at?: string | null
-  company_scope_enabled?: boolean
-  system_scope_enabled?: boolean
-  pending_templates?: number
-  failed_messages?: number
-}
-
-type WhatsAppSettingsPayload = {
-  success?: boolean
-  config?: {
-    is_active?: boolean
-    provider?: string
-    app_name?: string
-    access_token_masked?: string
-    phone_number_id?: string
-    business_account_id?: string
-    webhook_verify_token_masked?: string
-    default_country_code?: string
-    allow_broadcasts?: boolean
-    send_test_enabled?: boolean
-  }
-}
-
-type WhatsAppLogItem = {
-  id: number
-  status?: string
-  direction?: string
-  message_type?: string
-  recipient_phone?: string
-  template_name?: string
-  created_at?: string
-  provider_message_id?: string
-  error_message?: string
-}
-
-type WhatsAppLogsPayload = {
-  success?: boolean
-  count?: number
-  results?: WhatsAppLogItem[]
-}
-
-type WhatsAppTemplateItem = {
-  id: number
-  name?: string
-  template_type?: string
-  language?: string
-  category?: string
-  status?: string
-  updated_at?: string
-}
-
-type WhatsAppTemplatesPayload = {
-  success?: boolean
-  count?: number
-  results?: WhatsAppTemplateItem[]
-}
-
-type WhatsAppBroadcastItem = {
-  id: number
-  title?: string
-  status?: string
-  recipient_count?: number
-  sent_count?: number
-  failed_count?: number
-  created_at?: string
-}
-
-type WhatsAppBroadcastsPayload = {
-  success?: boolean
-  count?: number
-  results?: WhatsAppBroadcastItem[]
-}
+import {
+  fetchInboxConversations,
+  fetchInboxSummary,
+  fetchWhatsAppSettings,
+  fetchWhatsAppStatus,
+} from "@/lib/whatsapp/api"
+import { WHATSAPP_TRANSLATIONS } from "@/lib/whatsapp/constants"
+import {
+  detectLocale,
+  formatDate,
+  formatNumber,
+} from "@/lib/whatsapp/formatters"
+import type {
+  InboxConversation,
+  InboxSummary,
+  Locale,
+  WhatsAppSettingsPayload,
+  WhatsAppStatusPayload,
+} from "@/lib/whatsapp/types"
 
 type DashboardState = {
   loading: boolean
   refreshing: boolean
   status: WhatsAppStatusPayload | null
   settings: WhatsAppSettingsPayload | null
-  logs: WhatsAppLogItem[]
-  templates: WhatsAppTemplateItem[]
-  broadcasts: WhatsAppBroadcastItem[]
-}
-
-const API_PATHS = {
-  status: "/api/system/whatsapp/status/",
-  settings: "/api/system/whatsapp/settings/",
-  logs: "/api/system/whatsapp/logs/",
-  templates: "/api/system/whatsapp/templates/",
-  broadcasts: "/api/system/whatsapp/broadcasts/",
-} as const
-
-const translations = {
-  ar: {
-    centerBadge: "System WhatsApp Center",
-    pageTitle: "مركز واتساب للنظام",
-    pageDescription: "إدارة الربط، القوالب، السجل، والبث الجماعي على مستوى النظام بالكامل.",
-    refresh: "تحديث",
-    settings: "الإعدادات",
-    connected: "متصل",
-    disconnected: "غير متصل",
-    active: "نشط",
-    inactive: "غير نشط",
-    whatsappConnection: "حالة ربط واتساب",
-    whatsappConnectionDesc: "نظرة سريعة على حالة المزود، التفعيل، والتحقق من الويبهوك.",
-    phoneNumberId: "Phone Number ID",
-    notConfigured: "غير مضبوط",
-    webhook: "Webhook",
-    verified: "موثق",
-    pendingOrUnknown: "قيد الانتظار / غير معروف",
-    systemStatus: "حالة النظام",
-    approvedTemplates: "القوالب المعتمدة",
-    sentMessages: "الرسائل المرسلة",
-    broadcasts: "عمليات البث",
-    lastCheck: "آخر فحص",
-    outOf: "من أصل",
-    failed: "الفاشلة",
-    systemLevelReady: "مهيأة على مستوى النظام",
-    quickAccess: "الوصول السريع",
-    quickAccessDesc: "الانتقال إلى أهم أقسام واتساب للنظام بسرعة.",
-    logs: "السجل",
-    templates: "القوالب",
-    broadcastsLabel: "البث الجماعي",
-    smartSummary: "ملخص ذكي",
-    smartSummaryDesc: "حالة واتساب للنظام باختصار",
-    provider: "المزود",
-    systemScope: "System Scope",
-    companyScope: "Company Scope",
-    enabled: "مفعل",
-    undefined: "غير محدد",
-    pendingTemplates: "Pending Templates",
-    failedMessages: "Failed Messages",
-    latestMessages: "آخر الرسائل",
-    latestMessagesDesc: "أحدث الأنشطة في سجل رسائل واتساب على مستوى النظام.",
-    viewAll: "عرض الكل",
-    noMessagesYet: "لا توجد رسائل حتى الآن",
-    noMessagesDesc: "سيظهر هنا آخر سجل إرسال بمجرد بدء الاستخدام.",
-    noTemplatesYet: "لا توجد قوالب بعد",
-    noBroadcastsYet: "لا توجد حملات بث بعد",
-    latestTemplates: "آخر القوالب",
-    latestTemplatesDesc: "أحدث القوالب المعرفة بالنظام",
-    latestBroadcasts: "آخر حملات البث",
-    latestBroadcastsDesc: "أحدث العمليات الجماعية",
-    recipients: "المستلمون",
-    sent: "المرسلة",
-    untitledTemplate: "قالب بدون اسم",
-    noRecipient: "بدون رقم مستلم",
-    message: "رسالة",
-    dashboardLoadError: "تعذر تحميل لوحة واتساب للنظام",
-    settingsCardTitle: "الإعدادات",
-    settingsCardDesc: "مزود الخدمة، التفعيل، مفاتيح الربط، وإعدادات الإرسال.",
-    logsCardDesc: "تتبع الرسائل، الحالات، والفشل ومحاولات الإرسال.",
-    templatesCardDesc: "إدارة قوالب التنبيهات والإشعارات الجاهزة للإرسال.",
-    broadcastsCardDesc: "إرسال الحملات والتنبيهات إلى عدة مستلمين من لوحة النظام.",
-    unknown: "غير معروف",
-    statusToggle: "الحالة",
-    sentStatus: "تم الإرسال",
-    deliveredStatus: "تم التسليم",
-    readStatus: "تمت القراءة",
-    failedStatus: "فشل",
-    pendingStatus: "قيد الانتظار",
-    approvedStatus: "معتمد",
-    rejectedStatus: "مرفوض",
-    draftStatus: "مسودة",
-    runningStatus: "قيد التنفيذ",
-    completedStatus: "مكتمل",
-  },
-  en: {
-    centerBadge: "System WhatsApp Center",
-    pageTitle: "System WhatsApp Center",
-    pageDescription: "Manage connection, templates, logs, and broadcasts across the entire system.",
-    refresh: "Refresh",
-    settings: "Settings",
-    connected: "Connected",
-    disconnected: "Disconnected",
-    active: "Active",
-    inactive: "Inactive",
-    whatsappConnection: "WhatsApp Connection Status",
-    whatsappConnectionDesc: "Quick overview of provider health, activation status, and webhook verification.",
-    phoneNumberId: "Phone Number ID",
-    notConfigured: "Not configured",
-    webhook: "Webhook",
-    verified: "Verified",
-    pendingOrUnknown: "Pending / Unknown",
-    systemStatus: "System Status",
-    approvedTemplates: "Approved Templates",
-    sentMessages: "Sent Messages",
-    broadcasts: "Broadcasts",
-    lastCheck: "Last check",
-    outOf: "Out of",
-    failed: "Failed",
-    systemLevelReady: "Configured at system level",
-    quickAccess: "Quick Access",
-    quickAccessDesc: "Jump quickly to the most important WhatsApp system areas.",
-    logs: "Logs",
-    templates: "Templates",
-    broadcastsLabel: "Broadcasts",
-    smartSummary: "Smart Summary",
-    smartSummaryDesc: "System WhatsApp status at a glance",
-    provider: "Provider",
-    systemScope: "System Scope",
-    companyScope: "Company Scope",
-    enabled: "Enabled",
-    undefined: "Undefined",
-    pendingTemplates: "Pending Templates",
-    failedMessages: "Failed Messages",
-    latestMessages: "Latest Messages",
-    latestMessagesDesc: "Most recent activities in system-level WhatsApp message logs.",
-    viewAll: "View all",
-    noMessagesYet: "No messages yet",
-    noMessagesDesc: "Recent sending activity will appear here once usage begins.",
-    noTemplatesYet: "No templates yet",
-    noBroadcastsYet: "No broadcasts yet",
-    latestTemplates: "Latest Templates",
-    latestTemplatesDesc: "Most recently defined templates in the system",
-    latestBroadcasts: "Latest Broadcasts",
-    latestBroadcastsDesc: "Most recent bulk operations",
-    recipients: "Recipients",
-    sent: "Sent",
-    untitledTemplate: "Untitled Template",
-    noRecipient: "No recipient number",
-    message: "Message",
-    dashboardLoadError: "Unable to load the system WhatsApp dashboard",
-    settingsCardTitle: "Settings",
-    settingsCardDesc: "Provider, activation, credentials, and sending configuration.",
-    logsCardDesc: "Track messages, statuses, failures, and sending attempts.",
-    templatesCardDesc: "Manage ready-made notification and alert templates.",
-    broadcastsCardDesc: "Send campaigns and alerts to multiple recipients from the system panel.",
-    unknown: "Unknown",
-    statusToggle: "Status",
-    sentStatus: "Sent",
-    deliveredStatus: "Delivered",
-    readStatus: "Read",
-    failedStatus: "Failed",
-    pendingStatus: "Pending",
-    approvedStatus: "Approved",
-    rejectedStatus: "Rejected",
-    draftStatus: "Draft",
-    runningStatus: "Running",
-    completedStatus: "Completed",
-  },
-} as const
-
-function detectLocale(): Locale {
-  if (typeof document === "undefined") return "ar"
-
-  const htmlLang = document.documentElement.lang?.toLowerCase() || ""
-  return htmlLang.startsWith("en") ? "en" : "ar"
-}
-
-function getApiBaseCandidates(): string[] {
-  const fromEnv = (process.env.NEXT_PUBLIC_API_URL || "").trim().replace(/\/$/, "")
-  const fromWindow = typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : ""
-
-  return Array.from(new Set([fromEnv, fromWindow, ""]))
-}
-
-function buildCandidateUrls(path: string): string[] {
-  const cleanPath = path.startsWith("/") ? path : `/${path}`
-  const variants = new Set<string>()
-
-  for (const base of getApiBaseCandidates()) {
-    const full = base ? `${base}${cleanPath}` : cleanPath
-    const withoutSlash = full.endsWith("/") ? full.slice(0, -1) : full
-    const withSlash = `${withoutSlash}/`
-
-    variants.add(full)
-    variants.add(withoutSlash)
-    variants.add(withSlash)
-  }
-
-  return Array.from(variants).filter(Boolean)
-}
-
-function formatDate(value: string | null | undefined, locale: Locale) {
-  if (!value) return "—"
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "—"
-
-  return new Intl.DateTimeFormat(locale === "ar" ? "en-GB" : "en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    numberingSystem: "latn",
-  }).format(date)
-}
-
-function formatNumber(value: number | null | undefined) {
-  return new Intl.NumberFormat("en-US", {
-    useGrouping: false,
-  }).format(Number(value ?? 0))
-}
-
-function statusLabel(status: string | undefined, locale: Locale) {
-  const value = (status || "").toUpperCase()
-
-  const labels: Record<string, { ar: string; en: string }> = {
-    SENT: { ar: "تم الإرسال", en: "Sent" },
-    DELIVERED: { ar: "تم التسليم", en: "Delivered" },
-    READ: { ar: "تمت القراءة", en: "Read" },
-    FAILED: { ar: "فشل", en: "Failed" },
-    PENDING: { ar: "قيد الانتظار", en: "Pending" },
-    APPROVED: { ar: "معتمد", en: "Approved" },
-    REJECTED: { ar: "مرفوض", en: "Rejected" },
-    DRAFT: { ar: "مسودة", en: "Draft" },
-    RUNNING: { ar: "قيد التنفيذ", en: "Running" },
-    COMPLETED: { ar: "مكتمل", en: "Completed" },
-  }
-
-  if (labels[value]) return labels[value][locale]
-  return locale === "ar" ? "غير معروف" : "Unknown"
-}
-
-function getStatusTone(status?: string) {
-  const value = (status || "").toUpperCase()
-
-  if (["SENT", "DELIVERED", "READ", "APPROVED", "COMPLETED"].includes(value)) {
-    return {
-      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-      icon: CheckCircle2,
-    }
-  }
-
-  if (["FAILED", "REJECTED"].includes(value)) {
-    return {
-      className: "border-red-200 bg-red-50 text-red-700",
-      icon: AlertCircle,
-    }
-  }
-
-  if (["PENDING", "DRAFT", "RUNNING"].includes(value)) {
-    return {
-      className: "border-amber-200 bg-amber-50 text-amber-700",
-      icon: Clock3,
-    }
-  }
-
-  return {
-    className: "border-slate-200 bg-slate-50 text-slate-700",
-    icon: Power,
-  }
-}
-
-function WhatsAppStatusBadge({
-  status,
-  locale,
-}: {
-  status?: string
-  locale: Locale
-}) {
-  const tone = getStatusTone(status)
-  const Icon = tone.icon
-
-  return (
-    <span
-      className={[
-        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-        tone.className,
-      ].join(" ")}
-    >
-      <Icon className="me-1 h-3.5 w-3.5" />
-      {statusLabel(status, locale)}
-    </span>
-  )
-}
-
-async function safeFetchJson<T>(path: string): Promise<T | null> {
-  const candidates = buildCandidateUrls(path)
-  let lastError: Error | null = null
-
-  for (const candidate of candidates) {
-    try {
-      const response = await fetch(candidate, {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-        redirect: "follow",
-        headers: {
-          Accept: "application/json",
-        },
-      })
-
-      if (!response.ok) {
-        lastError = new Error(`Request failed: ${response.status} for ${candidate}`)
-        continue
-      }
-
-      return (await response.json()) as T
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error("Unknown fetch error")
-    }
-  }
-
-  throw lastError || new Error(`Request failed for ${path}`)
+  inboxSummary: InboxSummary | null
+  latestConversations: InboxConversation[]
 }
 
 export default function SystemWhatsAppPage() {
@@ -455,9 +77,8 @@ export default function SystemWhatsAppPage() {
     refreshing: false,
     status: null,
     settings: null,
-    logs: [],
-    templates: [],
-    broadcasts: [],
+    inboxSummary: null,
+    latestConversations: [],
   })
 
   useEffect(() => {
@@ -475,7 +96,7 @@ export default function SystemWhatsAppPage() {
     return () => observer.disconnect()
   }, [])
 
-  const t = translations[locale]
+  const t = WHATSAPP_TRANSLATIONS[locale]
   const isArabic = locale === "ar"
 
   const loadDashboard = useCallback(
@@ -487,44 +108,33 @@ export default function SystemWhatsAppPage() {
           refreshing: isRefresh,
         }))
 
-        const [statusRes, settingsRes, logsRes, templatesRes, broadcastsRes] =
+        const [statusRes, settingsRes, summaryRes, conversationsRes] =
           await Promise.allSettled([
-            safeFetchJson<WhatsAppStatusPayload>(API_PATHS.status),
-            safeFetchJson<WhatsAppSettingsPayload>(API_PATHS.settings),
-            safeFetchJson<WhatsAppLogsPayload>(API_PATHS.logs),
-            safeFetchJson<WhatsAppTemplatesPayload>(API_PATHS.templates),
-            safeFetchJson<WhatsAppBroadcastsPayload>(API_PATHS.broadcasts),
+            fetchWhatsAppStatus(),
+            fetchWhatsAppSettings(),
+            fetchInboxSummary(),
+            fetchInboxConversations({
+              limit: 6,
+            }),
           ])
 
         const status = statusRes.status === "fulfilled" ? statusRes.value : null
         const settings = settingsRes.status === "fulfilled" ? settingsRes.value : null
-        const logs =
-          logsRes.status === "fulfilled" ? (logsRes.value?.results ?? []) : []
-        const templates =
-          templatesRes.status === "fulfilled" ? (templatesRes.value?.results ?? []) : []
-        const broadcasts =
-          broadcastsRes.status === "fulfilled" ? (broadcastsRes.value?.results ?? []) : []
-
-        const hasHardFailure =
-          statusRes.status === "rejected" &&
-          settingsRes.status === "rejected" &&
-          logsRes.status === "rejected" &&
-          templatesRes.status === "rejected" &&
-          broadcastsRes.status === "rejected"
+        const inboxSummary =
+          summaryRes.status === "fulfilled" ? summaryRes.value?.summary ?? null : null
+        const latestConversations =
+          conversationsRes.status === "fulfilled"
+            ? conversationsRes.value?.results ?? []
+            : []
 
         setState({
           loading: false,
           refreshing: false,
           status,
           settings,
-          logs,
-          templates,
-          broadcasts,
+          inboxSummary,
+          latestConversations,
         })
-
-        if (hasHardFailure) {
-          toast.error(t.dashboardLoadError)
-        }
       } catch (error) {
         console.error("System WhatsApp dashboard load error:", error)
         setState((prev) => ({
@@ -545,33 +155,52 @@ export default function SystemWhatsAppPage() {
   const isConnected = !!state.status?.connected
   const isActive = !!state.settings?.config?.is_active
   const providerName =
-    state.status?.provider || state.settings?.config?.provider || "Meta / Cloud API"
+    state.status?.provider || state.settings?.config?.provider || "WhatsApp Web Session"
 
-  const metrics = useMemo(() => {
-    const totalLogs = state.logs.length
-    const failedLogs = state.logs.filter(
-      (item) => (item.status || "").toUpperCase() === "FAILED"
-    ).length
-    const sentLogs = state.logs.filter((item) =>
-      ["SENT", "DELIVERED", "READ"].includes((item.status || "").toUpperCase())
-    ).length
-    const approvedTemplates = state.templates.filter(
-      (item) => (item.status || "").toUpperCase() === "APPROVED"
-    ).length
+  const summary = state.inboxSummary || {}
 
-    return {
-      totalLogs,
-      failedLogs,
-      sentLogs,
-      totalTemplates: state.templates.length,
-      approvedTemplates,
-      totalBroadcasts: state.broadcasts.length,
-    }
-  }, [state.logs, state.templates, state.broadcasts])
+  const quickStats = useMemo(
+    () => [
+      {
+        label: t.totalConversations,
+        value: formatNumber(summary.total_conversations ?? 0),
+        icon: MessageCircle,
+      },
+      {
+        label: t.unreadConversations,
+        value: formatNumber(summary.unread_conversations ?? 0),
+        icon: BellRing,
+      },
+      {
+        label: t.resolvedConversations,
+        value: formatNumber(summary.resolved_conversations ?? 0),
+        icon: CheckCircle2,
+      },
+      {
+        label: t.pinnedConversations,
+        value: formatNumber(summary.pinned_conversations ?? 0),
+        icon: Activity,
+      },
+    ],
+    [
+      summary.pinned_conversations,
+      summary.resolved_conversations,
+      summary.total_conversations,
+      summary.unread_conversations,
+      t.pinnedConversations,
+      t.resolvedConversations,
+      t.totalConversations,
+      t.unreadConversations,
+    ]
+  )
+
+  const handleRefresh = async () => {
+    await loadDashboard(true)
+  }
 
   return (
     <div dir={isArabic ? "rtl" : "ltr"} className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-2 rounded-full border bg-background/70 px-3 py-1 text-sm shadow-sm backdrop-blur">
             <Sparkles className="h-4 w-4" />
@@ -579,7 +208,9 @@ export default function SystemWhatsAppPage() {
           </div>
 
           <div>
-            <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{t.pageTitle}</h1>
+            <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
+              {t.pageTitle}
+            </h1>
             <p className="text-muted-foreground">{t.pageDescription}</p>
           </div>
         </div>
@@ -587,16 +218,21 @@ export default function SystemWhatsAppPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            onClick={() => loadDashboard(true)}
+            onClick={handleRefresh}
             disabled={state.refreshing}
             className="gap-2"
           >
-            {state.refreshing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
+            <RefreshCw
+              className={`h-4 w-4 ${state.refreshing ? "animate-spin" : ""}`}
+            />
             {t.refresh}
+          </Button>
+
+          <Button asChild variant="outline" className="gap-2">
+            <Link href="/system/whatsapp/conversations">
+              <MessageCircle className="h-4 w-4" />
+              {t.conversations}
+            </Link>
           </Button>
 
           <Button asChild className="gap-2">
@@ -611,7 +247,7 @@ export default function SystemWhatsAppPage() {
       <Card className="overflow-hidden border-0 shadow-xl">
         <div className="bg-gradient-to-l from-primary/10 via-background to-background">
           <CardHeader className="pb-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={isConnected ? "default" : "destructive"} className="gap-1">
@@ -632,7 +268,9 @@ export default function SystemWhatsAppPage() {
 
                 <div>
                   <CardTitle className="text-xl">{t.whatsappConnection}</CardTitle>
-                  <CardDescription className="mt-1">{t.whatsappConnectionDesc}</CardDescription>
+                  <CardDescription className="mt-1">
+                    {t.whatsappConnectionDesc}
+                  </CardDescription>
                 </div>
               </div>
 
@@ -656,7 +294,7 @@ export default function SystemWhatsAppPage() {
                       </>
                     ) : (
                       <>
-                        <Clock3 className="h-4 w-4 text-amber-600" />
+                        <Activity className="h-4 w-4 text-amber-600" />
                         <span>{t.pendingOrUnknown}</span>
                       </>
                     )}
@@ -668,68 +306,49 @@ export default function SystemWhatsAppPage() {
         </div>
 
         <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border bg-background p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t.systemStatus}</span>
-              <ShieldCheck className="h-4 w-4 text-primary" />
-            </div>
-            <p className="mt-3 text-2xl font-bold">{isActive ? t.active : t.inactive}</p>
-            <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-              {t.lastCheck}: {formatDate(state.status?.last_check_at, locale)}
-            </p>
-          </div>
+          {quickStats.map((item) => {
+            const Icon = item.icon
 
-          <div className="rounded-2xl border bg-background p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t.approvedTemplates}</span>
-              <FileText className="h-4 w-4 text-primary" />
-            </div>
-            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
-              {formatNumber(metrics.approvedTemplates)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-              {t.outOf} {formatNumber(metrics.totalTemplates)}
-            </p>
-          </div>
+            return (
+              <div key={item.label} className="rounded-2xl border bg-background p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">{item.label}</span>
+                  <Icon className="h-4 w-4 text-primary" />
+                </div>
 
-          <div className="rounded-2xl border bg-background p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t.sentMessages}</span>
-              <Send className="h-4 w-4 text-primary" />
-            </div>
-            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
-              {formatNumber(metrics.sentLogs)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-              {t.failed}: {formatNumber(metrics.failedLogs)}
-            </p>
-          </div>
+                <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
+                  {item.value}
+                </p>
 
-          <div className="rounded-2xl border bg-background p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t.broadcasts}</span>
-              <Target className="h-4 w-4 text-primary" />
-            </div>
-            <p className="mt-3 text-2xl font-bold tabular-nums" dir="ltr">
-              {formatNumber(metrics.totalBroadcasts)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">{t.systemLevelReady}</p>
-          </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {isConnected ? t.connectedNow : t.disconnectedNow}
+                </p>
+              </div>
+            )
+          })}
         </CardContent>
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-4">
         <Card className="border-0 shadow-lg xl:col-span-3">
           <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <CardTitle>{t.quickAccess}</CardTitle>
-                <CardDescription>{t.quickAccessDesc}</CardDescription>
-              </div>
-            </div>
+            <CardTitle>{t.quickAccess}</CardTitle>
+            <CardDescription>{t.quickAccessDesc}</CardDescription>
           </CardHeader>
 
           <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Link
+              href="/system/whatsapp/conversations"
+              className="group rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <div className="flex items-center justify-between">
+                <MessageCircle className="h-5 w-5 text-primary" />
+                <ArrowUpRight className="h-4 w-4 text-muted-foreground transition group-hover:text-foreground" />
+              </div>
+              <h3 className="mt-4 font-semibold">{t.conversations}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">{t.messagesDesc}</p>
+            </Link>
+
             <Link
               href="/system/whatsapp/settings"
               className="group rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md"
@@ -738,20 +357,8 @@ export default function SystemWhatsAppPage() {
                 <Settings2 className="h-5 w-5 text-primary" />
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground transition group-hover:text-foreground" />
               </div>
-              <h3 className="mt-4 font-semibold">{t.settingsCardTitle}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{t.settingsCardDesc}</p>
-            </Link>
-
-            <Link
-              href="/system/whatsapp/logs"
-              className="group rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md"
-            >
-              <div className="flex items-center justify-between">
-                <Activity className="h-5 w-5 text-primary" />
-                <ArrowUpRight className="h-4 w-4 text-muted-foreground transition group-hover:text-foreground" />
-              </div>
-              <h3 className="mt-4 font-semibold">{t.logs}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{t.logsCardDesc}</p>
+              <h3 className="mt-4 font-semibold">{t.settings}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">{t.viewSettings}</p>
             </Link>
 
             <Link
@@ -763,7 +370,9 @@ export default function SystemWhatsAppPage() {
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground transition group-hover:text-foreground" />
               </div>
               <h3 className="mt-4 font-semibold">{t.templates}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{t.templatesCardDesc}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.pendingTemplates}: {formatNumber(state.status?.pending_templates ?? 0)}
+              </p>
             </Link>
 
             <Link
@@ -775,7 +384,9 @@ export default function SystemWhatsAppPage() {
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground transition group-hover:text-foreground" />
               </div>
               <h3 className="mt-4 font-semibold">{t.broadcastsLabel}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{t.broadcastsCardDesc}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.failedMessages}: {formatNumber(state.status?.failed_messages ?? 0)}
+              </p>
             </Link>
           </CardContent>
         </Card>
@@ -825,21 +436,9 @@ export default function SystemWhatsAppPage() {
               <div className="flex items-center gap-3">
                 <TrendingUp className="h-5 w-5 text-primary" />
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.pendingTemplates}</p>
-                  <p className="font-semibold tabular-nums" dir="ltr">
-                    {formatNumber(state.status?.pending_templates ?? 0)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border p-4">
-              <div className="flex items-center gap-3">
-                <MessageCircle className="h-5 w-5 text-primary" />
-                <div>
-                  <p className="text-sm text-muted-foreground">{t.failedMessages}</p>
-                  <p className="font-semibold tabular-nums" dir="ltr">
-                    {formatNumber(state.status?.failed_messages ?? metrics.failedLogs)}
+                  <p className="text-sm text-muted-foreground">{t.lastCheck}</p>
+                  <p className="font-semibold" dir="ltr">
+                    {formatDate(state.status?.last_check_at, locale)}
                   </p>
                 </div>
               </div>
@@ -848,158 +447,78 @@ export default function SystemWhatsAppPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="border-0 shadow-lg xl:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between gap-4">
-            <div>
-              <CardTitle>{t.latestMessages}</CardTitle>
-              <CardDescription>{t.latestMessagesDesc}</CardDescription>
+      <Card className="border-0 shadow-xl">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>{t.inboxListTitle}</CardTitle>
+            <CardDescription>{t.inboxListDesc}</CardDescription>
+          </div>
+
+          <Button asChild className="gap-2">
+            <Link href="/system/whatsapp/conversations">
+              <MessageCircle className="h-4 w-4" />
+              {t.conversations}
+            </Link>
+          </Button>
+        </CardHeader>
+
+        <CardContent>
+          {state.loading ? (
+            <div className="flex min-h-[240px] items-center justify-center">
+              <RefreshCw className="h-6 w-6 animate-spin text-primary" />
             </div>
+          ) : state.latestConversations.length === 0 ? (
+            <div className="rounded-2xl border border-dashed p-8 text-center">
+              <p className="font-medium">{t.noConversations}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.noConversationsDesc}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {state.latestConversations.map((conversation) => {
+                const contact =
+                  conversation.contact?.display_name ||
+                  conversation.contact?.push_name ||
+                  conversation.contact?.phone_number ||
+                  t.noRecipient
 
-            <Button asChild variant="outline" className="gap-2">
-              <Link href="/system/whatsapp/logs">
-                {t.viewAll}
-                <ArrowUpRight className="h-4 w-4" />
-              </Link>
-            </Button>
-          </CardHeader>
+                return (
+                  <Link
+                    key={conversation.id}
+                    href="/system/whatsapp/conversations"
+                    className="rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold">{contact}</p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground" dir="ltr">
+                          {conversation.contact?.phone_number || t.noRecipient}
+                        </p>
 
-          <CardContent className="space-y-3">
-            {state.loading ? (
-              <div className="flex min-h-[240px] items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
-            ) : state.logs.length === 0 ? (
-              <div className="rounded-2xl border border-dashed p-8 text-center">
-                <p className="font-medium">{t.noMessagesYet}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{t.noMessagesDesc}</p>
-              </div>
-            ) : (
-              state.logs.slice(0, 6).map((item, index) => (
-                <div key={item.id}>
-                  <div className="flex flex-col gap-3 rounded-2xl border p-4 md:flex-row md:items-center md:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <WhatsAppStatusBadge status={item.status} locale={locale} />
-                        <Badge variant="outline">{item.message_type || t.message}</Badge>
-                        {item.template_name ? (
-                          <Badge variant="secondary">{item.template_name}</Badge>
-                        ) : null}
+                        <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">
+                          {conversation.last_message_preview || "—"}
+                        </p>
                       </div>
 
-                      <p className="mt-3 truncate text-sm font-semibold" dir="ltr">
-                        {item.recipient_phone || t.noRecipient}
-                      </p>
-
-                      <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                        {formatDate(item.created_at, locale)}
-                      </p>
-
-                      {item.error_message ? (
-                        <p className="mt-2 text-xs text-destructive">{item.error_message}</p>
+                      {(conversation.unread_count || 0) > 0 ? (
+                        <Badge variant="destructive" dir="ltr">
+                          {formatNumber(conversation.unread_count)}
+                        </Badge>
                       ) : null}
                     </div>
 
-                    <div className="shrink-0 text-xs text-muted-foreground" dir="ltr">
-                      {item.provider_message_id || "—"}
+                    <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{conversation.status || t.unknown}</span>
+                      <span dir="ltr">{formatDate(conversation.last_message_at, locale)}</span>
                     </div>
-                  </div>
-
-                  {index !== state.logs.slice(0, 6).length - 1 ? (
-                    <Separator className="my-3" />
-                  ) : null}
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          <Card className="border-0 shadow-lg">
-            <CardHeader className="flex flex-row items-center justify-between gap-4">
-              <div>
-                <CardTitle>{t.latestTemplates}</CardTitle>
-                <CardDescription>{t.latestTemplatesDesc}</CardDescription>
-              </div>
-
-              <Button asChild variant="outline" size="sm">
-                <Link href="/system/whatsapp/templates">{t.viewAll}</Link>
-              </Button>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              {state.loading ? (
-                <div className="flex min-h-[140px] items-center justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                </div>
-              ) : state.templates.length === 0 ? (
-                <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  {t.noTemplatesYet}
-                </div>
-              ) : (
-                state.templates.slice(0, 4).map((template) => (
-                  <div key={template.id} className="rounded-2xl border p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold">
-                          {template.name || t.untitledTemplate}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                          {template.language || "—"} • {template.category || "—"}
-                        </p>
-                      </div>
-
-                      <WhatsAppStatusBadge status={template.status} locale={locale} />
-                    </div>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-lg">
-            <CardHeader className="flex flex-row items-center justify-between gap-4">
-              <div>
-                <CardTitle>{t.latestBroadcasts}</CardTitle>
-                <CardDescription>{t.latestBroadcastsDesc}</CardDescription>
-              </div>
-
-              <Button asChild variant="outline" size="sm">
-                <Link href="/system/whatsapp/broadcasts">{t.viewAll}</Link>
-              </Button>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              {state.loading ? (
-                <div className="flex min-h-[140px] items-center justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                </div>
-              ) : state.broadcasts.length === 0 ? (
-                <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  {t.noBroadcastsYet}
-                </div>
-              ) : (
-                state.broadcasts.slice(0, 4).map((broadcast) => (
-                  <div key={broadcast.id} className="rounded-2xl border p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold">
-                          {broadcast.title || `Broadcast #${formatNumber(broadcast.id)}`}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                          {t.recipients}: {formatNumber(broadcast.recipient_count ?? 0)} • {t.sent}: {formatNumber(broadcast.sent_count ?? 0)}
-                        </p>
-                      </div>
-
-                      <WhatsAppStatusBadge status={broadcast.status} locale={locale} />
-                    </div>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

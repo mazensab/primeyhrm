@@ -27,6 +27,39 @@ const LOG_LEVEL = process.env.LOG_LEVEL || "info"
 const SESSIONS_DIR = path.resolve(__dirname, process.env.SESSIONS_DIR || "./sessions")
 const CORS_ORIGIN = (process.env.CORS_ORIGIN || "").trim()
 
+// ============================================================
+// 🔗 Backend Webhook Bridge Config
+// ============================================================
+// ملاحظة:
+// هذا هو الجسر الذي يربط Baileys Gateway مع Django backend.
+// نرسل إليه كل:
+// - الرسائل الواردة Inbound Messages
+// - تحديثات الرسائل Message Status Updates
+//
+// مثال:
+// WHATSAPP_BACKEND_WEBHOOK_URL=https://your-domain.com/api/system/whatsapp/webhook/receive/
+// WHATSAPP_BACKEND_WEBHOOK_TOKEN=your_internal_shared_secret
+// WHATSAPP_BACKEND_WEBHOOK_TIMEOUT_MS=10000
+// ============================================================
+
+const BACKEND_WEBHOOK_URL = (
+  process.env.WHATSAPP_BACKEND_WEBHOOK_URL ||
+  process.env.BACKEND_WEBHOOK_URL ||
+  ""
+).trim()
+
+const BACKEND_WEBHOOK_TOKEN = (
+  process.env.WHATSAPP_BACKEND_WEBHOOK_TOKEN ||
+  process.env.BACKEND_WEBHOOK_TOKEN ||
+  ""
+).trim()
+
+const BACKEND_WEBHOOK_TIMEOUT_MS = Number(
+  process.env.WHATSAPP_BACKEND_WEBHOOK_TIMEOUT_MS ||
+  process.env.BACKEND_WEBHOOK_TIMEOUT_MS ||
+  10000
+)
+
 const logger = pino({
   level: LOG_LEVEL,
 })
@@ -231,6 +264,405 @@ async function requestPairingCodeSafe(sock, normalizedPhone) {
   return code
 }
 
+// ============================================================
+// 🔧 Inbound / Webhook Bridge Helpers
+// ============================================================
+
+function isGroupJid(jid) {
+  return String(jid || "").endsWith("@g.us")
+}
+
+function isBroadcastJid(jid) {
+  return String(jid || "").includes("@broadcast")
+}
+
+function isStatusJid(jid) {
+  return String(jid || "").includes("status@broadcast")
+}
+
+function normalizePhoneFromJid(jid) {
+  const raw = String(jid || "").split(":")[0].split("@")[0]
+  const digits = digitsOnly(raw)
+  return digits || ""
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ""
+}
+
+function unixToIso(value) {
+  try {
+    const numeric = Number(value || 0)
+    if (!numeric) return ""
+    return new Date(numeric * 1000).toISOString()
+  } catch {
+    return ""
+  }
+}
+
+function getMessageType(message) {
+  if (!message || typeof message !== "object") {
+    return "unknown"
+  }
+
+  const keys = Object.keys(message)
+  if (!keys.length) {
+    return "unknown"
+  }
+
+  if (message.conversation) return "conversation"
+  if (message.extendedTextMessage) return "extendedTextMessage"
+  if (message.imageMessage) return "imageMessage"
+  if (message.videoMessage) return "videoMessage"
+  if (message.audioMessage) return "audioMessage"
+  if (message.documentMessage) return "documentMessage"
+  if (message.stickerMessage) return "stickerMessage"
+  if (message.locationMessage) return "locationMessage"
+  if (message.contactMessage) return "contactMessage"
+  if (message.contactsArrayMessage) return "contactsArrayMessage"
+  if (message.buttonsResponseMessage) return "buttonsResponseMessage"
+  if (message.listResponseMessage) return "listResponseMessage"
+  if (message.templateButtonReplyMessage) return "templateButtonReplyMessage"
+  if (message.ephemeralMessage) return "ephemeralMessage"
+  if (message.viewOnceMessage) return "viewOnceMessage"
+  if (message.viewOnceMessageV2) return "viewOnceMessageV2"
+  if (message.protocolMessage) return "protocolMessage"
+  return keys[0] || "unknown"
+}
+
+function unwrapMessage(message) {
+  let current = message || null
+
+  for (let i = 0; i < 5; i += 1) {
+    if (!current || typeof current !== "object") break
+
+    if (current.ephemeralMessage?.message) {
+      current = current.ephemeralMessage.message
+      continue
+    }
+
+    if (current.viewOnceMessage?.message) {
+      current = current.viewOnceMessage.message
+      continue
+    }
+
+    if (current.viewOnceMessageV2?.message) {
+      current = current.viewOnceMessageV2.message
+      continue
+    }
+
+    if (current.documentWithCaptionMessage?.message) {
+      current = current.documentWithCaptionMessage.message
+      continue
+    }
+
+    break
+  }
+
+  return current || {}
+}
+
+function extractTextFromMessage(message) {
+  const msg = unwrapMessage(message)
+
+  return firstNonEmpty(
+    msg?.conversation,
+    msg?.extendedTextMessage?.text,
+    msg?.imageMessage?.caption,
+    msg?.videoMessage?.caption,
+    msg?.documentMessage?.caption,
+    msg?.buttonsResponseMessage?.selectedDisplayText,
+    msg?.listResponseMessage?.title,
+    msg?.templateButtonReplyMessage?.selectedDisplayText,
+    msg?.buttonsResponseMessage?.selectedButtonId,
+    msg?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    ""
+  )
+}
+
+function extractMediaMeta(message) {
+  const msg = unwrapMessage(message)
+
+  if (msg?.imageMessage) {
+    return {
+      media_type: "image",
+      mimetype: firstNonEmpty(msg.imageMessage.mimetype),
+      caption: firstNonEmpty(msg.imageMessage.caption),
+      file_name: "",
+    }
+  }
+
+  if (msg?.videoMessage) {
+    return {
+      media_type: "video",
+      mimetype: firstNonEmpty(msg.videoMessage.mimetype),
+      caption: firstNonEmpty(msg.videoMessage.caption),
+      file_name: "",
+    }
+  }
+
+  if (msg?.audioMessage) {
+    return {
+      media_type: "audio",
+      mimetype: firstNonEmpty(msg.audioMessage.mimetype),
+      caption: "",
+      file_name: "",
+    }
+  }
+
+  if (msg?.documentMessage) {
+    return {
+      media_type: "document",
+      mimetype: firstNonEmpty(msg.documentMessage.mimetype),
+      caption: firstNonEmpty(msg.documentMessage.caption),
+      file_name: firstNonEmpty(msg.documentMessage.fileName),
+    }
+  }
+
+  if (msg?.stickerMessage) {
+    return {
+      media_type: "sticker",
+      mimetype: firstNonEmpty(msg.stickerMessage.mimetype),
+      caption: "",
+      file_name: "",
+    }
+  }
+
+  return {
+    media_type: "",
+    mimetype: "",
+    caption: "",
+    file_name: "",
+  }
+}
+
+function serializeInboundMessage(item, sessionName) {
+  const key = item?.key || {}
+  const message = item?.message || {}
+  const normalizedMessage = unwrapMessage(message)
+  const remoteJid = firstNonEmpty(key.remoteJid)
+  const participantJid = firstNonEmpty(key.participant)
+  const senderJid = firstNonEmpty(
+    key.fromMe ? "" : participantJid,
+    key.fromMe ? "" : remoteJid,
+    remoteJid
+  )
+  const senderPhone = normalizePhoneFromJid(senderJid)
+  const remotePhone = normalizePhoneFromJid(remoteJid)
+  const text = extractTextFromMessage(message)
+  const media = extractMediaMeta(message)
+
+  return {
+    session_name: sessionName,
+    source: "baileys_gateway",
+    provider: "whatsapp_web_session",
+    event_type: "inbound_message",
+    message_id: firstNonEmpty(key.id),
+    remote_jid: remoteJid,
+    participant_jid: participantJid,
+    sender_jid: senderJid,
+    sender_phone: senderPhone,
+    remote_phone: remotePhone,
+    push_name: firstNonEmpty(item?.pushName),
+    from_me: Boolean(key.fromMe),
+    is_group: isGroupJid(remoteJid),
+    is_broadcast: isBroadcastJid(remoteJid),
+    is_status: isStatusJid(remoteJid),
+    message_type: getMessageType(normalizedMessage),
+    text,
+    timestamp: Number(item?.messageTimestamp || 0) || 0,
+    timestamp_iso: unixToIso(item?.messageTimestamp),
+    media_type: media.media_type,
+    mime_type: media.mimetype,
+    caption: media.caption,
+    file_name: media.file_name,
+    raw_message: message,
+    raw_key: key,
+    raw_payload: item,
+  }
+}
+
+function serializeMessageUpdate(item, sessionName) {
+  const key = item?.key || {}
+  const update = item?.update || {}
+
+  return {
+    session_name: sessionName,
+    source: "baileys_gateway",
+    provider: "whatsapp_web_session",
+    event_type: "message_update",
+    message_id: firstNonEmpty(key.id),
+    remote_jid: firstNonEmpty(key.remoteJid),
+    participant_jid: firstNonEmpty(key.participant),
+    from_me: Boolean(key.fromMe),
+    update,
+    raw_payload: item,
+  }
+}
+
+async function postToBackendWebhook(payload) {
+  if (!BACKEND_WEBHOOK_URL) {
+    logger.warn(
+      { payload_event_type: payload?.event_type || payload?.event || "unknown" },
+      "WHATSAPP_BACKEND_WEBHOOK_URL is not configured; skipping backend webhook push"
+    )
+    return {
+      success: false,
+      skipped: true,
+      status_code: 0,
+      error_message: "Missing WHATSAPP_BACKEND_WEBHOOK_URL",
+    }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), BACKEND_WEBHOOK_TIMEOUT_MS)
+
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    }
+
+    if (BACKEND_WEBHOOK_TOKEN) {
+      headers["Authorization"] = `Bearer ${BACKEND_WEBHOOK_TOKEN}`
+      headers["X-Primey-Webhook-Token"] = BACKEND_WEBHOOK_TOKEN
+    }
+
+    const response = await fetch(BACKEND_WEBHOOK_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload || {}),
+      signal: controller.signal,
+    })
+
+    const rawText = await response.text()
+    let parsed = null
+
+    try {
+      parsed = rawText ? JSON.parse(rawText) : null
+    } catch {
+      parsed = null
+    }
+
+    if (!response.ok) {
+      logger.warn(
+        {
+          status: response.status,
+          webhook_url: BACKEND_WEBHOOK_URL,
+          response_body: rawText,
+          payload_event_type: payload?.event_type || payload?.event || "unknown",
+        },
+        "Backend webhook returned non-OK response"
+      )
+    }
+
+    return {
+      success: response.ok,
+      skipped: false,
+      status_code: response.status,
+      response_data: parsed,
+      response_text: rawText,
+    }
+  } catch (error) {
+    logger.error(
+      {
+        err: error,
+        webhook_url: BACKEND_WEBHOOK_URL,
+        payload_event_type: payload?.event_type || payload?.event || "unknown",
+      },
+      "Failed to push event to backend webhook"
+    )
+
+    return {
+      success: false,
+      skipped: false,
+      status_code: 0,
+      error_message: String(error?.message || error),
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function emitInboundMessagesToBackend({ sessionName, upsertType, messages }) {
+  const safeMessages = Array.isArray(messages) ? messages : []
+  if (!safeMessages.length) return
+
+  const normalizedMessages = safeMessages
+    .map((item) => serializeInboundMessage(item, sessionName))
+    .filter((item) => item && item.message_id)
+
+  if (!normalizedMessages.length) return
+
+  const payload = {
+    provider: "whatsapp_web_session",
+    source: "baileys_gateway",
+    event: "messages.upsert",
+    event_type: "messages_upsert",
+    scope_type: "SYSTEM",
+    session_name: sessionName,
+    upsert_type: firstNonEmpty(upsertType, "notify"),
+    received_at: nowIso(),
+    messages: normalizedMessages,
+  }
+
+  const result = await postToBackendWebhook(payload)
+
+  logger.info(
+    {
+      session: sessionName,
+      count: normalizedMessages.length,
+      upsert_type: payload.upsert_type,
+      webhook_success: result.success,
+      webhook_status_code: result.status_code,
+    },
+    "Inbound WhatsApp messages forwarded to backend webhook"
+  )
+}
+
+async function emitMessageUpdatesToBackend({ sessionName, updates }) {
+  const safeUpdates = Array.isArray(updates) ? updates : []
+  if (!safeUpdates.length) return
+
+  const serializedUpdates = safeUpdates
+    .map((item) => serializeMessageUpdate(item, sessionName))
+    .filter((item) => item && item.message_id)
+
+  if (!serializedUpdates.length) return
+
+  const payload = {
+    provider: "whatsapp_web_session",
+    source: "baileys_gateway",
+    event: "messages.update",
+    event_type: "messages_update",
+    scope_type: "SYSTEM",
+    session_name: sessionName,
+    received_at: nowIso(),
+    message_updates: serializedUpdates,
+  }
+
+  const result = await postToBackendWebhook(payload)
+
+  logger.info(
+    {
+      session: sessionName,
+      count: serializedUpdates.length,
+      webhook_success: result.success,
+      webhook_status_code: result.status_code,
+    },
+    "WhatsApp message updates forwarded to backend webhook"
+  )
+}
+
+// ============================================================
+// 🏗 Socket Builder
+// ============================================================
+
 async function buildSocket(state, { mode = "qr", phoneNumber = "" } = {}) {
   if (state.isStarting) {
     await waitForSessionOutcome(state, 12000)
@@ -275,6 +707,76 @@ async function buildSocket(state, { mode = "qr", phoneNumber = "" } = {}) {
     state.saveCreds = saveCreds
 
     sock.ev.on("creds.update", saveCreds)
+
+    // --------------------------------------------------------
+    // 📥 Inbound Messages Listener
+    // --------------------------------------------------------
+    sock.ev.on("messages.upsert", async (event) => {
+      try {
+        const upsertType = firstNonEmpty(event?.type, "notify")
+        const messages = Array.isArray(event?.messages) ? event.messages : []
+
+        if (!messages.length) {
+          return
+        }
+
+        const filtered = messages.filter((item) => {
+          const key = item?.key || {}
+          const remoteJid = firstNonEmpty(key.remoteJid)
+
+          // نتجاهل رسائل النظام والحالات والبث
+          if (key.fromMe) {
+            return false
+          }
+
+          if (!remoteJid) {
+            return false
+          }
+
+          if (isStatusJid(remoteJid)) {
+            return false
+          }
+
+          return true
+        })
+
+        if (!filtered.length) {
+          return
+        }
+
+        await emitInboundMessagesToBackend({
+          sessionName: state.sessionName,
+          upsertType,
+          messages: filtered,
+        })
+      } catch (error) {
+        logger.error(
+          { err: error, session: state.sessionName },
+          "messages.upsert handler failed"
+        )
+      }
+    })
+
+    // --------------------------------------------------------
+    // 🔄 Message Updates Listener
+    // --------------------------------------------------------
+    sock.ev.on("messages.update", async (updates) => {
+      try {
+        if (!Array.isArray(updates) || !updates.length) {
+          return
+        }
+
+        await emitMessageUpdatesToBackend({
+          sessionName: state.sessionName,
+          updates,
+        })
+      } catch (error) {
+        logger.error(
+          { err: error, session: state.sessionName },
+          "messages.update handler failed"
+        )
+      }
+    })
 
     sock.ev.on("connection.update", async (update) => {
       try {
@@ -460,6 +962,7 @@ app.get("/health", (_req, res) => {
     message: "Gateway is running",
     uptime_seconds: Math.floor(process.uptime()),
     sessions_count: sessions.size,
+    backend_webhook_enabled: Boolean(BACKEND_WEBHOOK_URL),
   })
 })
 
@@ -839,6 +1342,8 @@ async function bootstrap() {
         host: HOST,
         port: PORT,
         sessionsDir: SESSIONS_DIR,
+        backendWebhookEnabled: Boolean(BACKEND_WEBHOOK_URL),
+        backendWebhookUrl: BACKEND_WEBHOOK_URL || null,
       },
       "Primey WhatsApp Session Gateway started"
     )

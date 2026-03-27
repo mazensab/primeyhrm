@@ -204,6 +204,7 @@ def _get_user_phone(user) -> str:
 
     return ""
 
+
 def _serialize_company_user(item: CompanyUser) -> dict:
     user = item.user
 
@@ -238,7 +239,7 @@ def _get_frontend_base_url() -> str:
         getattr(settings, "FRONTEND_BASE_URL", None)
         or getattr(settings, "FRONTEND_URL", None)
         or getattr(settings, "NEXT_PUBLIC_APP_URL", None)
-        or "http://localhost:3000"
+        or "https://primeyride.com"
     ).rstrip("/")
 
 

@@ -625,10 +625,493 @@ def send_attendance_status_whatsapp_notifications(
 
 
 # ============================================================
-# 🏢 Company Default Template Bootstrap
+# 🧩 Default Template Seed Helpers
 # ============================================================
 
-def _company_template_seed_rows() -> list[dict[str, str]]:
+def _build_seed_defaults(seed: dict[str, Any]) -> dict[str, Any]:
+    """
+    توحيد defaults الخاصة بإنشاء القوالب الافتراضية.
+    """
+    return {
+        "template_key": seed["template_key"],
+        "template_name": seed["template_name"],
+        "message_type": seed.get("message_type", MessageType.TEXT),
+        "header_text": seed.get("header_text", ""),
+        "body_text": seed["body_text"],
+        "footer_text": seed.get("footer_text", ""),
+        "button_text": seed.get("button_text", ""),
+        "button_url": seed.get("button_url", ""),
+        "meta_template_name": seed.get("meta_template_name", ""),
+        "meta_template_namespace": seed.get("meta_template_namespace", ""),
+        "approval_status": seed.get("approval_status", TemplateApprovalStatus.DRAFT),
+        "provider_status": seed.get("provider_status", TemplateProviderSyncStatus.NOT_SYNCED),
+        "rejection_reason": seed.get("rejection_reason", ""),
+        "is_default": seed.get("is_default", True),
+        "is_active": seed.get("is_active", True),
+    }
+
+
+def _system_template_seed_rows() -> list[dict[str, Any]]:
+    """
+    القوالب الافتراضية الخاصة بالنظام.
+    مطابقة للقوالب المعتمدة حاليًا في اللوكل.
+    """
+
+    return [
+        {
+            "event_code": "company_created",
+            "template_key": "system_company_created_ar",
+            "template_name": "إنشاء شركة جديدة",
+            "language_code": "ar",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{company_name}}،\n"
+                "تم إنشاء شركتكم بنجاح في Primey HR Cloud.\n\n"
+                "تفاصيل الاشتراك:\n"
+                "- الباقة: {{plan_name}}\n"
+                "- تاريخ البداية: {{start_date}}\n"
+                "- تاريخ النهاية: {{end_date}}\n\n"
+                "يمكنكم تسجيل الدخول من خلال الرابط التالي:\n"
+                "{{login_url}}\n\n"
+                "نسعد بخدمتكم ونتطلع لتجربة موفقة."
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "company_created",
+            "template_key": "system_company_created_en",
+            "template_name": "Company Created Welcome",
+            "language_code": "en",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{company_name}},\n"
+                "Your company has been created successfully in Primey HR Cloud.\n\n"
+                "Subscription details:\n"
+                "- Plan: {{plan_name}}\n"
+                "- Start Date: {{start_date}}\n"
+                "- End Date: {{end_date}}\n\n"
+                "You can log in using the following link:\n"
+                "{{login_url}}\n\n"
+                "We are pleased to serve you and wish you a great experience."
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+        {
+            "event_code": "invoice_payment_details",
+            "template_key": "system_invoice_payment_details_ar",
+            "template_name": "إرسال بيانات الدفع",
+            "language_code": "ar",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًاا {{company_name}}،\n"
+                "تم إصدار فاتورة جديدة لكم، وفيما يلي بيانات الدفع:\n\n"
+                "- رقم الفاتورة: {{invoice_number}}\n"
+                "- المبلغ: {{amount}}\n"
+                "- طريقة الدفع: {{payment_method}}\n"
+                "- حالة الدفع: {{payment_status}}\n\n"
+                "يمكنكم متابعة الفاتورة أو إتمام السداد عبر الرابط التالي:\n"
+                "{{invoice_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "invoice_payment_details",
+            "template_key": "system_invoice_payment_details_en",
+            "template_name": "Payment Details Sent",
+            "language_code": "en",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{company_name}},\n"
+                "A new invoice has been issued for you. Please find the payment details below:\n\n"
+                "- Invoice Number: {{invoice_number}}\n"
+                "- Amount: {{amount}}\n"
+                "- Payment Method: {{payment_method}}\n"
+                "- Payment Status: {{payment_status}}\n\n"
+                "You can review the invoice or complete payment using the following link:\n"
+                "{{invoice_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+        {
+            "event_code": "invoice_pdf_sent",
+            "template_key": "system_invoice_pdf_sent_ar",
+            "template_name": "إرسال الفاتورة PDF",
+            "language_code": "ar",
+            "message_type": MessageType.DOCUMENT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{companyy_name}}،\n"
+                "تم إرسال نسخة الفاتورة الخاصة بكم بنجاح.\n\n"
+                "تفاصيل الفاتورة:\n"
+                "- رقم الفاتورة: {{invoice_number}}\n"
+                "- المبلغ: {{amount}}\n"
+                "- تاريخ الإصدار: {{invoice_date}}\n\n"
+                "تم إرفاق ملف الفاتورة PDF أو يمكنكم الوصول إليه عبر الرابط التالي:\n"
+                "{{invoice_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "invoice_pdf_sent",
+            "template_key": "system_invoice_pdf_sent_en",
+            "template_name": "Invoice PDF Sent",
+            "language_code": "en",
+            "message_type": MessageType.DOCUMENT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{company_name}},\n"
+                "Your invoice copy has been sent successfully.\n\n"
+                "Invoice details:\n"
+                "- Invoice Number: {{invoice_number}}\n"
+                "- Amount: {{amount}}\n"
+                "- Invoice Date: {{invoice_date}}\n\n"
+                "The invoice PDF has been attached, or you may access it using the following link:\n"
+                "{{invoice_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+        {
+            "event_code": "subscription_expiring_7_days",
+            "template_key": "system_subscription_expiring_7_days_ar",
+            "template_name": "تنبيه قرب انتهاء الاشتراك",
+            "language_code": "ar",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{company_name}}،\n"
+                "نود إشعاركم بأن اشتراككم الحالي على وشك الانتهاء خلال 7 أيام.\n\n"
+                "تفاصيل الاشترراك:\n"
+                "- الباقة الحالية: {{plan_name}}\n"
+                "- تاريخ الانتهاء: {{end_date}}\n\n"
+                "يرجى التجديد قبل تاريخ الانتهاء لتجنب توقف الخدمة.\n\n"
+                "رابط التجديد:\n"
+                "{{renewal_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "subscription_expiring_7_days",
+            "template_key": "system_subscription_expiring_7_days_en",
+            "template_name": "Subscription Expiring in 7 Days",
+            "language_code": "en",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{company_name}},\n"
+                "We would like to inform you that your current subscription will expire in 7 days.\n\n"
+                "Subscription details:\n"
+                "- Current Plan: {{plan_name}}\n"
+                "- Expiry Date: {{end_date}}\n\n"
+                "Please renew before the expiry date to avoid service interruption.\n\n"
+                "Renewal URL:\n"
+                "{{renewal_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+        {
+            "event_code": "subscription_plan_changed",
+            "template_key": "system_subscription_plan_changed_ar",
+            "template_name": "تغيير الباقة",
+            "language_code": "ar",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{{company_name}}،\n"
+                "تم تحديث باقتكم بنجاح في Primey HR Cloud.\n\n"
+                "تفاصيل التغيير:\n"
+                "- الباقة السابقة: {{old_plan_name}}\n"
+                "- الباقة الجديدة: {{new_plan_name}}\n"
+                "- تاريخ التفعيل: {{effective_date}}\n\n"
+                "يمكنكم مراجعة تفاصيل الاشتراك من خلال الرابط التالي:\n"
+                "{{subscription_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "subscription_plan_changed",
+            "template_key": "system_subscription_plan_changed_en",
+            "template_name": "Subscription Plan Changed",
+            "language_code": "en",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{company_name}},\n"
+                "Your subscription plan has been updated successfully in Primey HR Cloud.\n\n"
+                "Change details:\n"
+                "- Previous Plan: {{old_plan_name}}\n"
+                "- New Plan: {{new_plan_name}}\n"
+                "- Effective Date: {{effective_date}}\n\n"
+                "You can review your subscription details using the following link:\n"
+                "{{subscription_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+        {
+            "event_code": "subscription_stopped",
+            "template_key": "system_subscription_stopped_ar",
+            "template_name": "إيقاف الاشتراك",
+            "language_code": "ar",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{companyy_name}}،\n"
+                "نود إشعاركم بأنه تم إيقاف اشتراككم الحالي في Primey HR Cloud.\n\n"
+                "تفاصيل الحالة:\n"
+                "- الباقة: {{plan_name}}\n"
+                "- تاريخ الإيقاف: {{stopped_at}}\n"
+                "- السبب: {{stop_reason}}\n\n"
+                "لإعادة التفعيل أو مراجعة التفاصيل، يرجى استخدام الرابط التالي:\n"
+                "{{reactivation_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "subscription_stopped",
+            "template_key": "system_subscription_stopped_en",
+            "template_name": "Subscription Stopped Notification",
+            "language_code": "en",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{company_name}},\n"
+                "We would like to inform you that your current subscription in Primey HR Cloud has been stopped.\n\n"
+                "Status details:\n"
+                "- Plan: {{plan_name}}\n"
+                "- Stopped At: {{stopped_at}}\n"
+                "- Reason: {{stop_reason}}\n\n"
+                "To reactivate or review the details, please use the following link:\n"
+                "{{reactivation_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+        {
+            "event_code": "system_user_created",
+            "template_key": "system_user_created_ar",
+            "template_name": "إنشاء مستخدم جديد",
+            "language_code": "ar",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{full_name}}،\n"
+                "nتم إنشاء حسابك بنجاح في Primey HR Cloud.\n\n"
+                "بيانات الدخول:\n"
+                "- اسم المستخدم: {{username}}\n"
+                "- البريد الإلكتروني: {{email}}\n"
+                "- كلمة المرور المؤقتة: {{temporary_password}}\n\n"
+                "رابط الدخول:\n"
+                "{{login_url}}\n\n"
+                "ننصح بتغيير كلمة المرور فور تسجيل الدخول حفاظًا على أمان حسابك."
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "system_user_created",
+            "template_key": "system_user_created_en",
+            "template_name": "User Created Welcome",
+            "language_code": "en",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{full_name}},\n"
+                "Your account has been created successfully in Primey HR Cloud.\n\n"
+                "Login details:\n"
+                "- Username: {{username}}\n"
+                "- Email: {{email}}\n"
+                "- Temporary Password: {{temporary_password}}\n\n"
+                "Login URL:\n"
+                "{{login_url}}\n\n"
+                "For your account security, we recommend changing your password immediately after logging in."
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+        {
+            "event_code": "system_user_password_changed",
+            "template_key": "system_user_password_changed_ar",
+            "template_name": "تغيير كلمة المرور",
+            "language_code": "ar",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{full_name}}،\n"
+                "تم تغيير كلمة المرور الخاصة بحسابك بنجاح.\n\n"
+                "تفاصيل العملية:\n"
+                "- وقت التغيير: {{changed_at}}\n\n"
+                "إإذا لم تقم بهذا الإجراء، يرجى التواصل فورًا مع الدعم الفني أو مسؤول النظام.\n\n"
+                "رابط الدخول:\n"
+                "{{login_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": True,
+            "is_active": True,
+        },
+        {
+            "event_code": "system_user_password_changed",
+            "template_key": "system_user_password_changed_en",
+            "template_name": "Password Changed Notification",
+            "language_code": "en",
+            "message_type": MessageType.TEXT,
+            "header_text": "",
+            "body_text": (
+                "Hello {{full_name}},\n"
+                "Your account password has been changed successfully.\n\n"
+                "Change details:\n"
+                "- Changed At: {{changed_at}}\n\n"
+                "If you did not perform this action, please contact technical support or your system administrator immediately.\n\n"
+                "Login URL:\n"
+                "{{login_url}}"
+            ),
+            "footer_text": "",
+            "button_text": "",
+            "button_url": "",
+            "meta_template_name": "",
+            "meta_template_namespace": "",
+            "approval_status": TemplateApprovalStatus.APPROVED,
+            "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
+            "rejection_reason": "",
+            "is_default": False,
+            "is_active": True,
+        },
+    ]
+
+
+def _company_template_seed_rows() -> list[dict[str, Any]]:
     """
     القوالب الافتراضية الخاصة بالشركة.
     ملاحظة:
@@ -1142,6 +1625,91 @@ def _company_template_seed_rows() -> list[dict[str, str]]:
     ]
 
 
+def _create_or_get_seed_template(
+    *,
+    scope_type: str,
+    company=None,
+    seed: dict[str, Any],
+    user=None,
+):
+    item, created = WhatsAppTemplate.objects.get_or_create(
+        scope_type=scope_type,
+        company=company,
+        event_code=seed["event_code"],
+        language_code=seed["language_code"],
+        version=1,
+        defaults=_build_seed_defaults(seed),
+    )
+
+    if created and user and getattr(user, "is_authenticated", False):
+        update_fields: list[str] = []
+
+        if hasattr(item, "created_by"):
+            item.created_by = user
+            update_fields.append("created_by")
+
+        if hasattr(item, "updated_by"):
+            item.updated_by = user
+            update_fields.append("updated_by")
+
+        if update_fields:
+            item.save(update_fields=update_fields)
+
+    return item, created
+
+
+# ============================================================
+# 🖥 System Default Template Bootstrap
+# ============================================================
+
+@transaction.atomic
+def ensure_system_default_whatsapp_templates(user=None) -> dict[str, Any]:
+    """
+    إنشاء القوالب الافتراضية الخاصة بالنظام عند عدم وجودها.
+    - آمن ضد التكرار
+    - لا يخلط مع قوالب الشركة
+    - ينشئ النسخ العربية والإنجليزية
+    """
+    existing_system_count = WhatsAppTemplate.objects.filter(
+        scope_type=ScopeType.SYSTEM,
+        company__isnull=True,
+    ).count()
+
+    if existing_system_count > 0:
+        return {
+            "created": 0,
+            "existing": existing_system_count,
+            "total_system_templates": existing_system_count,
+        }
+
+    created_count = 0
+
+    for seed in _system_template_seed_rows():
+        _, created = _create_or_get_seed_template(
+            scope_type=ScopeType.SYSTEM,
+            company=None,
+            seed=seed,
+            user=user,
+        )
+        if created:
+            created_count += 1
+
+    total_system_templates = WhatsAppTemplate.objects.filter(
+        scope_type=ScopeType.SYSTEM,
+        company__isnull=True,
+    ).count()
+
+    return {
+        "created": created_count,
+        "existing": total_system_templates - created_count,
+        "total_system_templates": total_system_templates,
+    }
+
+
+# ============================================================
+# 🏢 Company Default Template Bootstrap
+# ============================================================
+
 @transaction.atomic
 def ensure_company_default_whatsapp_templates(company, user=None) -> dict[str, Any]:
     """
@@ -1172,37 +1740,13 @@ def ensure_company_default_whatsapp_templates(company, user=None) -> dict[str, A
     created_count = 0
 
     for seed in _company_template_seed_rows():
-        item, created = WhatsAppTemplate.objects.get_or_create(
+        _, created = _create_or_get_seed_template(
             scope_type=ScopeType.COMPANY,
             company=company,
-            event_code=seed["event_code"],
-            language_code=seed["language_code"],
-            version=1,
-            defaults={
-                "template_key": seed["template_key"],
-                "template_name": seed["template_name"],
-                "message_type": MessageType.TEXT,
-                "header_text": seed.get("header_text", ""),
-                "body_text": seed["body_text"],
-                "footer_text": seed.get("footer_text", ""),
-                "button_text": "",
-                "button_url": "",
-                "meta_template_name": "",
-                "meta_template_namespace": "",
-                "approval_status": TemplateApprovalStatus.DRAFT,
-                "provider_status": TemplateProviderSyncStatus.NOT_SYNCED,
-                "is_default": True,
-                "is_active": True,
-            },
+            seed=seed,
+            user=user,
         )
-
         if created:
-            if user and getattr(user, "is_authenticated", False):
-                if hasattr(item, "created_by"):
-                    item.created_by = user
-                if hasattr(item, "updated_by"):
-                    item.updated_by = user
-                item.save(update_fields=["created_by", "updated_by"])
             created_count += 1
 
     total_company_templates = WhatsAppTemplate.objects.filter(
