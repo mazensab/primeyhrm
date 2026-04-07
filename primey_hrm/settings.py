@@ -59,8 +59,8 @@ ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     "160.153.175.81",
-    "primeyride.com",
-    ".primeyride.com",
+    "mhamcloud.com",
+    ".mhamcloud.com",
 ]
 
 SECURE_CONTENT_TYPE_NOSNIFF = env_bool("SECURE_CONTENT_TYPE_NOSNIFF", True)
