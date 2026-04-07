@@ -1,11 +1,14 @@
-import { cookies } from "next/headers";
+"use client";
+
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
-  DribbbleIcon,
   FacebookIcon,
   LinkedinIcon,
   Twitter,
+  Instagram,
+  Youtube,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,7 +28,7 @@ type FooterContent = {
     socials: string;
   };
   links: {
-    github: string;
+    facebook: string;
     twitter: string;
     instagram: string;
     ios: string;
@@ -34,29 +37,42 @@ type FooterContent = {
     contactUs: string;
     faq: string;
     feedback: string;
-    twitch: string;
-    discord: string;
-    dribbble: string;
+    youtube: string;
+    linkedin: string;
   };
   logoAlt: string;
 };
 
 /* =========================================================
-   🌐 Language Helper
+   🍪 Cookie Helpers
 ========================================================= */
-async function getPageLang(): Promise<AppLang> {
-  const cookieStore = await cookies();
+function getCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
 
-  const cookieLang =
-    cookieStore.get("lang")?.value ||
-    cookieStore.get("locale")?.value ||
-    cookieStore.get("NEXT_LOCALE")?.value ||
-    "";
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`));
 
-  const normalizedLang = cookieLang.toLowerCase();
-
-  return normalizedLang.startsWith("ar") ? "ar" : "en";
+  return match ? decodeURIComponent(match.split("=")[1]) : null;
 }
+
+function getCurrentLang(): AppLang {
+  const cookieLang =
+    getCookie("lang") || getCookie("locale") || getCookie("NEXT_LOCALE") || "";
+
+  return cookieLang.toLowerCase().startsWith("ar") ? "ar" : "en";
+}
+
+/* =========================================================
+   🔗 External Links
+========================================================= */
+const SOCIAL_LINKS = {
+  facebook: "https://www.facebook.com/mhamcloud",
+  instagram: "https://www.instagram.com/mhamcloud",
+  twitter: "https://twitter.com/mhamcloud",
+  youtube: "https://www.youtube.com/@mhamcloud",
+  linkedin: "https://in.linkedin.com/company/mhamcloud",
+} as const;
 
 /* =========================================================
    📝 Localized Content
@@ -72,8 +88,8 @@ const content: Record<AppLang, FooterContent> = {
       socials: "الشبكات الاجتماعية",
     },
     links: {
-      github: "جيت هب",
-      twitter: "تويتر",
+      facebook: "فيسبوك",
+      twitter: "إكس",
       instagram: "إنستغرام",
       ios: "iOS",
       android: "أندرويد",
@@ -81,9 +97,8 @@ const content: Record<AppLang, FooterContent> = {
       contactUs: "تواصل معنا",
       faq: "الأسئلة الشائعة",
       feedback: "ملاحظاتك",
-      twitch: "تويتش",
-      discord: "ديسكورد",
-      dribbble: "دريبل",
+      youtube: "يوتيوب",
+      linkedin: "لينكدإن",
     },
     logoAlt: "شعار Primey الرئيسي",
   },
@@ -97,8 +112,8 @@ const content: Record<AppLang, FooterContent> = {
       socials: "Socials",
     },
     links: {
-      github: "Github",
-      twitter: "Twitter",
+      facebook: "Facebook",
+      twitter: "X",
       instagram: "Instagram",
       ios: "iOS",
       android: "Android",
@@ -106,9 +121,8 @@ const content: Record<AppLang, FooterContent> = {
       contactUs: "Contact Us",
       faq: "FAQ",
       feedback: "Feedback",
-      twitch: "Twitch",
-      discord: "Discord",
-      dribbble: "Dribbble",
+      youtube: "YouTube",
+      linkedin: "LinkedIn",
     },
     logoAlt: "Primey main hero logo",
   },
@@ -117,8 +131,30 @@ const content: Record<AppLang, FooterContent> = {
 /* =========================================================
    🧩 Section
 ========================================================= */
-export const FooterSection = async () => {
-  const lang = await getPageLang();
+export const FooterSection = () => {
+  const [lang, setLang] = useState<AppLang>("en");
+
+  useEffect(() => {
+    const updateLang = () => {
+      setLang(getCurrentLang());
+    };
+
+    updateLang();
+
+    const observer = new MutationObserver(() => {
+      updateLang();
+    });
+
+    if (typeof document !== "undefined") {
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["lang", "dir"],
+      });
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
   const isArabic = lang === "ar";
   const t = content[lang];
 
@@ -167,21 +203,36 @@ export const FooterSection = async () => {
             <h3 className="mb-2 text-lg font-bold">{t.groups.contact}</h3>
 
             <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.github}
-              </Link>
+              <a
+                href={SOCIAL_LINKS.facebook}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-60 hover:opacity-100"
+              >
+                {t.links.facebook}
+              </a>
             </div>
 
             <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
+              <a
+                href={SOCIAL_LINKS.twitter}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-60 hover:opacity-100"
+              >
                 {t.links.twitter}
-              </Link>
+              </a>
             </div>
 
             <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
+              <a
+                href={SOCIAL_LINKS.instagram}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-60 hover:opacity-100"
+              >
                 {t.links.instagram}
-              </Link>
+              </a>
             </div>
           </div>
 
@@ -233,21 +284,36 @@ export const FooterSection = async () => {
             <h3 className="mb-2 text-lg font-bold">{t.groups.socials}</h3>
 
             <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.twitch}
-              </Link>
+              <a
+                href={SOCIAL_LINKS.youtube}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-60 hover:opacity-100"
+              >
+                {t.links.youtube}
+              </a>
             </div>
 
             <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.discord}
-              </Link>
+              <a
+                href={SOCIAL_LINKS.linkedin}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-60 hover:opacity-100"
+              >
+                {t.links.linkedin}
+              </a>
             </div>
 
             <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.dribbble}
-              </Link>
+              <a
+                href={SOCIAL_LINKS.instagram}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-60 hover:opacity-100"
+              >
+                {t.links.instagram}
+              </a>
             </div>
           </div>
         </div>
@@ -267,37 +333,64 @@ export const FooterSection = async () => {
         >
           <span>&copy; {new Date().getFullYear()}</span>
           <span>|</span>
-          <Button variant="link" className="h-auto p-0" asChild>
-            <Link target="_blank" href="https://bundui.io/">
-              Bundui
-            </Link>
-          </Button>
+          <span className="font-medium">Mhamcloud</span>
           <span>.</span>
         </div>
 
         <div className="flex items-center justify-center gap-2">
           <Button size="icon" variant="ghost" className="hover:opacity-50" asChild>
-            <Link href="#">
+            <a
+              href={SOCIAL_LINKS.facebook}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Facebook"
+            >
               <FacebookIcon />
-            </Link>
+            </a>
           </Button>
 
           <Button size="icon" variant="ghost" className="hover:opacity-50" asChild>
-            <Link href="#">
+            <a
+              href={SOCIAL_LINKS.twitter}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Twitter X"
+            >
               <Twitter />
-            </Link>
+            </a>
           </Button>
 
           <Button size="icon" variant="ghost" className="hover:opacity-50" asChild>
-            <Link href="#">
-              <DribbbleIcon />
-            </Link>
+            <a
+              href={SOCIAL_LINKS.instagram}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Instagram"
+            >
+              <Instagram />
+            </a>
           </Button>
 
           <Button size="icon" variant="ghost" className="hover:opacity-50" asChild>
-            <Link href="#">
+            <a
+              href={SOCIAL_LINKS.youtube}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="YouTube"
+            >
+              <Youtube />
+            </a>
+          </Button>
+
+          <Button size="icon" variant="ghost" className="hover:opacity-50" asChild>
+            <a
+              href={SOCIAL_LINKS.linkedin}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="LinkedIn"
+            >
               <LinkedinIcon />
-            </Link>
+            </a>
           </Button>
         </div>
       </div>

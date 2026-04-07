@@ -380,7 +380,10 @@ export const PricingSection = () => {
     const monthly = normalizeNumber(firstPlanWithDiscount.price_monthly);
     const yearly = normalizeNumber(firstPlanWithDiscount.price_yearly);
 
-    const discount = Math.round(((monthly * 12 - yearly) / (monthly * 12)) * 100);
+    const discount = Math.round(
+      ((monthly * 12 - yearly) / (monthly * 12)) * 100
+    );
+
     return discount > 0 ? discount : 0;
   }, [sortedPlans]);
 
@@ -412,13 +415,18 @@ export const PricingSection = () => {
                 }}
               >
                 {periods.map((period) => (
-                  <Button key={period.value} data-id={period.value} variant="ghost">
+                  <Button
+                    key={period.value}
+                    data-id={period.value}
+                    variant="ghost"
+                  >
                     {period.label}
-                    {period.value === "annually" && annualDiscountPercent > 0 && (
-                      <Badge className="ms-1 border-0 bg-transparent text-green-600">
-                        {t.saveLabel} {annualDiscountPercent}%
-                      </Badge>
-                    )}
+                    {period.value === "annually" &&
+                      annualDiscountPercent > 0 && (
+                        <Badge className="ms-1 border-0 bg-transparent text-green-600">
+                          {t.saveLabel} {annualDiscountPercent}%
+                        </Badge>
+                      )}
                   </Button>
                 ))}
               </AnimatedBackground>
@@ -497,7 +505,9 @@ export const PricingSection = () => {
                       <div
                         className={cn(
                           "bg-primary text-primary-foreground absolute top-0 rounded-bl-lg px-3 py-1 text-xs font-medium",
-                          isArabic ? "left-0 rounded-br-lg rounded-bl-none" : "right-0"
+                          isArabic
+                            ? "left-0 rounded-br-lg rounded-bl-none"
+                            : "right-0"
                         )}
                       >
                         {t.mostPopular}
@@ -511,18 +521,12 @@ export const PricingSection = () => {
                     </CardHeader>
 
                     <CardContent className="flex h-full flex-col">
+                      {/* ✅ سطر السعر يجب أن يبقى LTR دائمًا حتى لا تنعكس الأرقام */}
                       <div
-                        className={cn(
-                          "flex items-end gap-2",
-                          isArabic && "flex-row-reverse justify-end"
-                        )}
+                        dir="ltr"
+                        className="flex items-end justify-start gap-2 whitespace-nowrap"
                       >
-                        <div
-                          className={cn(
-                            "flex items-center gap-2 text-4xl font-bold",
-                            isArabic && "flex-row-reverse"
-                          )}
-                        >
+                        <div className="flex items-center gap-2 text-4xl font-bold tabular-nums">
                           <Image
                             src="/currency/sar.svg"
                             alt="SAR"
@@ -530,12 +534,12 @@ export const PricingSection = () => {
                             height={28}
                             className="h-7 w-7 shrink-0"
                           />
-                          <span className="flex items-baseline">
+                          <span className="flex items-baseline tabular-nums leading-none">
                             <SlidingNumber value={currentPrice} />
                           </span>
                         </div>
 
-                        <span className="text-muted-foreground mb-1 text-sm">
+                        <span className="text-muted-foreground mb-1 shrink-0 text-sm">
                           /{selectedPeriod.label}
                         </span>
                       </div>
@@ -551,7 +555,12 @@ export const PricingSection = () => {
                         </p>
                       )}
 
-                      <p className={cn("text-muted-foreground mt-3", isArabic && "text-right")}>
+                      <p
+                        className={cn(
+                          "text-muted-foreground mt-3",
+                          isArabic && "text-right"
+                        )}
+                      >
                         {plan.description || t.fallbackPlanDescription}
                       </p>
 
@@ -560,13 +569,19 @@ export const PricingSection = () => {
                           <div
                             className={cn(
                               "text-muted-foreground mb-2 flex items-center gap-2 text-xs",
-                              isArabic && "flex-row-reverse justify-end text-right"
+                              isArabic &&
+                                "flex-row-reverse justify-end text-right"
                             )}
                           >
                             <Building2 className="size-4" />
                             <span>{t.companies}</span>
                           </div>
-                          <p className={cn("font-semibold", isArabic && "text-right")}>
+                          <p
+                            className={cn(
+                              "font-semibold",
+                              isArabic && "text-right"
+                            )}
+                          >
                             {formatLimit(plan.max_companies)}
                           </p>
                         </div>
@@ -575,13 +590,19 @@ export const PricingSection = () => {
                           <div
                             className={cn(
                               "text-muted-foreground mb-2 flex items-center gap-2 text-xs",
-                              isArabic && "flex-row-reverse justify-end text-right"
+                              isArabic &&
+                                "flex-row-reverse justify-end text-right"
                             )}
                           >
                             <Users className="size-4" />
                             <span>{t.employees}</span>
                           </div>
-                          <p className={cn("font-semibold", isArabic && "text-right")}>
+                          <p
+                            className={cn(
+                              "font-semibold",
+                              isArabic && "text-right"
+                            )}
+                          >
                             {formatLimit(plan.max_employees)}
                           </p>
                         </div>
@@ -591,7 +612,8 @@ export const PricingSection = () => {
                         <div
                           className={cn(
                             "mb-3 flex items-center gap-2 text-sm font-medium",
-                            isArabic && "flex-row-reverse justify-end text-right"
+                            isArabic &&
+                              "flex-row-reverse justify-end text-right"
                           )}
                         >
                           <LayoutGrid className="text-primary size-4" />
@@ -604,7 +626,8 @@ export const PricingSection = () => {
                               key={`${plan.id}-${index}`}
                               className={cn(
                                 "flex items-center",
-                                isArabic && "flex-row-reverse justify-end text-right"
+                                isArabic &&
+                                  "flex-row-reverse justify-end text-right"
                               )}
                             >
                               <Check
@@ -621,7 +644,10 @@ export const PricingSection = () => {
 
                       <div className="mt-6 flex-grow" />
 
-                      <Button asChild variant={isPopular ? "default" : "outline"}>
+                      <Button
+                        asChild
+                        variant={isPopular ? "default" : "outline"}
+                      >
                         <Link href="/register">{t.getStarted}</Link>
                       </Button>
                     </CardContent>
