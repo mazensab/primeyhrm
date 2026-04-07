@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/event_router.py
-# Primey HR Cloud - WhatsApp Event Router
+# Mham Cloud - WhatsApp Event Router
 # ============================================================
 
 from .models import ScopeType, TriggerSource

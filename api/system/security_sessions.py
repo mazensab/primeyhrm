@@ -1,5 +1,5 @@
 # ============================================================
-# 🔐 PRIMEY HR CLOUD — SYSTEM SECURITY SESSIONS (Ω+)
+# 🔐 Mham Cloud — SYSTEM SECURITY SESSIONS (Ω+)
 # SuperAdmin Session Monitor
 # ============================================================
 

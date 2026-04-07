@@ -1,6 +1,6 @@
 # =====================================================================
 # 💳 PaymentTransaction V2 Ultra Clean
-# Primey HR Cloud — Unified Payment Tracking Layer
+# Mham Cloud — Unified Payment Tracking Layer
 # =====================================================================
 
 from django.db import models

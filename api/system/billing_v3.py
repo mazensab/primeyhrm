@@ -1,21 +1,25 @@
 # ============================================================================
-# 🟦 Billing & Subscription API — V4.4 Ultra Stable (Payment Based)
-# Primey HR Cloud — Super Admin & Company Level
+# 🟦 Billing & Subscription API — V4.5 Clean Notifications
+# Mham Cloud — Super Admin & Company Level
 # ============================================================================
 # ✔ Single Source of Truth (Payment)
 # ✔ Compatible with Models V9
 # ✔ SAFE ADDITIONS ONLY
 # ✔ Subscription Flow: PENDING → CONFIRM → ACTIVE
+# ✔ Notification Center Integrated
 # ============================================================================
+
+from __future__ import annotations
+
+import json
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.timezone import now, timedelta
-from django.db.models import Sum, Count
+from django.db.models import Sum
 from django.db import transaction
-import json
 
 from company_manager.models import Company, CompanyUser
 from billing_center.models import (
@@ -24,6 +28,8 @@ from billing_center.models import (
     Invoice,
     Payment,
 )
+from notification_center.services import notify_many, create_notification
+
 
 # ============================================================================
 # 🔹 Helpers
@@ -77,6 +83,206 @@ def serialize_subscription(subscription):
     }
 
 
+def _safe_company_users(company):
+    return (
+        CompanyUser.objects
+        .filter(company=company, is_active=True, user__isnull=False)
+        .select_related("user")
+    )
+
+
+def _safe_company_recipients(company):
+    recipients = []
+    seen_user_ids = set()
+
+    for company_user in _safe_company_users(company):
+        user = getattr(company_user, "user", None)
+        user_id = getattr(user, "id", None)
+        if not user or not user_id or user_id in seen_user_ids:
+            continue
+
+        seen_user_ids.add(user_id)
+        recipients.append(user)
+
+    owner = getattr(company, "owner", None)
+    owner_id = getattr(owner, "id", None)
+    if owner and owner_id and owner_id not in seen_user_ids:
+        recipients.append(owner)
+
+    return recipients
+
+
+def _notify_company_subscription_renewed(
+    *,
+    company,
+    subscription,
+    invoice,
+    actor=None,
+    months: int = 0,
+    years: int = 0,
+):
+    recipients = _safe_company_recipients(company)
+    if not recipients:
+        return []
+
+    duration_label = f"{months} شهر" if months > 0 else f"{years} سنة"
+
+    return notify_many(
+        recipients=receptors if False else recipients,
+        title="تم تجديد الاشتراك بنجاح",
+        message=(
+            f"تم تجديد اشتراك الشركة ({company.name}) بنجاح لمدة {duration_label}."
+        ),
+        notification_type="billing",
+        severity="success",
+        send_email=True,
+        send_whatsapp=False,
+        link=None,
+        company=company,
+        event_code="subscription_renewed",
+        event_group="billing",
+        actor=actor,
+        language_code="ar",
+        source="billing_v3.company_subscription_renew",
+        context={
+            "company_id": company.id,
+            "company_name": company.name,
+            "subscription_id": subscription.id if subscription else None,
+            "invoice_id": invoice.id if invoice else None,
+            "invoice_number": invoice.invoice_number if invoice else "",
+            "months": months,
+            "years": years,
+            "new_end_date": str(subscription.end_date) if subscription and subscription.end_date else "",
+        },
+        target_object=subscription,
+        template_key="subscription_renewed",
+    )
+
+
+def _notify_company_subscription_changed(
+    *,
+    company,
+    subscription,
+    old_plan_name: str,
+    new_plan_name: str,
+    actor=None,
+):
+    recipients = _safe_company_recipients(company)
+    if not recipients:
+        return []
+
+    return notify_many(
+        recipients=recipients,
+        title="تم تغيير خطة الاشتراك",
+        message=(
+            f"تم تغيير خطة اشتراك الشركة ({company.name}) من "
+            f"({old_plan_name or '-'}) إلى ({new_plan_name or '-'}) بنجاح."
+        ),
+        notification_type="billing",
+        severity="info",
+        send_email=True,
+        send_whatsapp=False,
+        link=None,
+        company=company,
+        event_code="subscription_plan_changed",
+        event_group="billing",
+        actor=actor,
+        language_code="ar",
+        source="billing_v3.company_subscription_change",
+        context={
+            "company_id": company.id,
+            "company_name": company.name,
+            "subscription_id": subscription.id if subscription else None,
+            "old_plan_name": old_plan_name or "",
+            "new_plan_name": new_plan_name or "",
+        },
+        target_object=subscription,
+        template_key="subscription_plan_changed",
+    )
+
+
+def _notify_company_subscription_confirmed(
+    *,
+    company,
+    subscription,
+    invoice,
+    payment,
+    actor=None,
+    billing_cycle: str = "monthly",
+):
+    recipients = _safe_company_recipients(company)
+    if not recipients:
+        return []
+
+    return notify_many(
+        recipients=recipients,
+        title="تم تفعيل الاشتراك بنجاح",
+        message=(
+            f"تم تأكيد الدفع وتفعيل اشتراك الشركة ({company.name}) بنجاح."
+        ),
+        notification_type="billing",
+        severity="success",
+        send_email=True,
+        send_whatsapp=True,
+        link=None,
+        company=company,
+        event_code="subscription_confirmed",
+        event_group="billing",
+        actor=actor,
+        language_code="ar",
+        source="billing_v3.confirm_subscription",
+        context={
+            "company_id": company.id,
+            "company_name": company.name,
+            "subscription_id": subscription.id if subscription else None,
+            "invoice_id": invoice.id if invoice else None,
+            "invoice_number": invoice.invoice_number if invoice else "",
+            "payment_id": payment.id if payment else None,
+            "reference_number": getattr(payment, "reference_number", "") if payment else "",
+            "billing_cycle": billing_cycle,
+            "start_date": str(subscription.start_date) if subscription and subscription.start_date else "",
+            "end_date": str(subscription.end_date) if subscription and subscription.end_date else "",
+        },
+        target_object=subscription,
+        template_key="subscription_confirmed",
+    )
+
+
+def _notify_super_admin_billing_event(
+    *,
+    title: str,
+    message: str,
+    event_code: str,
+    company=None,
+    actor=None,
+    context: dict | None = None,
+    target_object=None,
+):
+    if not actor or not getattr(actor, "is_authenticated", False):
+        return None
+
+    return create_notification(
+        recipient=actor,
+        title=title,
+        message=message,
+        notification_type="billing_admin",
+        severity="info",
+        send_email=False,
+        send_whatsapp=False,
+        link=None,
+        company=company,
+        event_code=event_code,
+        event_group="billing",
+        actor=actor,
+        target_user=actor,
+        language_code="ar",
+        source=f"billing_v3.{event_code}",
+        context=context or {},
+        target_object=target_object,
+        template_key=event_code,
+    )
+
+
 # ============================================================================
 # 1️⃣ Subscription — Company Detail
 # ============================================================================
@@ -122,11 +328,17 @@ def company_subscription_renew(request, company_id):
     if not subscription or not subscription.plan:
         return JsonResponse({"error": "No active subscription"}, status=400)
 
-    months = int(request.GET.get("months", 0))
-    years = int(request.GET.get("years", 0))
+    try:
+        months = int(request.GET.get("months", 0))
+        years = int(request.GET.get("years", 0))
+    except Exception:
+        return JsonResponse({"error": "Invalid renewal period"}, status=400)
 
     if months <= 0 and years <= 0:
         return JsonResponse({"error": "Invalid renewal period"}, status=400)
+
+    if not subscription.end_date:
+        return JsonResponse({"error": "Subscription end_date is missing"}, status=400)
 
     if months > 0:
         amount = subscription.plan.price_monthly * months
@@ -138,12 +350,36 @@ def company_subscription_renew(request, company_id):
     subscription.end_date = new_end
     subscription.save(update_fields=["end_date"])
 
-    Invoice.objects.create(
+    invoice = Invoice.objects.create(
         company=company,
         subscription=subscription,
         invoice_number=f"INV-{company.id}-{int(now().timestamp())}",
         total_amount=amount,
         status="PAID",
+    )
+
+    _notify_company_subscription_renewed(
+        company=company,
+        subscription=subscription,
+        invoice=invoice,
+        actor=getattr(request, "user", None),
+        months=months,
+        years=years,
+    )
+
+    _notify_super_admin_billing_event(
+        title="تم تنفيذ تجديد اشتراك",
+        message=f"تم تجديد اشتراك الشركة ({company.name}) بنجاح.",
+        event_code="subscription_renewed_admin",
+        company=company,
+        actor=getattr(request, "user", None),
+        context={
+            "company_id": company.id,
+            "company_name": company.name,
+            "subscription_id": subscription.id,
+            "invoice_id": invoice.id,
+        },
+        target_object=subscription,
     )
 
     return JsonResponse({
@@ -171,13 +407,38 @@ def company_subscription_change(request, company_id):
     subscription = CompanySubscription.objects.filter(
         company=company,
         status="ACTIVE"
-    ).first()
+    ).select_related("plan").first()
 
     if not subscription:
         return JsonResponse({"error": "No active subscription"}, status=400)
 
+    old_plan_name = subscription.plan.name if subscription.plan else ""
     subscription.plan = new_plan
     subscription.save(update_fields=["plan"])
+
+    _notify_company_subscription_changed(
+        company=company,
+        subscription=subscription,
+        old_plan_name=old_plan_name,
+        new_plan_name=new_plan.name,
+        actor=getattr(request, "user", None),
+    )
+
+    _notify_super_admin_billing_event(
+        title="تم تغيير خطة اشتراك",
+        message=f"تم تغيير خطة الشركة ({company.name}) إلى ({new_plan.name}).",
+        event_code="subscription_plan_changed_admin",
+        company=company,
+        actor=getattr(request, "user", None),
+        context={
+            "company_id": company.id,
+            "company_name": company.name,
+            "subscription_id": subscription.id,
+            "old_plan_name": old_plan_name,
+            "new_plan_name": new_plan.name,
+        },
+        target_object=subscription,
+    )
 
     return JsonResponse({
         "status": "success",
@@ -210,8 +471,8 @@ def billing_overview(request):
             "expired": CompanySubscription.objects.filter(status="EXPIRED").count(),
         },
         "payments": {
-            "total_amount": Payment.objects.aggregate(total=Sum("amount"))["total"] or 0
-        }
+            "total_amount": Payment.objects.aggregate(total=Sum("amount"))["total"] or 0,
+        },
     })
 
 
@@ -225,7 +486,7 @@ def subscriptions_overview(request):
         "status": "success",
         "expiring_7_days": CompanySubscription.objects.filter(
             end_date__lte=today + timedelta(days=7),
-            status="ACTIVE"
+            status="ACTIVE",
         ).count(),
     })
 
@@ -280,7 +541,10 @@ def confirm_subscription(request):
     if not request.user.is_superuser:
         return JsonResponse({"error": "Permission denied"}, status=403)
 
-    payload = json.loads(request.body or "{}")
+    try:
+        payload = json.loads(request.body or "{}")
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
 
     company_id = payload.get("company_id")
     billing_cycle = payload.get("billing_cycle", "monthly")
@@ -289,7 +553,7 @@ def confirm_subscription(request):
     if not company_id or not reference_number:
         return JsonResponse(
             {"error": "company_id and reference_number are required"},
-            status=400
+            status=400,
         )
 
     try:
@@ -297,11 +561,10 @@ def confirm_subscription(request):
     except Company.DoesNotExist:
         return JsonResponse({"error": "Company not found"}, status=404)
 
-    # ❌ منع التفعيل المكرر
     if CompanySubscription.objects.filter(company=company, status="ACTIVE").exists():
         return JsonResponse(
             {"error": "Company already has an active subscription"},
-            status=400
+            status=400,
         )
 
     subscription = (
@@ -327,7 +590,6 @@ def confirm_subscription(request):
         end_date = now().date() + timedelta(days=30)
 
     with transaction.atomic():
-
         invoice = Invoice.objects.create(
             company=company,
             subscription=subscription,
@@ -336,7 +598,7 @@ def confirm_subscription(request):
             status="PAID",
         )
 
-        Payment.objects.create(
+        payment = Payment.objects.create(
             invoice=invoice,
             amount=amount,
             method="BANK_TRANSFER",
@@ -349,6 +611,33 @@ def confirm_subscription(request):
         subscription.end_date = end_date
         subscription.apps_snapshot = list(plan.apps or [])
         subscription.save()
+
+    _notify_company_subscription_confirmed(
+        company=company,
+        subscription=subscription,
+        invoice=invoice,
+        payment=payment,
+        actor=request.user,
+        billing_cycle=billing_cycle,
+    )
+
+    _notify_super_admin_billing_event(
+        title="تم تأكيد اشتراك نقدي",
+        message=f"تم تأكيد وتفعيل اشتراك الشركة ({company.name}) بنجاح.",
+        event_code="subscription_confirmed_admin",
+        company=company,
+        actor=request.user,
+        context={
+            "company_id": company.id,
+            "company_name": company.name,
+            "subscription_id": subscription.id,
+            "invoice_id": invoice.id,
+            "payment_id": payment.id,
+            "reference_number": reference_number,
+            "billing_cycle": billing_cycle,
+        },
+        target_object=subscription,
+    )
 
     return JsonResponse({
         "status": "success",

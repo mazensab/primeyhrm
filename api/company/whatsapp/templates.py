@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/company/whatsapp/templates.py
 # 🏢 Company WhatsApp Templates API
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations

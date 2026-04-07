@@ -1,5 +1,5 @@
 # ======================================================================
-# 🎨 Primey HR Cloud V14 — Enterprise Color Stack
+# 🎨 Mham Cloud V14 — Enterprise Color Stack
 # ----------------------------------------------------------------------
 # ملف مركزي لتحديد الألوان الرسمية لأنواع الإجازات (Leave Types)
 # هذا الملف يُستخدم في:
@@ -96,7 +96,7 @@ def get_leave_colors(category: str):
         "border": "rgba(156, 163, 175, 0.45)",
     })
 # ======================================================================
-# 🎨 Primey HR Cloud V14 — Enterprise Color Stack
+# 🎨 Mham Cloud V14 — Enterprise Color Stack
 # ----------------------------------------------------------------------
 # ملف مركزي لتحديد الألوان الرسمية لأنواع الإجازات (Leave Types)
 # ======================================================================
@@ -185,7 +185,7 @@ def get_leave_colors(category: str):
 
 class LeaveTypeColorEngine:
     """
-    🧠 محرك ألوان رسمي لنظام Primey HR Cloud
+    🧠 محرك ألوان رسمي لنظام Mham Cloud
     - يعيد Theme شامل (أيقونة + خلفية + حدود + نص)
     - جاهز للـ Calendar + Dashboard + API
     """

@@ -165,7 +165,7 @@ function ContactPageContent() {
                   <Mail className="h-4 w-4" />
                   <div className="font-semibold">Email</div>
                 </div>
-                <p className="text-sm text-muted-foreground">info@primeyride.com</p>
+                <p className="text-sm text-muted-foreground">info@mhamcloud.sa</p>
               </div>
 
               <div className="rounded-2xl border border-border/60 bg-muted/40 p-5">

@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/template_builder.py
-# Primey HR Cloud - WhatsApp Template Builder
+# Mham Cloud - WhatsApp Template Builder
 # ============================================================
 
 from __future__ import annotations

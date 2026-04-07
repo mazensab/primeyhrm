@@ -1,6 +1,6 @@
 // ============================================================
 // 📂 الملف: lib/whatsapp/constants.ts
-// 🟢 Primey HR Cloud - WhatsApp Module Constants
+// 🟢 Mham Cloud - WhatsApp Module Constants
 // ------------------------------------------------------------
 // ✅ الثوابت العامة الخاصة بموديول الواتساب
 // ✅ API Paths

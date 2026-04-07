@@ -1,7 +1,7 @@
 """
 ====================================================================
 🚨 System Alerts API (READ ONLY | Derived)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ No DB
 ✔ No persistence

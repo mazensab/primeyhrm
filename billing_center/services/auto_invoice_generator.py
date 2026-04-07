@@ -1,26 +1,29 @@
 # ============================================================
 # 🧾 Auto Invoice Generator — S3-B
-# Primey HR Cloud | Ultra Stable V1
+# Mham Cloud | Ultra Stable V2
 # ============================================================
 # ✔ Uses BillingCycleEngine decisions
 # ✔ Creates Invoice only
 # ✔ Snapshot-based
 # ✔ Idempotent-safe (basic)
 # ✔ No Scheduler / No Payments / No Enforcement
+# ✔ Notification Ready
 # ============================================================
 
+from __future__ import annotations
+
 from decimal import Decimal
-from datetime import timedelta
-from typing import List, Dict
+from typing import Dict, List
 
 from django.db import transaction
 from django.utils import timezone
 
-from billing_center.models import Invoice, CompanySubscription
+from billing_center.models import CompanySubscription, Invoice
 from billing_center.services.billing_cycle_engine import (
     BillingCycleEngine,
     DECISION_READY_FOR_RENEW,
 )
+from billing_center.services.billing_notifications import notify_invoice_created
 
 
 class AutoInvoiceGenerator:
@@ -44,9 +47,7 @@ class AutoInvoiceGenerator:
         Run auto invoice generation process.
         Returns list of created invoices.
         """
-        engine = BillingCycleEngine(
-            reference_date=self.reference_date
-        )
+        engine = BillingCycleEngine(reference_date=self.reference_date)
         decisions = engine.evaluate()
 
         created_invoices: List[Invoice] = []
@@ -69,7 +70,8 @@ class AutoInvoiceGenerator:
     # --------------------------------------------------------
     @transaction.atomic
     def _create_invoice_if_needed(
-        self, subscription_id: int
+        self,
+        subscription_id: int,
     ) -> Invoice | None:
         """
         Create invoice for subscription if not already created.
@@ -77,7 +79,8 @@ class AutoInvoiceGenerator:
         """
 
         subscription = CompanySubscription.objects.select_related(
-            "company", "plan"
+            "company",
+            "plan",
         ).get(id=subscription_id)
 
         # Safety: subscription must still be valid
@@ -86,7 +89,7 @@ class AutoInvoiceGenerator:
 
         # 🛡️ Idempotency Guard:
         # If there's already a PENDING invoice for this subscription
-        # and same end_date period → skip
+        # and same period → skip
         existing = Invoice.objects.filter(
             subscription=subscription,
             status="PENDING",
@@ -106,11 +109,13 @@ class AutoInvoiceGenerator:
         # ----------------------------------------------------
         # Snapshot
         # ----------------------------------------------------
-        snapshot = {
+        snapshot: Dict = {
             "subscription_id": subscription.id,
             "status": subscription.status,
             "period": {
-                "start": subscription.start_date.isoformat(),
+                "start": subscription.start_date.isoformat()
+                if subscription.start_date
+                else None,
                 "end": subscription.end_date.isoformat()
                 if subscription.end_date
                 else None,
@@ -140,7 +145,20 @@ class AutoInvoiceGenerator:
             subtotal_amount=total_amount,
             total_after_discount=total_amount,
             subscription_snapshot=snapshot,
+            status="PENDING",
         )
+
+        # ----------------------------------------------------
+        # 🔔 Notification
+        # ----------------------------------------------------
+        try:
+            notify_invoice_created(
+                company=subscription.company,
+                invoice_number=invoice.invoice_number,
+            )
+        except Exception:
+            # لا نكسر إنشاء الفاتورة بسبب الإشعار
+            pass
 
         return invoice
 

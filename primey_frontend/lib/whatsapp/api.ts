@@ -1,6 +1,6 @@
 // ============================================================
 // 📂 الملف: lib/whatsapp/api.ts
-// 🟢 Primey HR Cloud - WhatsApp API Helpers
+// 🟢 Mham Cloud - WhatsApp API Helpers
 // ------------------------------------------------------------
 // ✅ جميع دوال الجلب والإرسال الخاصة بموديول الواتساب
 // ✅ آمنة ومرنة وتدعم fallback URL candidates

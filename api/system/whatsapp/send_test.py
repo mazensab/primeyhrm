@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/whatsapp/send_test.py
 # 🛡 System WhatsApp Test Send API
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def system_whatsapp_send_test(request):
         or ""
     )
     recipient_name = (body.get("recipient_name") or "User").strip()
-    message = (body.get("message") or "This is a system WhatsApp test message from Primey HR Cloud.").strip()
+    message = (body.get("message") or "This is a system WhatsApp test message from Mham Cloud.").strip()
 
     if not recipient_phone:
         return json_bad_request("phone_number is required")

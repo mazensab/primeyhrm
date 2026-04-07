@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/utils.py
-# Primey HR Cloud - WhatsApp Utilities
+# Mham Cloud - WhatsApp Utilities
 # ============================================================
 
 from __future__ import annotations

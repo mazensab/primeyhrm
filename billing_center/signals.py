@@ -1,6 +1,6 @@
 # ======================================================
 # 🔔 Subscription Apps Snapshot Signals — Phase B
-# Primey HR Cloud
+# Mham Cloud
 # ======================================================
 
 from django.db.models.signals import post_save, pre_save
@@ -73,7 +73,7 @@ def update_apps_snapshot_on_plan_change(
 
 # ============================================================
 # 💳 Billing Signals — Auto PaymentTransaction Creator
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 @receiver(post_save, sender=Payment)

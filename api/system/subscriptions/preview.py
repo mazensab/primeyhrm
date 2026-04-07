@@ -1,6 +1,6 @@
 # ============================================================
 # 📦 SYSTEM — Subscription Preview API
-# Primey HR Cloud | V1.0 Ultra Stable
+# Mham Cloud | V1.0 Ultra Stable
 # ============================================================
 # ✔ Single Source of Truth
 # ✔ VAT 15%

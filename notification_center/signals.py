@@ -1,13 +1,15 @@
 # 📂 الملف: notification_center/signals.py
 # 🧠 إشعارات النظام التلقائية (Smart Notification Signals)
-# 🚀 الإصدار V5.0 — Unified + Email Ready + No Duplicate Broadcast Logic
+# 🚀 الإصدار V6.0 — Event/Delivery Ready
 # ------------------------------------------------------------
 # ✅ توحيد الإشعار عبر services.create_notification
 # ✅ دعم البريد الاختياري من نفس المحرك الرسمي
+# ✅ دعم NotificationEvent + NotificationDelivery
 # ✅ إزالة التكرار اليدوي لـ Notification.objects.create + WebSocket
 # ✅ Fail-Safe: أي خطأ في الإشعارات لا يكسر إنشاء الشركة أو المستخدم
-# ✅ متوافق مع Notification Model الحالي
 # ------------------------------------------------------------
+
+from __future__ import annotations
 
 import logging
 
@@ -71,6 +73,16 @@ def notify_company_created(sender, instance, created, **kwargs):
                 notification_type="system",
                 severity="success",
                 send_email=_email_enabled_for_signals(),
+                company=instance,
+                event_code="company_created",
+                event_group="company",
+                source="signals.notify_company_created",
+                context={
+                    "company_id": getattr(instance, "id", None),
+                    "company_name": getattr(instance, "name", ""),
+                },
+                target_object=instance,
+                target_user=admin,
             )
 
         logger.info(f"✅ تم إرسال إشعارات إنشاء الشركة: {instance.name}")
@@ -94,9 +106,10 @@ def notify_user_created(sender, instance, created, **kwargs):
             return
 
         display_name = instance.get_full_name() or instance.username
-
         title = f"👤 مستخدم جديد: {instance.username}"
         message = f"تم تسجيل المستخدم {display_name} بنجاح."
+
+        user_company = getattr(instance, "company", None)
 
         for admin in admins:
             # تجنب إرسال إشعار للمستخدم نفسه لو كان staff وتم إنشاؤه الآن
@@ -110,6 +123,19 @@ def notify_user_created(sender, instance, created, **kwargs):
                 notification_type="user",
                 severity="info",
                 send_email=_email_enabled_for_signals(),
+                company=user_company,
+                event_code="user_created",
+                event_group="auth",
+                source="signals.notify_user_created",
+                context={
+                    "user_id": getattr(instance, "id", None),
+                    "username": getattr(instance, "username", ""),
+                    "display_name": display_name,
+                    "email": getattr(instance, "email", ""),
+                    "company_id": getattr(user_company, "id", None) if user_company else None,
+                },
+                target_object=instance,
+                target_user=admin,
             )
 
         logger.info(f"✅ تم إرسال إشعارات إنشاء المستخدم: {instance.username}")

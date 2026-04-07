@@ -1,22 +1,23 @@
 # ============================================================
 # 🔄 Renewal Service — Subscription Auto Renewal
-# Primey HR Cloud | Billing Center
+# Mham Cloud | Billing Center
 # ============================================================
 
-from django.utils import timezone
-from decimal import Decimal
+from __future__ import annotations
+
 from datetime import timedelta
+from decimal import Decimal
 
-from billing_center.models import (
-    CompanySubscription,
-    Invoice,
-)
+from django.db import transaction
+from django.utils import timezone
 
-from notification_center.services.billing_notifications import (
-    notify_invoice_created,
-)
+from billing_center.models import CompanySubscription, Invoice
+from billing_center.services.billing_notifications import notify_invoice_created
 
 
+# ============================================================
+# 🧩 Helpers
+# ============================================================
 def _get_billing_cycle(subscription: CompanySubscription) -> str:
     """
     ============================================================
@@ -30,6 +31,31 @@ def _get_billing_cycle(subscription: CompanySubscription) -> str:
     return "yearly" if duration > 31 else "monthly"
 
 
+def _get_plan_amount_and_end_date(subscription: CompanySubscription) -> tuple[Decimal, object, str]:
+    """
+    ============================================================
+    Resolve billing amount + next end date + invoice label
+    ============================================================
+    """
+    billing_cycle = _get_billing_cycle(subscription)
+    plan = subscription.plan
+
+    if billing_cycle == "yearly":
+        amount = Decimal(plan.price_yearly)
+        new_end_date = subscription.end_date + timedelta(days=365)
+        label = "Y"
+    else:
+        amount = Decimal(plan.price_monthly)
+        new_end_date = subscription.end_date + timedelta(days=30)
+        label = "M"
+
+    return amount, new_end_date, label
+
+
+# ============================================================
+# 🧾 Generate Renewal Invoice
+# ============================================================
+@transaction.atomic
 def generate_renewal_invoice(subscription: CompanySubscription) -> Invoice | None:
     """
     ============================================================
@@ -45,11 +71,20 @@ def generate_renewal_invoice(subscription: CompanySubscription) -> Invoice | Non
     # ------------------------------------------------------------
     # 1️⃣ تحقق أساسي
     # ------------------------------------------------------------
+    if not subscription:
+        return None
+
     if not subscription.auto_renew:
         return None
 
     if subscription.status != "ACTIVE":
         return None
+
+    plan = subscription.plan
+    if not plan:
+        return None
+
+    today = timezone.now().date()
 
     # ------------------------------------------------------------
     # 2️⃣ 🛑 منع التجديد إذا توجد فاتورة غير مدفوعة
@@ -62,36 +97,21 @@ def generate_renewal_invoice(subscription: CompanySubscription) -> Invoice | Non
     if has_unpaid:
         return None
 
-    today = timezone.now().date()
-
     # ------------------------------------------------------------
     # 3️⃣ منع تكرار الفاتورة لنفس اليوم
     # ------------------------------------------------------------
-    existing = Invoice.objects.filter(
+    existing_invoice = Invoice.objects.filter(
         subscription=subscription,
         issue_date=today,
     ).first()
 
-    if existing:
-        return existing
-
-    plan = subscription.plan
-    if not plan:
-        return None
+    if existing_invoice:
+        return existing_invoice
 
     # ------------------------------------------------------------
-    # 4️⃣ تحديد دورة الفوترة
+    # 4️⃣ تحديد دورة الفوترة + المبلغ + تاريخ النهاية الجديد
     # ------------------------------------------------------------
-    billing_cycle = _get_billing_cycle(subscription)
-
-    if billing_cycle == "yearly":
-        amount = Decimal(plan.price_yearly)
-        new_end_date = subscription.end_date + timedelta(days=365)
-        label = "Y"
-    else:
-        amount = Decimal(plan.price_monthly)
-        new_end_date = subscription.end_date + timedelta(days=30)
-        label = "M"
+    amount, new_end_date, label = _get_plan_amount_and_end_date(subscription)
 
     # ------------------------------------------------------------
     # 5️⃣ إنشاء الفاتورة
@@ -109,7 +129,7 @@ def generate_renewal_invoice(subscription: CompanySubscription) -> Invoice | Non
     )
 
     # ------------------------------------------------------------
-    # 6️⃣ تحديث تاريخ نهاية الاشتراك (يُعتمد بعد الدفع)
+    # 6️⃣ تحديث تاريخ نهاية الاشتراك (كما هو معتمد حاليًا في النظام)
     # ------------------------------------------------------------
     subscription.end_date = new_end_date
     subscription.save(update_fields=["end_date"])

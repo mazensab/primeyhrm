@@ -1,5 +1,5 @@
 # ============================================================
-# 🔐 Primey HR Cloud — Logout API
+# 🔐 Mham Cloud — Logout API
 # AUTH Ω FINAL — Enterprise Hard Logout
 # ============================================================
 

@@ -3,24 +3,21 @@
 
 # ============================================================
 # 📊 Company Attendance APIs — FINAL (IP LOCATION FIXED)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 import logging
 import json
 
 from django.http import JsonResponse
-from django.views.decorators.http import require_http_methods
-from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db.models import Q
 from django.core.exceptions import ValidationError   # ✅ NEW
 from attendance_center.serializers.constants import ATTENDANCE_STATUS_AR
 from attendance_center.services.workday_engine import WorkdayEngine
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from django.db import models
-from whatsapp_center.services import send_attendance_status_whatsapp_notifications
-
+from notification_center.services_hr import notify_attendance_event
 from attendance_center.models import (
     AttendanceRecord,
     WorkSchedule,
@@ -74,8 +71,9 @@ def _resolve_company(request):
 # ============================================================
 
 from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ValidationError
 from django.db import transaction
 import json
@@ -245,7 +243,7 @@ def company_attendance_policy(request):
         }, status=500)
 
 # ============================================================
-# 📊 Dashboard Snapshot
+# 📊 Dashboard Snapshot — Smart Today Counters
 # ============================================================
 
 @login_required
@@ -255,31 +253,118 @@ def attendance_dashboard(request):
     if not company:
         return JsonResponse({"error": "NO_COMPANY"}, status=403)
 
-    qs = AttendanceRecord.objects.filter(
-        employee__company=company
+    today_date = timezone.localdate()
+
+    employees = list(
+        Employee.objects
+        .filter(company=company)
+        .select_related("default_work_schedule")
+        .order_by("id")
     )
 
-    today_date = timezone.now().date()
-    today = qs.filter(date=today_date)
+    if not employees:
+        return JsonResponse({
+            "status": "success",
+            "data": {
+                "today": {
+                    "present": 0,
+                    "absent": 0,
+                    "late": 0,
+                    "leave": 0,
+                },
+                "total_records": 0,
+            }
+        })
+
+    employee_ids = [emp.id for emp in employees]
+
+    today_records = (
+        AttendanceRecord.objects
+        .filter(
+            employee__company=company,
+            employee_id__in=employee_ids,
+            date=today_date,
+        )
+        .select_related(
+            "employee",
+            "employee__default_work_schedule",
+        )
+    )
+
+    record_map = {
+        record.employee_id: record
+        for record in today_records
+    }
+
+    present_count = 0
+    absent_count = 0
+    late_count = 0
+    leave_count = 0
+
+    now_time = timezone.localtime().time()
+
+    for emp in employees:
+        # =====================================================
+        # 🛑 Respect employee work start date
+        # =====================================================
+        if emp.work_start_date and today_date < emp.work_start_date:
+            continue
+
+        record = record_map.get(emp.id)
+        schedule = getattr(emp, "default_work_schedule", None)
+
+        # =====================================================
+        # ✅ Real record exists
+        # =====================================================
+        if record:
+            status_value = (record.status or "").strip().lower()
+
+            if status_value == "present":
+                present_count += 1
+            elif status_value == "late":
+                late_count += 1
+            elif status_value == "absent":
+                absent_count += 1
+            elif status_value == "leave":
+                leave_count += 1
+
+            continue
+
+        # =====================================================
+        # 🧠 Missing record → smart today classification
+        # =====================================================
+        if emp.status and str(emp.status).upper() == "TERMINATED":
+            continue
+
+        if schedule and schedule.is_weekend(today_date):
+            continue
+
+        if schedule and schedule.period1_start and now_time < schedule.period1_start:
+            continue
+
+        absent_count += 1
+
+    total_records = AttendanceRecord.objects.filter(
+        employee__company=company
+    ).count()
 
     data = {
         "today": {
-            "present": today.filter(status="present").count(),
-            "absent": today.filter(status="absent").count(),
-            "late": today.filter(status="late").count(),
-            "leave": today.filter(status="leave").count(),
+            "present": present_count,
+            "absent": absent_count,
+            "late": late_count,
+            "leave": leave_count,
         },
-        "total_records": qs.count(),
+        "total_records": total_records,
     }
 
     return JsonResponse({"status": "success", "data": data})
-
-
 
 # ============================================================
 # 🔄 Manual Biotime Sync (SMART PIPELINE)
 # ============================================================
 
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def attendance_sync(request):
@@ -304,7 +389,7 @@ def attendance_sync(request):
 
 
     try:
-        logs_result = sync_logs()
+        logs_result = sync_logs(company=company)
 
         if logs_result.get("status") != "success":
             logger.warning("Biotime sync failed: %s", logs_result)
@@ -315,7 +400,9 @@ def attendance_sync(request):
                 "message": logs_result.get("message"),
             }, status=500)
 
-        attendance_result = sync_biotime_logs_to_attendance()
+        attendance_result = sync_biotime_logs_to_attendance(
+            company=company
+        )
 
         response = {
             "status": "success",
@@ -427,179 +514,261 @@ def attendance_unmapped_logs(request):
 
 
 # ============================================================
-# 📊 Attendance Reports — Preview V2 (ENGINE BASED + MERGED SCHEDULE)
+# 📊 Attendance Reports — Preview V3
+# Smart Range Builder:
+# - Shows real AttendanceRecord rows when present
+# - Synthesizes missing workdays as absent
+# - Synthesizes weekends
+# - Keeps today-before-start behavior
 # ============================================================
 
 @login_required
 @require_http_methods(["GET"])
 def attendance_reports_preview(request):
+    from django.utils.dateparse import parse_date
+
     company = _resolve_company(request)
     if not company:
         return JsonResponse({"error": "NO_COMPANY"}, status=403)
 
     try:
-        filters = Q(employee__company=company)
+        from_date_str = (request.GET.get("from_date") or "").strip()
+        to_date_str = (request.GET.get("to_date") or "").strip()
+        requested_status = (request.GET.get("status") or "all").strip().lower()
 
-        from_date = request.GET.get("from_date")
-        to_date = request.GET.get("to_date")
-        status = request.GET.get("status")
+        today = timezone.localdate()
 
-        if from_date:
-            filters &= Q(date__gte=from_date)
+        from_date = parse_date(from_date_str) if from_date_str else today.replace(day=1)
+        to_date = parse_date(to_date_str) if to_date_str else today
 
-        if to_date:
-            filters &= Q(date__lte=to_date)
+        if not from_date or not to_date:
+            return JsonResponse({
+                "status": "error",
+                "message": "صيغة التاريخ غير صالحة.",
+            }, status=400)
 
-        if status and status != "all":
-            filters &= Q(status=status)
+        if from_date > to_date:
+            return JsonResponse({
+                "status": "error",
+                "message": "من تاريخ يجب أن يكون أصغر من أو يساوي إلى تاريخ.",
+            }, status=400)
 
-        qs = (
+        employees = list(
+            Employee.objects
+            .filter(company=company)
+            .select_related("default_work_schedule")
+            .order_by("id")
+        )
+
+        if not employees:
+            return JsonResponse({
+                "status": "success",
+                "count": 0,
+                "rows": [],
+            })
+
+        employee_ids = [emp.id for emp in employees]
+
+        existing_records = (
             AttendanceRecord.objects
-            .filter(filters)
             .filter(
-                Q(employee__work_start_date__isnull=True) |
-                Q(date__gte=models.F("employee__work_start_date"))
+                employee__company=company,
+                employee_id__in=employee_ids,
+                date__gte=from_date,
+                date__lte=to_date,
             )
             .select_related(
                 "employee",
                 "employee__default_work_schedule",
                 "biotime_log",
             )
-                .order_by("-date")[:1000]
-            
+            .order_by("-date", "employee__id")
         )
 
+        record_map = {
+            (record.employee_id, record.date): record
+            for record in existing_records
+        }
+
         rows = []
-        today = timezone.localdate()
+        current_date = from_date
 
-        for r in qs:
-            biotime = r.biotime_log
-            schedule = getattr(r.employee, "default_work_schedule", None)
+        while current_date <= to_date:
+            for emp in employees:
+                # =====================================================
+                # 🛑 Respect employee work start date
+                # =====================================================
+                if emp.work_start_date and current_date < emp.work_start_date:
+                    continue
 
-            # =====================================================
-            # 🕓 Schedule Mapping
-            # =====================================================
-            schedule_type = None
-            schedule_label = None
-            period_display = None
+                schedule = getattr(emp, "default_work_schedule", None)
+                record = record_map.get((emp.id, current_date))
+                biotime = getattr(record, "biotime_log", None) if record else None
 
-            if schedule:
-                schedule_type = schedule.schedule_type
+                # =====================================================
+                # 🕓 Schedule Mapping
+                # =====================================================
+                schedule_type = None
+                schedule_label = None
+                period_display = None
 
-                if schedule.schedule_type == "FULL_TIME":
-                    schedule_label = "دوام كامل"
-                    if schedule.period1_start and schedule.period1_end:
-                        period_display = (
-                            f"{schedule.period1_start.strftime('%H:%M')} "
-                            f"→ {schedule.period1_end.strftime('%H:%M')}"
-                        )
+                if schedule:
+                    schedule_type = schedule.schedule_type
 
-                elif schedule.schedule_type == "PART_TIME":
-                    schedule_label = "فترتين"
-                    periods = []
+                    if schedule.schedule_type == "FULL_TIME":
+                        schedule_label = "دوام كامل"
+                        if schedule.period1_start and schedule.period1_end:
+                            period_display = (
+                                f"{schedule.period1_start.strftime('%H:%M')} "
+                                f"→ {schedule.period1_end.strftime('%H:%M')}"
+                            )
 
-                    if schedule.period1_start and schedule.period1_end:
-                        periods.append(
-                            f"{schedule.period1_start.strftime('%H:%M')} "
-                            f"→ {schedule.period1_end.strftime('%H:%M')}"
-                        )
+                    elif schedule.schedule_type == "PART_TIME":
+                        schedule_label = "فترتين"
+                        periods = []
 
-                    if schedule.period2_start and schedule.period2_end:
-                        periods.append(
-                            f"{schedule.period2_start.strftime('%H:%M')} "
-                            f"→ {schedule.period2_end.strftime('%H:%M')}"
-                        )
+                        if schedule.period1_start and schedule.period1_end:
+                            periods.append(
+                                f"{schedule.period1_start.strftime('%H:%M')} "
+                                f"→ {schedule.period1_end.strftime('%H:%M')}"
+                            )
 
-                    period_display = "\n".join(periods) if periods else None
+                        if schedule.period2_start and schedule.period2_end:
+                            periods.append(
+                                f"{schedule.period2_start.strftime('%H:%M')} "
+                                f"→ {schedule.period2_end.strftime('%H:%M')}"
+                            )
 
-                elif schedule.schedule_type == "HOURLY":
-                    schedule_label = "بالساعات"
-                    if schedule.target_daily_hours:
-                        period_display = (
-                            f"{schedule.target_daily_hours} ساعات مطلوبة"
-                        )
+                        period_display = "\n".join(periods) if periods else None
 
+                    elif schedule.schedule_type == "HOURLY":
+                        schedule_label = "بالساعات"
+                        if schedule.target_daily_hours:
+                            period_display = f"{schedule.target_daily_hours} ساعات مطلوبة"
+
+                    else:
+                        schedule_label = schedule.schedule_type
+
+                # =====================================================
+                # 🧠 Real Record Case
+                # =====================================================
+                if record:
+                    actual_hours = record.actual_hours if record.actual_hours is not None else 0
+                    late_minutes = record.late_minutes if record.late_minutes else 0
+                    overtime_minutes = record.overtime_minutes if record.overtime_minutes else 0
+
+                    display_status = record.status
+                    display_status_ar = ATTENDANCE_STATUS_AR.get(record.status, record.status)
+
+                    if emp.status and str(emp.status).upper() == "TERMINATED":
+                        display_status = "terminated"
+                        display_status_ar = "منتهي خدمة"
+
+                    elif schedule and schedule.is_weekend(record.date):
+                        display_status = "weekend"
+                        display_status_ar = "عطلة"
+
+                    elif (
+                        record.date == today
+                        and not record.check_in
+                        and not record.is_finalized
+                        and schedule
+                        and schedule.period1_start
+                    ):
+                        now_time = timezone.localtime().time()
+                        if now_time < schedule.period1_start:
+                            display_status = "before_start"
+                            display_status_ar = "قبل المباشرة"
+
+                    row = {
+                        "employee": emp.full_name,
+                        "employee_id": emp.id,
+                        "photo_url": emp.photo_url,
+                        "date": record.date,
+                        "status": display_status,
+                        "status_ar": display_status_ar,
+                        "schedule_type": schedule_type,
+                        "schedule_label": schedule_label,
+                        "period_display": period_display,
+                        "check_in": record.check_in,
+                        "check_out": record.check_out,
+                        "actual_hours": actual_hours,
+                        "late_minutes": late_minutes,
+                        "overtime_minutes": overtime_minutes,
+                        "location": (
+                            biotime.device_ip
+                            if biotime and getattr(biotime, "device_ip", None)
+                            else None
+                        ),
+                    }
+
+                # =====================================================
+                # 🧠 Missing Record Case → Synthesize
+                # =====================================================
                 else:
-                    schedule_label = schedule.schedule_type
+                    is_weekend = schedule.is_weekend(current_date) if schedule else False
 
-            # =====================================================
-            # 🧠 Engine Results (Source of Truth)
-            # =====================================================
-            actual_hours = r.actual_hours if r.actual_hours is not None else 0
-            late_minutes = r.late_minutes if r.late_minutes else 0
-            overtime_minutes = r.overtime_minutes if r.overtime_minutes else 0
+                    if emp.status and str(emp.status).upper() == "TERMINATED":
+                        display_status = "terminated"
+                        display_status_ar = "منتهي خدمة"
 
-            # =====================================================
-            # 🧠 Smart Display Status Layer (REPORT ONLY)
-            # =====================================================
-            display_status = r.status
-            display_status_ar = ATTENDANCE_STATUS_AR.get(r.status, r.status)
+                    elif is_weekend:
+                        display_status = "weekend"
+                        display_status_ar = "عطلة"
 
-            # ⚫ Terminated Employee (SAFE — Supports different Employee schemas)
-            if r.employee.status and str(r.employee.status).upper() == "TERMINATED":
-                display_status = "terminated"
-                display_status_ar = "منتهي خدمة"
+                    elif (
+                        current_date == today
+                        and schedule
+                        and schedule.period1_start
+                        and timezone.localtime().time() < schedule.period1_start
+                    ):
+                        display_status = "before_start"
+                        display_status_ar = "قبل المباشرة"
 
-            # 🟣 Weekend
-            elif schedule and schedule.is_weekend(r.date):
-                display_status = "weekend"
-                display_status_ar = "عطلة"
+                    else:
+                        display_status = "absent"
+                        display_status_ar = ATTENDANCE_STATUS_AR.get("absent", "غائب")
 
-            # ⏳ Before Start (Today Only)
-            elif (
-                r.date == today
-                and not r.check_in
-                and not r.is_finalized
-                and schedule
-                and schedule.period1_start
-            ):
-                now_time = timezone.localtime().time()
-                if now_time < schedule.period1_start:
-                    display_status = "before_start"
-                    display_status_ar = "قبل المباشرة"
+                    row = {
+                        "employee": emp.full_name,
+                        "employee_id": emp.id,
+                        "photo_url": emp.photo_url,
+                        "date": current_date,
+                        "status": display_status,
+                        "status_ar": display_status_ar,
+                        "schedule_type": schedule_type,
+                        "schedule_label": schedule_label,
+                        "period_display": period_display,
+                        "check_in": None,
+                        "check_out": None,
+                        "actual_hours": 0,
+                        "late_minutes": 0,
+                        "overtime_minutes": 0,
+                        "location": None,
+                    }
 
-            # =====================================================
-            # 📦 Append Row
-            # =====================================================
-            rows.append({
-                # 👤 Employee
-                "employee": r.employee.full_name,
-                "employee_id": r.employee.id,
-                "photo_url": r.employee.photo_url,
+                # =====================================================
+                # 🎯 Status Filter
+                # =====================================================
+                if requested_status != "all" and row["status"] != requested_status:
+                    continue
 
-                # 📅 Date
-                "date": r.date,
+                rows.append(row)
 
-                # 🔹 Status (Smart Layer)
-                "status": display_status,
-                "status_ar": display_status_ar,
+            current_date += timedelta(days=1)
 
-                # 🕓 Schedule
-                "schedule_type": schedule_type,
-                "schedule_label": schedule_label,
-                "period_display": period_display,
-
-                # ⏰ Times
-                "check_in": r.check_in,
-                "check_out": r.check_out,
-
-                # 🧮 Engine Calculations
-                "actual_hours": actual_hours,
-                "late_minutes": late_minutes,
-                "overtime_minutes": overtime_minutes,
-
-                # 🌍 Location
-                "location": (
-                    biotime.device_ip
-                    if biotime and getattr(biotime, "device_ip", None)
-                    else None
-                ),
-            })
+        rows.sort(
+            key=lambda item: (
+                item["date"],
+                item["employee_id"],
+            ),
+            reverse=True,
+        )
 
         return JsonResponse({
             "status": "success",
             "count": len(rows),
-            "rows": rows,
+            "rows": rows[:2000],
         })
 
     except Exception:
@@ -608,6 +777,7 @@ def attendance_reports_preview(request):
             "status": "error",
             "message": "فشل تحميل تقرير الحضور",
         }, status=500)
+
 
 # ============================================================
 # 📄 Attendance Records (READ ONLY)
@@ -964,27 +1134,45 @@ def work_schedules(request):
                 "allow_night_overlap",
                 "early_arrival_minutes",
                 "early_exit_minutes",
+                "is_active",
             ]
 
             updated_fields = []
 
             for field in editable_fields:
-                if field in body:
-                    setattr(schedule, field, body.get(field))
-                    updated_fields.append(field)
+                if field not in body:
+                    continue
 
-            schedule.save(update_fields=updated_fields)
+                value = body.get(field)
+
+                if field == "is_active":
+                    value = bool(value)
+
+                setattr(schedule, field, value)
+                updated_fields.append(field)
+
+            if updated_fields:
+                try:
+                    schedule.save(update_fields=updated_fields)
+                except ValidationError as ve:
+                    return JsonResponse({
+                        "status": "error",
+                        "message": str(ve),
+                    }, status=400)
 
             logger.info(
-                "WorkSchedule updated | id=%s | company=%s",
+                "WorkSchedule updated | id=%s | company=%s | fields=%s | is_active=%s",
                 schedule.id,
-                company.id
+                company.id,
+                updated_fields,
+                schedule.is_active,
             )
 
             return JsonResponse({
                 "status": "success",
                 "mode": "updated",
-                "id": schedule.id
+                "id": schedule.id,
+                "is_active": schedule.is_active,
             })
 
         # ========================================================
@@ -1004,7 +1192,7 @@ def work_schedules(request):
                 allow_night_overlap=body.get("allow_night_overlap", True),
                 early_arrival_minutes=body.get("early_arrival_minutes", 0),
                 early_exit_minutes=body.get("early_exit_minutes", 0),
-                is_active=True,
+                is_active=bool(body.get("is_active", True)),
             )
         except ValidationError as ve:
             return JsonResponse({
@@ -1013,15 +1201,17 @@ def work_schedules(request):
             }, status=400)
 
         logger.info(
-            "WorkSchedule created | id=%s | company=%s",
+            "WorkSchedule created | id=%s | company=%s | is_active=%s",
             schedule.id,
-            company.id
+            company.id,
+            schedule.is_active,
         )
 
         return JsonResponse({
             "status": "success",
             "mode": "created",
-            "id": schedule.id
+            "id": schedule.id,
+            "is_active": schedule.is_active,
         })
 
     except Exception as exc:
@@ -1031,6 +1221,7 @@ def work_schedules(request):
             "message": "فشل حفظ جدول الدوام.",
             "exception": str(exc),
         }, status=500)
+
 
 @login_required
 @require_http_methods(["PUT", "DELETE"])
@@ -1268,10 +1459,9 @@ def employee_assign_work_schedule(request):
             "exception": str(exc),
         }, status=500)
     
-# ============================================================
-# 🟦 Manual Attendance Entry — Phase M1 (Safe + Finalization Aware)
-# ============================================================
 
+
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def attendance_manual_entry(request):
@@ -1291,9 +1481,10 @@ def attendance_manual_entry(request):
     - Respects Finalization
     - Uses WorkdayEngine as source of truth
     - Allows check-in only / check-out only
+    - Manager/Admin guarded
+    - Unified notifications عبر services_hr فقط
     """
 
-    
     from django.utils.dateparse import parse_date, parse_time
 
     company = _resolve_company(request)
@@ -1301,12 +1492,49 @@ def attendance_manual_entry(request):
         return JsonResponse({"error": "NO_COMPANY"}, status=403)
 
     try:
+        # =====================================================
+        # 🔐 Permission Guard — Manager/Admin Only
+        # =====================================================
+        company_user = (
+            CompanyUser.objects
+            .filter(
+                company=company,
+                user=request.user,
+                is_active=True,
+            )
+            .first()
+        )
+
+        role_value = str(getattr(company_user, "role", "") or "").strip().lower()
+
+        is_allowed = any([
+            bool(getattr(request.user, "is_superuser", False)),
+            bool(getattr(request.user, "is_staff", False)),
+            bool(getattr(company_user, "is_owner", False)),
+            bool(getattr(company_user, "is_admin", False)),
+            bool(getattr(company_user, "can_manage_attendance", False)),
+            role_value in {
+                "owner",
+                "admin",
+                "manager",
+                "hr",
+                "hr_manager",
+                "attendance_manager",
+            },
+        ])
+
+        if not is_allowed:
+            return JsonResponse({
+                "status": "error",
+                "message": "ليس لديك صلاحية لإدخال الحركات يدويًا.",
+            }, status=403)
+
         body = json.loads(request.body or "{}")
 
         employee_id = body.get("employee_id")
-        date_str = body.get("date")
-        check_in_str = body.get("check_in")
-        check_out_str = body.get("check_out")
+        date_str = (body.get("date") or "").strip()
+        check_in_str = (body.get("check_in") or "").strip()
+        check_out_str = (body.get("check_out") or "").strip()
 
         if not employee_id or not date_str:
             return JsonResponse({
@@ -1314,11 +1542,18 @@ def attendance_manual_entry(request):
                 "message": "employee_id و date مطلوبة.",
             }, status=400)
 
+        if not check_in_str and not check_out_str:
+            return JsonResponse({
+                "status": "error",
+                "message": "يجب إدخال وقت دخول أو وقت خروج على الأقل.",
+            }, status=400)
+
         # =========================
-        # 🔒 Resolve Employee (Company Scoped)
+        # 👤 Resolve Employee
         # =========================
         employee = (
             Employee.objects
+            .select_related("default_work_schedule")
             .filter(id=employee_id, company=company)
             .first()
         )
@@ -1329,6 +1564,9 @@ def attendance_manual_entry(request):
                 "message": "الموظف غير موجود.",
             }, status=404)
 
+        # =========================
+        # 📅 Parse Date
+        # =========================
         work_date = parse_date(date_str)
         if not work_date:
             return JsonResponse({
@@ -1336,72 +1574,120 @@ def attendance_manual_entry(request):
                 "message": "تاريخ غير صالح.",
             }, status=400)
 
-        # منع التاريخ المستقبلي
         if work_date > timezone.localdate():
             return JsonResponse({
                 "status": "error",
                 "message": "لا يمكن إدخال حركة بتاريخ مستقبلي.",
             }, status=400)
 
-        # =========================
-        # 📝 Get or Create Record
-        # =========================
-        record, _ = AttendanceRecord.objects.get_or_create(
-            employee=employee,
-            date=work_date,
-        )
+        # احترام تاريخ مباشرة الموظف
+        if employee.work_start_date and work_date < employee.work_start_date:
+            return JsonResponse({
+                "status": "error",
+                "message": "تاريخ الحركة يسبق تاريخ مباشرة الموظف.",
+            }, status=400)
 
         # =========================
         # ⏱ Parse Times
         # =========================
+        parsed_check_in = None
+        parsed_check_out = None
+
         if check_in_str:
-            t = parse_time(check_in_str)
-            if not t:
+            parsed_check_in = parse_time(check_in_str)
+            if not parsed_check_in:
                 return JsonResponse({
                     "status": "error",
                     "message": "وقت دخول غير صالح.",
                 }, status=400)
-            record.check_in = t
 
         if check_out_str:
-            t = parse_time(check_out_str)
-            if not t:
+            parsed_check_out = parse_time(check_out_str)
+            if not parsed_check_out:
                 return JsonResponse({
                     "status": "error",
                     "message": "وقت خروج غير صالح.",
                 }, status=400)
-            record.check_out = t
+
+        if parsed_check_in and parsed_check_out and parsed_check_out < parsed_check_in:
+            return JsonResponse({
+                "status": "error",
+                "message": "وقت الخروج لا يمكن أن يكون قبل وقت الدخول.",
+            }, status=400)
 
         # =========================
-        # 🔓 Handle Finalization
+        # 📝 Get or Create Record
         # =========================
-        was_finalized = record.is_finalized
+        record, created = AttendanceRecord.objects.get_or_create(
+            employee=employee,
+            date=work_date,
+        )
+
+        previous_check_in = record.check_in
+        previous_check_out = record.check_out
+
+        # =========================
+        # 🔓 Finalization Handling
+        # =========================
+        was_finalized = bool(getattr(record, "is_finalized", False))
 
         if was_finalized:
             record.is_finalized = False
-
-        # حفظ أولي بدون تشغيل Engine
-        record.save(skip_engine=True)
+            if hasattr(record, "finalized_at"):
+                record.finalized_at = None
 
         # =========================
-        # 🧠 Apply Engine (Force Mode)
+        # ✏️ Apply Manual Values
+        # =========================
+        if parsed_check_in:
+            record.check_in = parsed_check_in
+
+        if parsed_check_out:
+            record.check_out = parsed_check_out
+
+        # حفظ أولي بدون Engine
+        save_kwargs = {"skip_engine": True}
+        record.save(**save_kwargs)
+
+        # =========================
+        # 🧠 Recalculate via Engine
         # =========================
         WorkdayEngine.apply(record, force=True)
 
         # =========================
-        # 📲 WhatsApp Attendance Hook
-        # يرسل فقط عند late / absent
+        # 🔔 Notifications
         # =========================
         try:
-            send_attendance_status_whatsapp_notifications(
-                attendance_record=record,
-                company=company,
-                send_to_employee=True,
-                send_to_user=True,
+            if parsed_check_in:
+                notify_attendance_event(
+                    record,
+                    action="check_in",
+                    send_email_to_employee=True,
+                    send_email_to_managers=False,
+                    send_whatsapp_to_employee=True,
+                    send_whatsapp_to_managers=False,
+                )
+
+            if parsed_check_out:
+                notify_attendance_event(
+                    record,
+                    action="check_out",
+                    send_email_to_employee=True,
+                    send_email_to_managers=False,
+                    send_whatsapp_to_employee=True,
+                    send_whatsapp_to_managers=False,
+                )
+
+            notify_attendance_event(
+                record,
+                send_email_to_employee=True,
+                send_email_to_managers=False,
+                send_whatsapp_to_employee=True,
+                send_whatsapp_to_managers=False,
             )
         except Exception:
             logger.exception(
-                "⚠ Attendance WhatsApp hook failed (manual_entry) | record_id=%s",
+                "⚠ Attendance Notification hook failed (manual_entry) | record_id=%s",
                 record.id,
             )
 
@@ -1410,28 +1696,49 @@ def attendance_manual_entry(request):
         # =========================
         if was_finalized:
             record.is_finalized = True
-            record.finalized_at = timezone.now()
+            if hasattr(record, "finalized_at"):
+                record.finalized_at = timezone.now()
+
             record.save(
-                update_fields=["is_finalized", "finalized_at"],
+                update_fields=["is_finalized", "finalized_at"] if hasattr(record, "finalized_at") else ["is_finalized"],
                 skip_engine=True,
             )
+
         logger.info(
-            "Manual attendance entry | employee=%s | date=%s | finalized=%s",
+            "Manual attendance entry saved | company=%s | employee=%s | date=%s | created=%s | by_user=%s | previous_in=%s | previous_out=%s | new_in=%s | new_out=%s",
+            company.id,
             employee.id,
             work_date,
-            was_finalized,
+            created,
+            request.user.id,
+            previous_check_in,
+            previous_check_out,
+            record.check_in,
+            record.check_out,
         )
 
         return JsonResponse({
             "status": "success",
+            "message": "تم حفظ الحركة اليدوية بنجاح.",
             "employee_id": employee.id,
+            "employee_name": employee.full_name,
             "date": work_date,
+            "created": created,
+            "previous_check_in": previous_check_in,
+            "previous_check_out": previous_check_out,
             "check_in": record.check_in,
             "check_out": record.check_out,
             "actual_hours": record.actual_hours,
             "late_minutes": record.late_minutes,
             "overtime_minutes": record.overtime_minutes,
+            "status_value": record.status,
+            "status_ar": ATTENDANCE_STATUS_AR.get(record.status, record.status),
             "is_finalized": record.is_finalized,
+            "schedule_type": (
+                getattr(employee.default_work_schedule, "schedule_type", None)
+                if getattr(employee, "default_work_schedule", None)
+                else None
+            ),
         })
 
     except Exception as exc:
@@ -1441,6 +1748,7 @@ def attendance_manual_entry(request):
             "message": "فشل إدخال الحركة اليدوية.",
             "exception": str(exc),
         }, status=500)
+
 
 @login_required
 @require_http_methods(["POST"])
@@ -1520,7 +1828,6 @@ def attendance_manual_action(request):
             # ===============================
             # 🟢 COMMIT
             # ===============================
-
             record, _ = AttendanceRecord.objects.get_or_create(
                 employee=emp,
                 date=work_date,
@@ -1574,23 +1881,45 @@ def attendance_manual_action(request):
                 )
             else:
                 # =========================
-                # 📲 WhatsApp Attendance Hook
-                # يرسل فقط عند late / absent
+                # 🔔 In-App / Realtime / Email / WhatsApp Attendance Hook
+                # يعتمد على notification_center.services_hr
                 # =========================
                 try:
-                    send_attendance_status_whatsapp_notifications(
-                        attendance_record=record,
-                        company=company,
-                        send_to_employee=True,
-                        send_to_user=True,
+                    if record.check_in:
+                        notify_attendance_event(
+                            record,
+                            action="check_in",
+                            send_email_to_employee=True,
+                            send_email_to_managers=False,
+                            send_whatsapp_to_employee=True,
+                            send_whatsapp_to_managers=False,
+                        )
+
+                    if record.check_out:
+                        notify_attendance_event(
+                            record,
+                            action="check_out",
+                            send_email_to_employee=True,
+                            send_email_to_managers=False,
+                            send_whatsapp_to_employee=True,
+                            send_whatsapp_to_managers=False,
+                        )
+
+                    notify_attendance_event(
+                        record,
+                        send_email_to_employee=True,
+                        send_email_to_managers=False,
+                        send_whatsapp_to_employee=True,
+                        send_whatsapp_to_managers=False,
                     )
                 except Exception:
                     logger.exception(
-                        "⚠ Attendance WhatsApp hook failed (manual_action) | record_id=%s",
+                        "⚠ Attendance Notification hook failed (manual_action) | record_id=%s",
                         record.id,
                     )
 
             updated += 1
+
         # ===============================
         # 🔁 Return
         # ===============================

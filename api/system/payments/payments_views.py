@@ -1,6 +1,6 @@
 # ============================================================================
 # 💳 System Payments API — V3 Ultra Stable (MODEL ALIGNED)
-# Primey HR Cloud — Super Admin Level
+# Mham Cloud — Super Admin Level
 # ============================================================================
 # ✔ Dashboard: Latest Payments
 # ✔ Company Payments Detail (?company_id)

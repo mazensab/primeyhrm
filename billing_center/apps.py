@@ -5,7 +5,7 @@ class BillingCenterConfig(AppConfig):
     """
     ============================================================
     💳 Billing Center — AppConfig
-    Primey HR Cloud
+    Mham Cloud
     ============================================================
     ✔ Initializes Auto Billing Scheduler (S3-D)
     ✔ Registers Billing Signals (Payment → Transaction)

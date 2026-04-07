@@ -1,6 +1,6 @@
 # ===============================================================
 # 📂 الملف: auth_center/models.py
-# 🧭 Primey HR Cloud — Auth Center Models
+# 🧭 Mham Cloud — Auth Center Models
 # 🚀 الإصدار الرسمي V12.0 (Glass White — Circular-Free Edition)
 # ===============================================================
 

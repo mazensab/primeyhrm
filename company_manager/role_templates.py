@@ -1,5 +1,5 @@
 # ==================================================================
-# 🎛️ Role Templates — Ultra Stable for Primey HR Cloud
+# 🎛️ Role Templates — Ultra Stable for Mham Cloud
 # ==================================================================
 
 from django.db import transaction

@@ -1,5 +1,5 @@
 # ================================================================
-# 🌐 System Log WebSocket Routing — V4 (Primey HR Cloud)
+# 🌐 System Log WebSocket Routing — V4 (Mham Cloud)
 # ================================================================
 # يربط Consumer بالمسار:
 #    /ws/system_log/live/<company_id>/

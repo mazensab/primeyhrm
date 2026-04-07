@@ -1,6 +1,6 @@
 # ============================================================
 # 🔐 CSRF Bootstrap API (PUBLIC) — FINAL STABLE
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✔ Sets csrftoken cookie correctly
 # ✔ Public (NO AUTH required)

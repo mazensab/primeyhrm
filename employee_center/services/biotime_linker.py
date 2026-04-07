@@ -2,7 +2,7 @@
 # 📂 Path: employee_center/services/biotime_linker.py
 # 🔗 Biotime ↔ Employee Smart Linker — Phase C2 (Real Execution)
 # 🧪 Shell-First | Safe | Auditable | Zero Migration
-# 👨‍💻 Developed by Mazen — Primey HR Cloud 2026
+# 👨‍💻 Developed by Mazen — Mham Cloud 2026
 # ===============================================================
 
 from django.utils import timezone

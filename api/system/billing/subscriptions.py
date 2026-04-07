@@ -1,6 +1,6 @@
 # ============================================================
 # 📦 SYSTEM — Billing Subscriptions API (LIST)
-# Primey HR Cloud | V1.0 Ultra Stable
+# Mham Cloud | V1.0 Ultra Stable
 # ============================================================
 # ✔ READ ONLY
 # ✔ Super Admin only

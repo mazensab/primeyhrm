@@ -1,7 +1,7 @@
 """
 ====================================================================
 🔔 In-App Notifications Integration (Phase C-2)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Alert → Notification record
 ✔ Uses Notifications Engine contracts

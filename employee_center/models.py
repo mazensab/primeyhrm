@@ -1,18 +1,20 @@
 # ===============================================================
 # 📂 employee_center/models.py
-# 🧭 Employee Center — Models (FIXED + COMPLETED | OPTION A LOCKED)
+# 🧭 Employee Center — Models (FIXED + COMPLETED | AUTO EMPLOYEE NUMBER)
 # ===============================================================
 
+import re
+import uuid
+
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
-from django.conf import settings
-import uuid
 
 from company_manager.models import (
     Company,
+    CompanyBranch,
     CompanyDepartment,
     JobTitle,
-    CompanyBranch,     # ✅ NEW — لدعم Multi-Branch
 )
 
 
@@ -62,16 +64,13 @@ class Employee(models.Model):
         help_text="Employee code in Biotime / biometric devices"
     )
 
-    # ============================================================
-    # 🔗 الربط الفعلي مع سجل Biotime (Phase C3)
-    # ============================================================
-
     full_name = models.CharField(max_length=255, verbose_name="الاسم الكامل")
     arabic_name = models.CharField(max_length=255, null=True, blank=True)
 
     national_id = models.CharField(max_length=20, verbose_name="رقم الهوية/الإقامة")
     passport_number = models.CharField(max_length=20, null=True, blank=True)
-        # ============================================================
+
+    # ============================================================
     # 📌 بيانات الهوية والإقامة
     # ============================================================
     national_id_issue_date = models.DateField(
@@ -132,7 +131,6 @@ class Employee(models.Model):
         null=True,
         blank=True,
         verbose_name="رقم الجوال"
-
     )
 
     gender = models.CharField(
@@ -155,7 +153,7 @@ class Employee(models.Model):
     )
 
     # ============================================================
-    # 🏢 القسم (يبقى كما هو — لا تغيير)
+    # 🏢 القسم
     # ============================================================
     department = models.ForeignKey(
         CompanyDepartment,
@@ -166,7 +164,7 @@ class Employee(models.Model):
     )
 
     # ============================================================
-    # 🏢 الفروع — Multi-Branch (NEW ✅)
+    # 🏢 الفروع — Multi-Branch
     # ============================================================
     branches = models.ManyToManyField(
         CompanyBranch,
@@ -204,7 +202,6 @@ class Employee(models.Model):
         blank=True,
         verbose_name="تاريخ المباشرة",
         help_text="يبدأ احتساب الحضور من هذا التاريخ"
-
     )
 
     probation_end_date = models.DateField(null=True, blank=True)
@@ -221,6 +218,52 @@ class Employee(models.Model):
     def __str__(self):
         return self.full_name
 
+    # ============================================================
+    # 🔢 توليد رقم موظف تلقائي
+    # الصيغة: EMP-002-00001
+    # ============================================================
+    def _generate_employee_number(self) -> str:
+        if not self.company_id:
+            timestamp_part = timezone.now().strftime("%Y%m%d%H%M%S")
+            return f"EMP-GEN-{timestamp_part}"
+
+        prefix = f"EMP-{int(self.company_id):03d}-"
+        pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+
+        existing_numbers = (
+            self.__class__.objects
+            .filter(company_id=self.company_id)
+            .exclude(pk=self.pk)
+            .exclude(employee_number__isnull=True)
+            .exclude(employee_number__exact="")
+            .values_list("employee_number", flat=True)
+        )
+
+        max_seq = 0
+        for value in existing_numbers:
+            match = pattern.match(str(value).strip())
+            if not match:
+                continue
+
+            try:
+                seq = int(match.group(1))
+                if seq > max_seq:
+                    max_seq = seq
+            except (TypeError, ValueError):
+                continue
+
+        return f"{prefix}{max_seq + 1:05d}"
+
+    def save(self, *args, **kwargs):
+        current_employee_number = (self.employee_number or "").strip()
+
+        if not current_employee_number:
+            self.employee_number = self._generate_employee_number()
+        else:
+            self.employee_number = current_employee_number
+
+        super().save(*args, **kwargs)
+
 
 # ===============================================================
 # 🧩 (2) EmploymentInfo
@@ -229,7 +272,7 @@ class EmploymentInfo(models.Model):
     employee = models.OneToOneField(
         Employee,
         on_delete=models.CASCADE,
-         related_name="employment_info"
+        related_name="employment_info"
     )
 
     job_grade = models.CharField(max_length=50, null=True, blank=True)
@@ -367,6 +410,7 @@ class EmployeeDocument(models.Model):
                 raise ValidationError(
                     "تاريخ المباشرة لا يمكن أن يكون قبل تاريخ التعيين."
                 )
+
     class Meta:
         ordering = ["-uploaded_at"]
 

@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 الملف: payroll_center/urls.py — V12.7 FINAL STABLE
-# Primey HR Cloud | Payroll Module Routing
+# Mham Cloud | Payroll Module Routing
 # ============================================================
 
 from django.urls import path

@@ -1,6 +1,6 @@
 # ============================================================
 # Tamara API Client
-# Primey HR Cloud
+# Mham Cloud
 # Path: payment_gateways/tamara/client.py
 # ------------------------------------------------------------
 # HTTP Client Layer only

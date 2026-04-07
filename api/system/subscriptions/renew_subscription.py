@@ -1,54 +1,27 @@
 # ============================================================
 # 🔄 Renew Company Subscription
-# Primey HR Cloud
+# Mham Cloud — Notification Center Clean
 # ============================================================
 
 from __future__ import annotations
 
-from datetime import timedelta
-from decimal import Decimal
+import importlib
 import logging
+from decimal import Decimal
 
-from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.html import escape
 from django.views.decorators.http import require_POST
 
 from billing_center.models import (
     CompanySubscription,
     Invoice,
 )
-from whatsapp_center.models import ScopeType, TriggerSource
-from whatsapp_center.services import send_event_whatsapp_message
 
 VAT_RATE = Decimal("0.15")
 logger = logging.getLogger(__name__)
-
-
-# ============================================================
-# 🖼️ Primey Email Branding
-# نفس أسلوب reset password / system users
-# ============================================================
-
-PRIMEY_EMAIL_LOGO_URL = getattr(
-    settings,
-    "PRIMEY_EMAIL_LOGO_URL",
-    getattr(
-        settings,
-        "EMAIL_LOGO_URL",
-        "https://drive.google.com/uc?export=view&id=1x2Q9wJm8QmQm7mYjQmW7aJmR8bPlogoblak",
-    ),
-)
-
-DEFAULT_FROM_EMAIL = getattr(
-    settings,
-    "DEFAULT_FROM_EMAIL",
-    getattr(settings, "EMAIL_HOST_USER", "no-reply@primeyhr.com"),
-)
 
 
 # ============================================================
@@ -60,6 +33,12 @@ def _safe_text(value, default="-"):
         return default
     value = str(value).strip()
     return value if value else default
+
+
+def _normalize_email(value: str) -> str:
+    if not value:
+        return ""
+    return str(value).strip().lower()
 
 
 def _money_str(value) -> str:
@@ -107,7 +86,7 @@ def _collect_recipients(subscription) -> list[str]:
         )
 
     for value in candidates:
-        email = _safe_text(value, "").lower()
+        email = _normalize_email(value)
         if email and email not in recipients:
             recipients.append(email)
 
@@ -134,58 +113,102 @@ def _get_first_existing_attr(instance, attr_names: list[str], default=""):
     return default
 
 
-def _collect_whatsapp_targets(subscription) -> list[dict]:
+def _get_user_related_profile_candidates(user) -> list:
     """
-    تجميع مستهدفي الواتساب بشكل آمن وبدون تكرار.
+    محاولة الوصول إلى بروفايل المستخدم الشائع بدون فرض اسم محدد.
+    """
+    if not user:
+        return []
 
-    الأولوية:
-    - جوال الشركة
-    - جوال المالك
-    - جوال أول admin / owner داخل الشركة
+    candidates = []
+
+    for attr_name in ["profile", "userprofile"]:
+        try:
+            related_obj = getattr(user, attr_name, None)
+        except Exception:
+            related_obj = None
+
+        if related_obj:
+            candidates.append(related_obj)
+
+    return candidates
+
+
+def _get_best_phone_for_entity(instance) -> str:
+    """
+    جلب أفضل رقم جوال من الكيان مباشرة أو من profile/userprofile إن وجد.
+    """
+    phone_attr_candidates = [
+        "phone",
+        "mobile",
+        "mobile_number",
+        "whatsapp_number",
+        "phone_number",
+    ]
+
+    direct_phone = _get_first_existing_attr(instance, phone_attr_candidates, "")
+    if direct_phone:
+        return direct_phone
+
+    for profile_obj in _get_user_related_profile_candidates(instance):
+        profile_phone = _get_first_existing_attr(profile_obj, phone_attr_candidates, "")
+        if profile_phone:
+            return profile_phone
+
+    return ""
+
+
+def _collect_notification_targets(subscription) -> list[dict]:
+    """
+    تجميع مستهدفي الإشعار بشكل آمن وبدون تكرار.
     """
     targets: list[dict] = []
     seen_phones: set[str] = set()
+    seen_emails: set[str] = set()
 
     company = getattr(subscription, "company", None)
     owner = getattr(company, "owner", None) if company else None
 
-    def _append_target(phone, name="", role=""):
-        phone = _safe_text(phone, "")
-        if not phone:
-            return
-        if phone in seen_phones:
+    def _append_target(*, phone="", email="", name="", role=""):
+        safe_phone = _safe_text(phone, "")
+        safe_email = _normalize_email(email)
+        safe_name = _safe_text(name, "User")
+        safe_role = _safe_text(role, "")
+
+        key = safe_phone or safe_email
+        if not key:
             return
 
-        seen_phones.add(phone)
+        if safe_phone and safe_phone in seen_phones:
+            return
+
+        if safe_email and safe_email in seen_emails:
+            return
+
+        if safe_phone:
+            seen_phones.add(safe_phone)
+
+        if safe_email:
+            seen_emails.add(safe_email)
+
         targets.append({
-            "phone": phone,
-            "name": _safe_text(name, "User"),
-            "role": _safe_text(role, ""),
+            "phone": safe_phone,
+            "email": safe_email,
+            "name": safe_name,
+            "role": safe_role,
         })
 
-    company_phone = _get_first_existing_attr(
-        company,
-        ["phone", "mobile", "mobile_number", "whatsapp_number"],
-        "",
-    )
     _append_target(
-        company_phone,
+        phone=_get_best_phone_for_entity(company),
+        email=getattr(company, "email", None),
         name=getattr(company, "name", None),
         role="company",
     )
 
-    owner_phone = _get_first_existing_attr(
-        owner,
-        ["phone", "mobile", "mobile_number", "whatsapp_number"],
-        "",
-    )
-    owner_name = _safe_text(
-        getattr(owner, "first_name", None) or getattr(owner, "username", None),
-        "Owner",
-    )
     _append_target(
-        owner_phone,
-        name=owner_name,
+        phone=_get_best_phone_for_entity(owner),
+        email=getattr(owner, "email", None),
+        name=getattr(owner, "first_name", None) or getattr(owner, "username", None),
         role="owner",
     )
 
@@ -199,280 +222,153 @@ def _collect_whatsapp_targets(subscription) -> list[dict]:
         ) if company else None
 
         admin_user = getattr(admin_link, "user", None) if admin_link else None
-        admin_phone = _get_first_existing_attr(
-            admin_user,
-            ["phone", "mobile", "mobile_number", "whatsapp_number"],
-            "",
-        )
-        admin_name = _safe_text(
-            getattr(admin_user, "first_name", None) or getattr(admin_user, "username", None),
-            "Admin",
-        )
         _append_target(
-            admin_phone,
-            name=admin_name,
+            phone=_get_best_phone_for_entity(admin_user),
+            email=getattr(admin_user, "email", None),
+            name=getattr(admin_user, "first_name", None) or getattr(admin_user, "username", None),
             role=getattr(admin_link, "role", "admin") if admin_link else "admin",
         )
     except Exception:
         logger.exception(
-            "Failed while collecting renewal WhatsApp targets. subscription_id=%s",
+            "Failed while collecting renewal notification targets. subscription_id=%s",
             getattr(subscription, "id", None),
         )
 
     return targets
 
 
-def _build_renewal_whatsapp_message(*, subscription, invoice, duration, subtotal, vat_amount, total) -> str:
-    company = getattr(subscription, "company", None)
-    plan = getattr(subscription, "plan", None)
+# ============================================================
+# Notification Helpers
+# ============================================================
 
-    return (
-        f"تم إنشاء فاتورة تجديد الاشتراك بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"الباقة: {_safe_text(getattr(plan, 'name', None))}\n"
-        f"مدة التجديد: {_safe_text(duration)}\n"
-        f"رقم الفاتورة: {_safe_text(getattr(invoice, 'invoice_number', None))}\n"
-        f"تاريخ الإصدار: {_date_str(getattr(invoice, 'issue_date', None))}\n"
-        f"السعر الأساسي: {_money_str(subtotal)} SAR\n"
-        f"الضريبة: {_money_str(vat_amount)} SAR\n"
-        f"الإجمالي: {_money_str(total)} SAR\n"
-        f"الحالة: PENDING\n"
-        f"نهاية الاشتراك الحالي: {_date_str(getattr(subscription, 'end_date', None))}\n\n"
-        f"يمكنكم الآن متابعة السداد لإكمال التجديد."
-    )
-
-
-def _send_renewal_invoice_whatsapp(*, subscription, invoice, duration, subtotal, vat_amount, total) -> None:
+def _load_subscription_notification_module():
     """
-    إرسال إشعار واتساب عند إنشاء فاتورة التجديد.
+    تحميل مرن لطبقة الاشتراكات/الفوترة الرسمية.
     """
-    company = getattr(subscription, "company", None)
-    targets = _collect_whatsapp_targets(subscription)
+    candidate_modules = [
+        "notification_center.services_billing",
+        "notification_center.services_company",
+    ]
 
-    if not targets:
-        logger.warning(
-            "Renewal WhatsApp skipped: no phone targets found. subscription_id=%s invoice_id=%s",
-            getattr(subscription, "id", None),
-            getattr(invoice, "id", None),
-        )
-        return
-
-    message_text = _build_renewal_whatsapp_message(
-        subscription=subscription,
-        invoice=invoice,
-        duration=duration,
-        subtotal=subtotal,
-        vat_amount=vat_amount,
-        total=total,
-    )
-
-    for target in targets:
+    for module_path in candidate_modules:
         try:
-            send_event_whatsapp_message(
-                scope_type=ScopeType.COMPANY,
-                company=company,
-                event_code="subscription_renewal_invoice_created",
-                recipient_phone=target["phone"],
-                recipient_name=target["name"],
-                recipient_role=target["role"],
-                trigger_source=TriggerSource.SYSTEM,
-                language_code="ar",
-                related_model="Invoice",
-                related_object_id=str(getattr(invoice, "id", "")),
-                context={
-                    "message": message_text,
-                    "company_name": _safe_text(getattr(company, "name", None)),
-                    "recipient_name": target["name"],
-                    "plan_name": _safe_text(getattr(subscription.plan, "name", None)),
-                    "duration": _safe_text(duration),
-                    "invoice_number": _safe_text(getattr(invoice, "invoice_number", None)),
-                    "amount": f"{_money_str(total)} SAR",
-                    "status": "PENDING",
-                },
-            )
+            return importlib.import_module(module_path)
         except Exception:
-            logger.exception(
-                "Failed to send renewal WhatsApp. subscription_id=%s invoice_id=%s phone=%s",
-                getattr(subscription, "id", None),
-                getattr(invoice, "id", None),
-                target.get("phone"),
-            )
+            continue
+
+    return None
 
 
-def _build_renewal_email_html(*, subscription, invoice, duration, subtotal, vat_amount, total) -> str:
+def _build_renewal_context(*, subscription, invoice, duration, subtotal, vat_amount, total, actor) -> dict:
     company = getattr(subscription, "company", None)
+    owner = getattr(company, "owner", None) if company else None
     plan = getattr(subscription, "plan", None)
 
-    logo_url = escape(PRIMEY_EMAIL_LOGO_URL)
-    company_name = escape(_safe_text(getattr(company, "name", None)))
-    company_email = escape(_safe_text(getattr(company, "email", None)))
-    company_phone = escape(_safe_text(getattr(company, "phone", None)))
-    plan_name = escape(_safe_text(getattr(plan, "name", None)))
-    duration_text = escape(_safe_text(duration))
-    invoice_number = escape(_safe_text(getattr(invoice, "invoice_number", None)))
-    issue_date = escape(_date_str(getattr(invoice, "issue_date", None)))
-    current_end_date = escape(_date_str(getattr(subscription, "end_date", None)))
-    subtotal_text = escape(_money_str(subtotal))
-    vat_text = escape(_money_str(vat_amount))
-    total_text = escape(_money_str(total))
-
-    return f"""
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <title>فاتورة تجديد الاشتراك</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Tahoma,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f7fb;margin:0;padding:24px 0;">
-    <tr>
-      <td align="center">
-        <table width="680" cellpadding="0" cellspacing="0"
-               style="max-width:680px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
-
-          <tr>
-            <td align="center" style="background:#000000;padding:28px 24px;">
-              <img src="{logo_url}" alt="Primey"
-                   style="max-height:56px;width:auto;display:block;margin:0 auto 12px auto;" />
-              <div style="color:#ffffff;font-size:22px;font-weight:700;line-height:1.6;">
-                Primey HR Cloud
-              </div>
-              <div style="color:#d1d5db;font-size:14px;line-height:1.8;">
-                تم إنشاء فاتورة تجديد الاشتراك
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:32px 28px 20px 28px;">
-              <div style="font-size:15px;color:#374151;line-height:2;">
-                تم إنشاء فاتورة تجديد الاشتراك بنجاح. يمكنك الآن متابعة السداد لإكمال التجديد.
-              </div>
-
-              <div style="margin-top:22px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الشركة
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">اسم الشركة:</td><td style="padding:6px 0;">{company_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">البريد الإلكتروني:</td><td style="padding:6px 0;">{company_email}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الجوال:</td><td style="padding:6px 0;">{company_phone}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الاشتراك
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">الباقة:</td><td style="padding:6px 0;">{plan_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">مدة التجديد:</td><td style="padding:6px 0;">{duration_text}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">نهاية الاشتراك الحالي:</td><td style="padding:6px 0;">{current_end_date}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الفاتورة
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">رقم الفاتورة:</td><td style="padding:6px 0;">{invoice_number}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ الإصدار:</td><td style="padding:6px 0;">{issue_date}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">السعر الأساسي:</td><td style="padding:6px 0;">{subtotal_text} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الضريبة:</td><td style="padding:6px 0;">{vat_text} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الإجمالي:</td><td style="padding:6px 0;">{total_text} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الحالة:</td><td style="padding:6px 0;">PENDING</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:22px;font-size:14px;color:#6b7280;line-height:2;">
-                هذه الرسالة للتأكيد فقط بأنه تم إصدار فاتورة التجديد بنجاح داخل النظام.
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:20px 28px 30px 28px;">
-              <div style="border-top:1px solid #e5e7eb;padding-top:18px;font-size:12px;color:#9ca3af;line-height:1.9;text-align:center;">
-                هذه رسالة آلية من Primey HR Cloud — يرجى عدم الرد عليها مباشرة.
-              </div>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""".strip()
+    return {
+        "subscription_id": getattr(subscription, "id", None),
+        "company_id": getattr(company, "id", None) if company else None,
+        "company_name": _safe_text(getattr(company, "name", None)),
+        "company_email": _safe_text(getattr(company, "email", None)),
+        "company_phone": _safe_text(getattr(company, "phone", None)),
+        "owner_user_id": getattr(owner, "id", None) if owner else None,
+        "owner_email": _safe_text(getattr(owner, "email", None)) if owner else "",
+        "plan_id": getattr(plan, "id", None) if plan else None,
+        "plan_name": _safe_text(getattr(plan, "name", None)),
+        "duration": _safe_text(duration),
+        "invoice_id": getattr(invoice, "id", None),
+        "invoice_number": _safe_text(getattr(invoice, "invoice_number", None)),
+        "invoice_status": _safe_text(getattr(invoice, "status", None)),
+        "billing_reason": _safe_text(getattr(invoice, "billing_reason", None)),
+        "issue_date": _date_str(getattr(invoice, "issue_date", None)),
+        "subtotal_amount": _money_str(subtotal),
+        "vat_amount": _money_str(vat_amount),
+        "total_amount": _money_str(total),
+        "subscription_end_date": _date_str(getattr(subscription, "end_date", None)),
+        "recipients": _collect_recipients(subscription),
+        "targets": _collect_notification_targets(subscription),
+        "actor_user_id": getattr(actor, "id", None) if actor else None,
+        "actor_username": _safe_text(getattr(actor, "username", None), "") if actor else "",
+    }
 
 
-def _send_renewal_invoice_email(*, subscription, invoice, duration, subtotal, vat_amount, total) -> None:
-    recipients = _collect_recipients(subscription)
+def _dispatch_renewal_notification(*, subscription, invoice, duration, subtotal, vat_amount, total, actor) -> None:
+    services_module = _load_subscription_notification_module()
 
-    if not recipients:
+    if not services_module:
         logger.warning(
-            "Renewal invoice email skipped: no recipients found. subscription_id=%s invoice_id=%s",
+            "Subscription notification service module not found for renewal. subscription_id=%s invoice_id=%s",
             getattr(subscription, "id", None),
             getattr(invoice, "id", None),
         )
         return
 
-    company = getattr(subscription, "company", None)
-    plan = getattr(subscription, "plan", None)
+    candidate_function_names = [
+        "notify_subscription_renewal_invoice_created",
+        "notify_renewal_invoice_created",
+        "send_subscription_renewal_notification",
+        "send_renewal_invoice_notification",
+    ]
 
-    subject = f"فاتورة تجديد الاشتراك - {_safe_text(getattr(company, 'name', None), 'Company')}"
+    notify_func = None
+    for func_name in candidate_function_names:
+        notify_func = getattr(services_module, func_name, None)
+        if callable(notify_func):
+            break
 
-    text_body = (
-        f"تم إنشاء فاتورة تجديد الاشتراك بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"الباقة: {_safe_text(getattr(plan, 'name', None))}\n"
-        f"مدة التجديد: {_safe_text(duration)}\n"
-        f"رقم الفاتورة: {_safe_text(getattr(invoice, 'invoice_number', None))}\n"
-        f"تاريخ الإصدار: {_date_str(getattr(invoice, 'issue_date', None))}\n"
-        f"السعر الأساسي: {_money_str(subtotal)} SAR\n"
-        f"الضريبة: {_money_str(vat_amount)} SAR\n"
-        f"الإجمالي: {_money_str(total)} SAR\n"
-        f"الحالة: PENDING\n\n"
-        f"مع تحيات Primey HR Cloud"
-    )
+    if not callable(notify_func):
+        logger.warning(
+            "Renewal notification function not found. checked=%s",
+            ", ".join(candidate_function_names),
+        )
+        return
 
-    html_body = _build_renewal_email_html(
+    context = _build_renewal_context(
         subscription=subscription,
         invoice=invoice,
         duration=duration,
         subtotal=subtotal,
         vat_amount=vat_amount,
         total=total,
+        actor=actor,
     )
 
     try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_body,
-            from_email=DEFAULT_FROM_EMAIL,
-            to=recipients,
+        notify_func(
+            actor=actor,
+            subscription=subscription,
+            company=getattr(subscription, "company", None),
+            invoice=invoice,
+            extra_context=context,
         )
-        message.attach_alternative(html_body, "text/html")
-        message.send(fail_silently=False)
+        return
+    except TypeError:
+        pass
 
-        logger.info(
-            "Renewal invoice email sent successfully. subscription_id=%s invoice_id=%s recipients=%s",
-            getattr(subscription, "id", None),
-            getattr(invoice, "id", None),
-            recipients,
+    try:
+        notify_func(
+            actor=actor,
+            subscription=subscription,
+            company=getattr(subscription, "company", None),
+            invoice=invoice,
+            context=context,
         )
+        return
+    except TypeError:
+        pass
 
+    try:
+        notify_func(
+            subscription=subscription,
+            invoice=invoice,
+        )
+        return
     except Exception:
         logger.exception(
-            "Failed to send renewal invoice email. subscription_id=%s invoice_id=%s",
+            "Failed while dispatching renewal notification. subscription_id=%s invoice_id=%s",
             getattr(subscription, "id", None),
             getattr(invoice, "id", None),
         )
+        return
 
 
 @require_POST
@@ -547,30 +443,17 @@ def renew_subscription(request, subscription_id):
         )
 
         # ------------------------------------------------
-        # ✉️ Send Email After Successful Commit
+        # Notification Center الرسمي فقط بعد نجاح الـ commit
         # ------------------------------------------------
         transaction.on_commit(
-            lambda: _send_renewal_invoice_email(
+            lambda: _dispatch_renewal_notification(
                 subscription=subscription,
                 invoice=invoice,
                 duration=duration,
                 subtotal=price,
                 vat_amount=vat_amount,
                 total=total,
-            )
-        )
-
-        # ------------------------------------------------
-        # 📲 Send WhatsApp After Successful Commit
-        # ------------------------------------------------
-        transaction.on_commit(
-            lambda: _send_renewal_invoice_whatsapp(
-                subscription=subscription,
-                invoice=invoice,
-                duration=duration,
-                subtotal=price,
-                vat_amount=vat_amount,
-                total=total,
+                actor=getattr(request, "user", None),
             )
         )
 

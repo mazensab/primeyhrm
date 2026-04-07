@@ -1,7 +1,7 @@
 "use client"
 
 /* =========================================================
-   📄 Primey HR Cloud — Landing Pricing Page
+   📄 Mham Cloud — Landing Pricing Page
    المسار:
    C:\Users\mazen\primeyhrm\primey_frontend\app\(landing)\pricing\page.tsx
    ========================================================= */
@@ -342,7 +342,7 @@ export default function LandingPricingPage() {
                     </CardTitle>
 
                     <CardDescription className="min-h-[48px] text-sm leading-6">
-                      {plan.description || "Primey HR Cloud subscription plan"}
+                      {plan.description || "Mham Cloud subscription plan"}
                     </CardDescription>
 
                     <div className="pt-4">

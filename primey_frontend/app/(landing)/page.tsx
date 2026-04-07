@@ -57,16 +57,16 @@ export async function generateMetadata(): Promise<Metadata> {
   const isArabic = lang === "ar";
 
   const title = isArabic
-    ? "Primey HR Cloud — منصة سحابية ذكية لإدارة الموارد البشرية"
-    : "Primey HR Cloud — Smart Cloud HR Management Platform";
+    ? "Mham Cloud منصة احترافية لإدارة الحسابات و الفاتورة الألكترونية و الموارد البشرية"
+    : "Mham Cloud — Smart Cloud HR Management Platform";
 
   const description = isArabic
-    ? "Primey HR Cloud منصة احترافية لإدارة الموارد البشرية، الحضور، الرواتب، الإجازات، والأداء ضمن تجربة SaaS حديثة ومتعددة اللغات."
-    : "Primey HR Cloud is a professional SaaS platform for HR, attendance, payroll, leave management, and performance with a modern multilingual experience.";
+    ? "Mham Cloud منصة احترافية لإدارة الحسابات و الفاتورة الألكترونية و الموارد البشرية، الحضور، الرواتب، الإجازات، والأداء ضمن تجربة SaaS حديثة ومتعددة اللغات."
+    : "Mham Cloud is a professional SaaS platform for HR, attendance, payroll, leave management, and performance with a modern multilingual experience.";
 
   const imageAlt = isArabic
-    ? "Primey HR Cloud Landing Page"
-    : "Primey HR Cloud Landing Page";
+    ? "Mham Cloud Landing Page"
+    : "Mham Cloud Landing Page";
 
   return {
     title,

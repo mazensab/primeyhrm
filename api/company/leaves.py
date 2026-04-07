@@ -1,6 +1,7 @@
 # ============================================================
 # 🏢 Company Leave APIs — FINAL STABLE
-# Primey HR Cloud
+# Mham Cloud
+# Version: V2.1 Notification Center Cleanup ✅
 # ============================================================
 
 import json
@@ -25,8 +26,11 @@ from leave_center.models import (
     LeaveRequest,
     LeaveType,
 )
-from whatsapp_center.services import send_leave_status_whatsapp_notifications
-
+from notification_center.services_hr import (
+    notify_leave_requested,
+    notify_leave_approved,
+    notify_leave_rejected,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +218,19 @@ def create_leave_request(request):
         reason=reason,
     )
 
+    # ======================================================
+    # 🔔 Notification Center Hook — Leave Submitted
+    # المسار الرسمي الموحد بدل الإرسال المباشر من الـ API
+    # ======================================================
+    try:
+        notify_leave_requested(
+            leave_request,
+            send_email=False,
+            send_whatsapp=True,
+        )
+    except Exception:
+        logger.exception("⚠ Leave submit notification hook failed (non-blocking)")
+
     return JsonResponse({
         "status": "created",
         "request_id": leave_request.id,
@@ -312,22 +329,17 @@ def approve_leave(request, leave_id):
     leave.refresh_from_db()
 
     # =====================================================
-    # 📲 WhatsApp Notification Hook
-    # غير حاجب للتنفيذ — لا يكسر الموافقة إذا فشل الواتساب
+    # 🔔 Notification Center Hook
+    # المسار الرسمي الموحد بدل الإرسال المباشر من الـ API
     # =====================================================
     try:
-        send_leave_status_whatsapp_notifications(
-            leave_request=leave,
-            company=company,
-            action="approved",
-            send_to_employee=True,
-            send_to_user=True,
-            extra_context={
-                "approved_by": getattr(request.user, "id", None),
-            },
+        notify_leave_approved(
+            leave,
+            send_email=True,
+            send_whatsapp=True,
         )
     except Exception:
-        logger.exception("⚠ Leave approval WhatsApp hook failed (non-blocking)")
+        logger.exception("⚠ Leave approval notification hook failed (non-blocking)")
 
     # =====================================================
     # 🔗 FUTURE HOOK (SAFE — Enterprise Ready)
@@ -390,27 +402,23 @@ def reject_leave(request, leave_id):
     leave.refresh_from_db()
 
     # =====================================================
-    # 📲 WhatsApp Notification Hook
+    # 🔔 Notification Center Hook
+    # المسار الرسمي الموحد بدل الإرسال المباشر من الـ API
     # =====================================================
     try:
-        send_leave_status_whatsapp_notifications(
-            leave_request=leave,
-            company=company,
-            action="rejected",
-            send_to_employee=True,
-            send_to_user=True,
-            extra_context={
-                "reason": rejection_reason or getattr(leave, "reason", "") or "No reason provided",
-                "rejected_by": getattr(request.user, "id", None),
-            },
+        notify_leave_rejected(
+            leave,
+            send_email=True,
+            send_whatsapp=True,
         )
     except Exception:
-        logger.exception("⚠ Leave rejection WhatsApp hook failed (non-blocking)")
+        logger.exception("⚠ Leave rejection notification hook failed (non-blocking)")
 
     return JsonResponse({
         "status": "rejected",
         "leave_id": leave.id,
         "employee_id": leave.employee_id,
+        "rejection_reason": rejection_reason,
     })
 
 

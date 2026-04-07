@@ -1,7 +1,7 @@
 # ================================================================
 # 📂 api/company/branches.py
 # 🏢 Company Branch API
-# Primey HR Cloud
+# Mham Cloud
 # Version: V1.3 — BIOTIME UPDATE PATCH (SAFE) ✅
 # ================================================================
 # ✔ Create / Update Branch

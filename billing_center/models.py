@@ -1,6 +1,6 @@
 # =====================================================================
 # 📦 Billing Center — Models V10.1 Ultra Stable (PUBLIC FLOW PATCHED 🔒)
-# Primey HR Cloud — Subscription + Invoicing + Unified Payments
+# Mham Cloud — Subscription + Invoicing + Unified Payments
 # =====================================================================
 
 from django.db import models

@@ -6,7 +6,6 @@ import {
   Activity,
   Briefcase,
   Building2,
-  CalendarDays,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -14,7 +13,6 @@ import {
   Eye,
   FileDown,
   FileSpreadsheet,
-  Filter,
   GitBranch,
   Layers3,
   Loader2,
@@ -23,7 +21,6 @@ import {
   Phone,
   Plane,
   Plus,
-  Printer,
   RefreshCw,
   Search,
   Shield,
@@ -213,6 +210,8 @@ const translations = {
     excel: "Excel",
 
     fullName: "الاسم الكامل",
+    arabicName: "الاسم العربي",
+    employeeNumber: "الرقم الوظيفي",
     username: "اسم المستخدم",
     email: "البريد الإلكتروني",
     phone: "الجوال",
@@ -224,6 +223,8 @@ const translations = {
     branches: "الفروع",
 
     exampleFullName: "مثال: أحمد الحربي",
+    exampleArabicName: "مثال: أحمد الحربي",
+    exampleEmployeeNumber: "مثال: EMP-1001",
     exampleUsername: "مثال: ahmed.hr",
     exampleEmail: "example@company.com",
     examplePhone: "+9665xxxxxxxx",
@@ -361,6 +362,7 @@ const translations = {
     hourly: "دوام بالساعات",
 
     fullNameRequired: "الاسم الكامل مطلوب",
+    departmentRequired: "القسم مطلوب",
     usernameRequired: "اسم المستخدم مطلوب",
     usernameLength: "اسم المستخدم يجب أن يكون 3 أحرف على الأقل",
     emailInvalid: "يرجى إدخال بريد إلكتروني صحيح",
@@ -410,6 +412,8 @@ const translations = {
     excel: "Excel",
 
     fullName: "Full Name",
+    arabicName: "Arabic Name",
+    employeeNumber: "Employee Number",
     username: "Username",
     email: "Email",
     phone: "Phone",
@@ -421,6 +425,8 @@ const translations = {
     branches: "Branches",
 
     exampleFullName: "Example: Ahmed Alharbi",
+    exampleArabicName: "Example: أحمد الحربي",
+    exampleEmployeeNumber: "Example: EMP-1001",
     exampleUsername: "Example: ahmed.hr",
     exampleEmail: "example@company.com",
     examplePhone: "+9665xxxxxxxx",
@@ -560,6 +566,7 @@ const translations = {
     hourly: "Hourly",
 
     fullNameRequired: "Full name is required",
+    departmentRequired: "Department is required",
     usernameRequired: "Username is required",
     usernameLength: "Username must be at least 3 characters",
     emailInvalid: "Please enter a valid email address",
@@ -1287,6 +1294,7 @@ function WorkScheduleSection({
   creating,
   editItem,
   onEditItem,
+  onToggleItem,
   lang,
 }: {
   items: LookupItem[]
@@ -1314,6 +1322,7 @@ function WorkScheduleSection({
   creating: boolean
   editItem: (item: LookupItem) => void
   onEditItem: (item: LookupItem) => void
+  onToggleItem: (item: LookupItem) => void
   lang: Lang
 }) {
   const t = translations[lang]
@@ -1563,18 +1572,39 @@ function WorkScheduleSection({
                       </TableCell>
 
                       <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            editItem(item)
-                            onEditItem(item)
-                          }}
-                          className="gap-2"
-                        >
-                          <Pencil className="h-4 w-4" />
-                          {t.viewEdit}
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              editItem(item)
+                              onEditItem(item)
+                            }}
+                            className="gap-2"
+                          >
+                            <Pencil className="h-4 w-4" />
+                            {t.viewEdit}
+                          </Button>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onToggleItem(item)}
+                            className="gap-2"
+                          >
+                            {item.is_active === false ? (
+                              <>
+                                <CheckCircle2 className="h-4 w-4" />
+                                {t.statusActive}
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="h-4 w-4" />
+                                {t.statusInactive}
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1644,17 +1674,37 @@ function WorkScheduleSection({
                     </div>
                   </div>
 
-                  <Button
-                    variant="outline"
-                    className="mt-4 w-full gap-2"
-                    onClick={() => {
-                      editItem(item)
-                      onEditItem(item)
-                    }}
-                  >
-                    <Pencil className="h-4 w-4" />
-                    {t.viewEdit}
-                  </Button>
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Button
+                      variant="outline"
+                      className="w-full gap-2"
+                      onClick={() => {
+                        editItem(item)
+                        onEditItem(item)
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      {t.viewEdit}
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="w-full gap-2"
+                      onClick={() => onToggleItem(item)}
+                    >
+                      {item.is_active === false ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" />
+                          {t.statusActive}
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4" />
+                          {t.statusInactive}
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1680,6 +1730,8 @@ export default function CompanyEmployeesPage() {
 
   const [openCreateDialog, setOpenCreateDialog] = useState(false)
   const [fullName, setFullName] = useState("")
+  const [arabicName, setArabicName] = useState("")
+  const [employeeNumber, setEmployeeNumber] = useState("")
   const [username, setUsername] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
@@ -1870,6 +1922,8 @@ export default function CompanyEmployeesPage() {
 
   function resetCreateForm() {
     setFullName("")
+    setArabicName("")
+    setEmployeeNumber("")
     setUsername("")
     setEmail("")
     setPhone("")
@@ -1917,9 +1971,13 @@ export default function CompanyEmployeesPage() {
 
   async function handleCreateUserFromEmployees() {
     const safeFullName = fullName.trim()
+    const safeArabicName = arabicName.trim()
+    const safeEmployeeNumber = employeeNumber.trim()
     const safeUsername = username.trim().toLowerCase()
     const safeEmail = email.trim().toLowerCase()
     const safePhone = phone.trim()
+    const safeDepartmentId = selectedDepartmentId ? Number(selectedDepartmentId) : null
+    const safeJobTitleId = selectedJobTitleId ? Number(selectedJobTitleId) : null
 
     if (!safeFullName) {
       toast.error(t.fullNameRequired)
@@ -1941,6 +1999,11 @@ export default function CompanyEmployeesPage() {
       return
     }
 
+    if (!safeDepartmentId) {
+      toast.error(t.departmentRequired)
+      return
+    }
+
     setSubmitting(true)
 
     try {
@@ -1957,9 +2020,11 @@ export default function CompanyEmployeesPage() {
         body: JSON.stringify({
           employee: {
             full_name: safeFullName,
-            mobile_number: safePhone,
-            department_id: selectedDepartmentId ? Number(selectedDepartmentId) : null,
-            job_title_id: selectedJobTitleId ? Number(selectedJobTitleId) : null,
+            arabic_name: safeArabicName || null,
+            employee_number: safeEmployeeNumber || null,
+            mobile_number: safePhone || null,
+            department_id: safeDepartmentId,
+            job_title_id: safeJobTitleId,
             branch_ids: selectedBranchIds,
           },
           user: {
@@ -1968,6 +2033,7 @@ export default function CompanyEmployeesPage() {
             password: temporaryPassword,
             role,
             status,
+            phone: safePhone || null,
           },
         }),
       })
@@ -2167,6 +2233,43 @@ export default function CompanyEmployeesPage() {
       toast.error(error instanceof Error ? error.message : t.jobTitleCreateFailed)
     } finally {
       setCreatingJobTitle(false)
+    }
+  }
+
+  async function handleToggleWorkSchedule(item: LookupItem) {
+    try {
+      const csrfToken = getCookie("csrftoken")
+
+      const response = await fetch(
+        `${API_BASE}/api/company/work-schedules/${item.id}/toggle/`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfToken,
+          },
+        }
+      )
+
+      const data: GenericApiResponse & { is_active?: boolean } = await response.json()
+
+      const isSuccess =
+        response.ok &&
+        (data.success === true || data.status === "success" || data.status === "ok")
+
+      if (!isSuccess) {
+        throw new Error(data.error || data.message || t.workScheduleSaveFailed)
+      }
+
+      toast.success(
+        data.is_active === false ? t.statusInactive : t.statusActive
+      )
+
+      await fetchLookups()
+    } catch (error) {
+      console.error("Toggle work schedule error:", error)
+      toast.error(error instanceof Error ? error.message : t.workScheduleSaveFailed)
     }
   }
 
@@ -2411,6 +2514,26 @@ export default function CompanyEmployeesPage() {
                     </div>
 
                     <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.arabicName}</label>
+                      <Input
+                        value={arabicName}
+                        onChange={(e) => setArabicName(e.target.value)}
+                        placeholder={t.exampleArabicName}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">{t.employeeNumber}</label>
+                      <Input
+                        dir="ltr"
+                        lang="en"
+                        value={employeeNumber}
+                        onChange={(e) => setEmployeeNumber(e.target.value)}
+                        placeholder={t.exampleEmployeeNumber}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
                       <label className="text-sm font-medium">{t.username}</label>
                       <Input
                         dir="ltr"
@@ -2607,6 +2730,16 @@ export default function CompanyEmployeesPage() {
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.arabicName}</span>
+                        <span className="font-medium text-end">{arabicName || "—"}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{t.employeeNumber}</span>
+                        <span dir="ltr" className="font-medium">{employeeNumber || "—"}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">{t.userStatus}</span>
                         <span className="font-medium">
                           {status === "ACTIVE" ? t.statusActive : t.statusInactive}
@@ -2796,13 +2929,17 @@ export default function CompanyEmployeesPage() {
               </SelectContent>
             </Select>
 
-            <Button variant="outline" onClick={() => {
-              setSearch("")
-              setStatusFilter("ALL")
-              setDepartmentFilter("ALL")
-              setBranchFilter("ALL")
-              toast.success(t.filtersReset)
-            }} className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSearch("")
+                setStatusFilter("ALL")
+                setDepartmentFilter("ALL")
+                setBranchFilter("ALL")
+                toast.success(t.filtersReset)
+              }}
+              className="gap-2"
+            >
               <RefreshCw className="h-4 w-4" />
               {t.reset}
             </Button>
@@ -2830,11 +2967,11 @@ export default function CompanyEmployeesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="min-w-[260px]">{t.employee}</TableHead>
+                      <TableHead className="min-w-[280px]">{t.employee}</TableHead>
                       <TableHead>{t.employeeNo}</TableHead>
                       <TableHead>{t.department}</TableHead>
                       <TableHead>{t.jobTitle}</TableHead>
-                      <TableHead>{t.employeeBranches}</TableHead>
+                      <TableHead className="min-w-[180px]">{t.employeeBranches}</TableHead>
                       <TableHead>{t.userStatus}</TableHead>
                       <TableHead>{t.joinDate}</TableHead>
                       <TableHead>{t.actions}</TableHead>
@@ -2860,15 +2997,8 @@ export default function CompanyEmployeesPage() {
 
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{employee.full_name}</div>
-                                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                                  <span dir="ltr" className="inline-flex items-center gap-1">
-                                    <Mail className="h-3.5 w-3.5" />
-                                    {employee.email || "—"}
-                                  </span>
-                                  <span dir="ltr" className="inline-flex items-center gap-1">
-                                    <Phone className="h-3.5 w-3.5" />
-                                    {employee.phone || "—"}
-                                  </span>
+
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
                                   {employee.role ? (
                                     <span
                                       className={cn(
@@ -2879,6 +3009,18 @@ export default function CompanyEmployeesPage() {
                                       {getRoleLabel(employee.role, lang)}
                                     </span>
                                   ) : null}
+                                </div>
+
+                                <div className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+                                  <div dir="ltr" className="flex items-center gap-1.5">
+                                    <Mail className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="truncate">{employee.email || "—"}</span>
+                                  </div>
+
+                                  <div dir="ltr" className="flex items-center gap-1.5">
+                                    <Phone className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="truncate">{employee.phone || "—"}</span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -2897,7 +3039,23 @@ export default function CompanyEmployeesPage() {
                             </div>
                           </TableCell>
 
-                          <TableCell>{employee.branch || "—"}</TableCell>
+                          <TableCell>
+                            {employee.branches.length > 0 ? (
+                              <div className="flex flex-col items-start gap-1.5">
+                                {employee.branches.map((branch) => (
+                                  <div
+                                    key={branch.id}
+                                    className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-xs"
+                                  >
+                                    <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <span>{branch.name}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
 
                           <TableCell>
                             <StatusBadge status={employee.status} lang={lang} />
@@ -2986,7 +3144,21 @@ export default function CompanyEmployeesPage() {
 
                         <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
                           <p className="text-xs text-muted-foreground">{t.employeeBranches}</p>
-                          <p className="mt-1 font-medium">{employee.branch || "—"}</p>
+                          {employee.branches.length > 0 ? (
+                            <div className="mt-2 flex flex-col items-start gap-1.5">
+                              {employee.branches.map((branch) => (
+                                <div
+                                  key={branch.id}
+                                  className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-2.5 py-1 text-xs"
+                                >
+                                  <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span>{branch.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-1 font-medium">—</p>
+                          )}
                         </div>
 
                         <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
@@ -3117,6 +3289,7 @@ export default function CompanyEmployeesPage() {
           creating={creatingWorkSchedule}
           editItem={fillWorkScheduleForm}
           onEditItem={() => setOpenWorkScheduleDialog(true)}
+          onToggleItem={handleToggleWorkSchedule}
           lang={lang}
         />
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 // ======================================================
-// 🔐 PRIMEY HR CLOUD — ROUTE GUARD
+// 🔐 Mham Cloud — ROUTE GUARD
 // Client Runtime Protection
 // ======================================================
 

@@ -1,5 +1,5 @@
 # ============================================================
-# 🔒 Primey HR Cloud — System Enforcement Middleware
+# 🔒 Mham Cloud — System Enforcement Middleware
 # Version: V1.2 Ultra Stable — Safe Boot + Compatibility Layer
 # ============================================================
 

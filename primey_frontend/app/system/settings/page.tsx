@@ -55,7 +55,7 @@ interface EmailSettings {
 const translations = {
   ar: {
     pageTitle: "إعدادات النظام",
-    pageSubtitle: "Primey HR Cloud — حوكمة المنصة وإعدادات البريد الإلكتروني",
+    pageSubtitle: "Mham Cloud — حوكمة المنصة وإعدادات البريد الإلكتروني",
 
     refresh: "تحديث",
     reload: "إعادة تحميل",
@@ -153,7 +153,7 @@ const translations = {
   },
   en: {
     pageTitle: "System Settings",
-    pageSubtitle: "Primey HR Cloud — Platform Governance & Email Configuration",
+    pageSubtitle: "Mham Cloud — Platform Governance & Email Configuration",
 
     refresh: "Refresh",
     reload: "Reload",

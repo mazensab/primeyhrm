@@ -29,7 +29,7 @@ class SingletonModel(models.Model):
 # ⚙️ 1) GENERAL SETTINGS
 # ============================================================
 class SettingsGeneral(SingletonModel):
-    system_name = models.CharField(max_length=150, default="Primey HR Cloud")
+    system_name = models.CharField(max_length=150, default="Mham Cloud")
     support_email = models.EmailField(default="support@primeyhrm.com")
     support_phone = models.CharField(max_length=20, blank=True, null=True)
     theme_mode = models.CharField(

@@ -2,11 +2,15 @@
 # 📂 الملف: payroll_center/models.py
 # 🧠 وحدة الرواتب — الإصدار V11.0 Ultra Pro
 # ➕ Added PayrollRun (Non-breaking)
+# 🟢 Recalc Safety Patch for PayrollRecord.save()
 # ============================================================
 
-from django.db import models
-from django.utils import timezone
+from decimal import Decimal
+
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
+from django.utils import timezone
 
 # 🔗 من وحدة الموظفين
 from employee_center.models import Employee, Contract
@@ -37,19 +41,19 @@ class PayrollRun(models.Model):
         Company,
         on_delete=models.CASCADE,
         related_name="payroll_runs",
-        verbose_name="الشركة"
+        verbose_name="الشركة",
     )
 
     month = models.DateField(
         verbose_name="شهر دورة الرواتب",
-        help_text="يمثل أول يوم في الشهر"
+        help_text="يمثل أول يوم في الشهر",
     )
 
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.DRAFT,
-        verbose_name="حالة الدورة"
+        verbose_name="حالة الدورة",
     )
 
     created_by = models.ForeignKey(
@@ -57,12 +61,12 @@ class PayrollRun(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="تم الإنشاء بواسطة"
+        verbose_name="تم الإنشاء بواسطة",
     )
 
     created_at = models.DateTimeField(
         auto_now_add=True,
-        verbose_name="تاريخ الإنشاء"
+        verbose_name="تاريخ الإنشاء",
     )
 
     class Meta:
@@ -75,7 +79,6 @@ class PayrollRun(models.Model):
     # 🔐 Hard Save Protection
     # ========================================================
     def save(self, *args, **kwargs):
-
         if self.pk:
             old = PayrollRun.objects.get(pk=self.pk)
 
@@ -118,7 +121,6 @@ class PayrollRun(models.Model):
     # 🔐 Hard Delete Protection
     # ========================================================
     def delete(self, *args, **kwargs):
-
         if self.status in [
             self.Status.CALCULATED,
             self.Status.APPROVED,
@@ -134,20 +136,12 @@ class PayrollRun(models.Model):
     def __str__(self):
         return f"Payroll Run — {self.company} — {self.month.strftime('%B %Y')}"
 
-# ============================================================
-# 🧾 سجل الرواتب — PayrollRecord (Enterprise Lock V6)
-# ============================================================
-
-from django.db import models, transaction
-from decimal import Decimal
-
 
 # ============================================================
 # 🔐 Safe QuerySet — Prevent Bulk Operations
 # ============================================================
 
 class PayrollRecordQuerySet(models.QuerySet):
-
     def delete(self):
         for obj in self:
             obj.delete()
@@ -165,19 +159,12 @@ class PayrollRecordManager(models.Manager):
 # 🧾 PayrollRecord — Enterprise Lock V7 (Partial Payment Ready)
 # ============================================================
 
-from decimal import Decimal
-from django.db import models, transaction
-from django.core.exceptions import ValidationError
-
-
 class PayrollRecord(models.Model):
-
     objects = PayrollRecordManager()
 
     # ========================================================
     # 👤 بيانات الموظف و العقد
     # ========================================================
-
     employee = models.ForeignKey(
         "employee_center.Employee",
         on_delete=models.CASCADE,
@@ -195,7 +182,6 @@ class PayrollRecord(models.Model):
     # ========================================================
     # 🔗 ربط بدورة الرواتب
     # ========================================================
-
     run = models.ForeignKey(
         "payroll_center.PayrollRun",
         on_delete=models.CASCADE,
@@ -205,7 +191,6 @@ class PayrollRecord(models.Model):
     # ========================================================
     # 💵 تفاصيل الراتب
     # ========================================================
-
     base_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     allowance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     deductions = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -221,7 +206,6 @@ class PayrollRecord(models.Model):
     # ========================================================
     # 💰 Payment Tracking (NEW — Partial Payment Engine)
     # ========================================================
-
     paid_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -231,7 +215,6 @@ class PayrollRecord(models.Model):
     # ========================================================
     # 🔖 الحالة
     # ========================================================
-
     STATUS_CHOICES = (
         ("PENDING", "قيد الانتظار"),
         ("PARTIAL", "مدفوع جزئياً"),
@@ -268,7 +251,6 @@ class PayrollRecord(models.Model):
     # ========================================================
     # 🧮 Calculations
     # ========================================================
-
     def calculate_net_salary(self):
         return (
             self.base_salary
@@ -280,62 +262,114 @@ class PayrollRecord(models.Model):
 
     @property
     def remaining_amount(self):
-        return self.net_salary - self.paid_amount
+        remaining = self.net_salary - self.paid_amount
+        return remaining if remaining > Decimal("0.00") else Decimal("0.00")
 
     @property
     def is_fully_paid(self):
         return self.paid_amount >= self.net_salary
 
     # ========================================================
+    # 🔐 Internal Helpers
+    # ========================================================
+    def _is_payment_update(self, update_fields) -> bool:
+        """
+        يحدد ما إذا كانت عملية الحفظ تخص الدفع فقط
+        (مثل mark paid / partial payment).
+        """
+        if not update_fields:
+            return False
+
+        allowed_payment_fields = {
+            "paid_amount",
+            "status",
+            "payment_method",
+            "paid_at",
+            "updated_at",
+        }
+        return set(update_fields).issubset(allowed_payment_fields)
+
+    def _is_recalculation_update(self, update_fields) -> bool:
+        """
+        يحدد ما إذا كان الحفظ ناتجًا عن إعادة احتساب الرواتب.
+        """
+        if not update_fields:
+            return False
+
+        recalculation_fields = {
+            "base_salary",
+            "allowance",
+            "overtime",
+            "bonus",
+            "deductions",
+            "net_salary",
+            "paid_amount",
+            "payment_method",
+            "paid_at",
+            "status",
+            "breakdown",
+        }
+        return bool(set(update_fields) & recalculation_fields)
+
+    # ========================================================
     # 🔐 Hard Financial Lock
     # ========================================================
-
     def save(self, *args, **kwargs):
-
         is_create = self.pk is None
+        update_fields = kwargs.get("update_fields")
+        is_payment_update = self._is_payment_update(update_fields)
+        is_recalculation_update = self._is_recalculation_update(update_fields)
 
         if not is_create:
             old = PayrollRecord.objects.get(pk=self.pk)
 
-            # 🔒 لا تعديل بعد الدفع الكامل
-            if old.status == "PAID":
+            # 🔒 لا تعديل بعد الدفع الكامل إلا إذا كان تحديث دفع صريح
+            if old.status == "PAID" and not is_payment_update and not is_recalculation_update:
                 raise ValueError("Cannot modify a fully PAID payroll record")
 
-            # 🔒 لا تعديل بعد اعتماد الدورة
+            # 🔒 لا تعديل بعد اعتماد الدورة أو دفعها إلا عبر Payment Engine
             if old.run.status in ["APPROVED", "PAID"]:
-                if self.paid_amount != old.paid_amount:
-                    pass  # مسموح تعديل paid_amount عبر Payment Engine فقط
-                else:
+                if not is_payment_update:
                     raise ValueError("Cannot modify record from processed PayrollRun")
 
         # ====================================================
-        # 🧠 لا نعيد حساب الراتب إذا كان من Engine بعد المعالجة
+        # 🧠 وضع إعادة الاحتساب:
+        # إذا كانت الدورة ما زالت DRAFT أو CALCULATED،
+        # وأتى الحفظ كتحديث احتساب وليس دفعًا،
+        # نصفر بيانات الدفع لتجنب Validation القديم.
         # ====================================================
-        if is_create or (self.run and self.run.status == "DRAFT"):
+        if self.run and self.run.status in ["DRAFT", "CALCULATED"] and not is_payment_update:
+            self.paid_amount = Decimal("0.00")
+            self.payment_method = None
+            self.paid_at = None
+            self.status = "PENDING"
+
+        # ====================================================
+        # 🧠 إعادة حساب net_salary أثناء الإنشاء أو أثناء الاحتساب
+        # ====================================================
+        if is_create or (self.run and self.run.status in ["DRAFT", "CALCULATED"] and not is_payment_update):
             self.net_salary = self.calculate_net_salary()
 
-
+        # ====================================================
         # 🔒 Validation
-        if self.paid_amount < 0:
-            raise ValidationError("Paid amount cannot be negative")
-
-        from decimal import Decimal
-        # 🔒 Validation (Accounting Tolerance — Enterprise Safe)
+        # ====================================================
         tolerance = Decimal("0.01")
 
         if self.paid_amount < 0:
             raise ValidationError("Paid amount cannot be negative")
-        # السماح بفارق كسري محاسبي بسبب rounding / overtime / quantize
+
+        if self.net_salary < 0:
+            raise ValidationError("Net salary cannot be negative")
+
+        # السماح بفارق كسري محاسبي بسيط
         if self.paid_amount > (self.net_salary + tolerance):
             raise ValidationError("Paid amount cannot exceed net salary")
-            
 
         super().save(*args, **kwargs)
 
         # ====================================================
         # 📝 Audit Log
         # ====================================================
-
         from payroll_center.models import PayrollRecordHistory
 
         action = "CREATE" if is_create else "UPDATE"
@@ -349,9 +383,7 @@ class PayrollRecord(models.Model):
     # ========================================================
     # 🔐 Hard Delete Protection
     # ========================================================
-
     def delete(self, *args, **kwargs):
-
         if self.run.status in ["CALCULATED", "APPROVED", "PAID"]:
             raise ValueError("Cannot delete record from processed PayrollRun")
 
@@ -360,18 +392,14 @@ class PayrollRecord(models.Model):
     # ========================================================
     # 🏗 Auto Generator
     # ========================================================
-
     @classmethod
     @transaction.atomic
     def create_for_run_from_active_employees(cls, run):
-
         if run.status != "DRAFT":
             raise ValueError("PayrollRun must be DRAFT to generate records")
 
         if cls.objects.filter(run=run).exists():
             return
-
-        from employee_center.models import Employee
 
         employees = Employee.objects.filter(
             company_id=run.company_id,
@@ -379,7 +407,6 @@ class PayrollRecord(models.Model):
         )
 
         for employee in employees:
-
             contract = (
                 employee.contracts
                 .filter(is_active=True)
@@ -397,11 +424,12 @@ class PayrollRecord(models.Model):
     def __str__(self):
         return f"{self.employee} — {self.month.strftime('%B %Y')}"
 
-# ============================================================
-# 🧾 سجل عمليات الراتب — PayrollRecordHistory (كما هو)
-# ============================================================
-class PayrollRecordHistory(models.Model):
 
+# ============================================================
+# 🧾 سجل عمليات الراتب — PayrollRecordHistory
+# ============================================================
+
+class PayrollRecordHistory(models.Model):
     ACTION_CHOICES = (
         ("CREATE", "إنشاء السجل"),
         ("UPDATE", "تحديث البيانات"),
@@ -412,7 +440,7 @@ class PayrollRecordHistory(models.Model):
         PayrollRecord,
         on_delete=models.CASCADE,
         related_name="history_logs",
-        verbose_name="سجل الراتب"
+        verbose_name="سجل الراتب",
     )
 
     action = models.CharField(max_length=20, choices=ACTION_CHOICES, verbose_name="نوع العملية")
@@ -422,7 +450,7 @@ class PayrollRecordHistory(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="تم بواسطة"
+        verbose_name="تم بواسطة",
     )
 
     notes = models.TextField(null=True, blank=True, verbose_name="تفاصيل إضافية")
@@ -436,6 +464,7 @@ class PayrollRecordHistory(models.Model):
 
     def __str__(self):
         return f"{self.get_action_display()} — {self.payroll} — {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+
 
 # ============================================================
 # ➕ Payroll Adjustment — Enterprise Layer (V1.0)
@@ -464,39 +493,39 @@ class PayrollAdjustment(models.Model):
         PayrollRun,
         on_delete=models.CASCADE,
         related_name="adjustments",
-        verbose_name="دورة الرواتب"
+        verbose_name="دورة الرواتب",
     )
 
     employee = models.ForeignKey(
         Employee,
         on_delete=models.CASCADE,
         related_name="payroll_adjustments",
-        verbose_name="الموظف"
+        verbose_name="الموظف",
     )
 
     type = models.CharField(
         max_length=20,
         choices=TYPE_CHOICES,
-        verbose_name="نوع العملية"
+        verbose_name="نوع العملية",
     )
 
     category = models.CharField(
         max_length=20,
         choices=CATEGORY_CHOICES,
         default="OTHER",
-        verbose_name="التصنيف"
+        verbose_name="التصنيف",
     )
 
     amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        verbose_name="المبلغ"
+        verbose_name="المبلغ",
     )
 
     reason = models.TextField(
         null=True,
         blank=True,
-        verbose_name="السبب / الملاحظات"
+        verbose_name="السبب / الملاحظات",
     )
 
     created_by = models.ForeignKey(
@@ -504,12 +533,12 @@ class PayrollAdjustment(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="تم بواسطة"
+        verbose_name="تم بواسطة",
     )
 
     created_at = models.DateTimeField(
         auto_now_add=True,
-        verbose_name="تاريخ الإنشاء"
+        verbose_name="تاريخ الإنشاء",
     )
 
     class Meta:
@@ -520,28 +549,24 @@ class PayrollAdjustment(models.Model):
     # ========================================================
     # 🔐 Guard Rules — Enterprise Protection
     # ========================================================
-from django.core.exceptions import ValidationError
+    def clean(self):
+        # 🔐 1️⃣ منع التعديل خارج DRAFT
+        if self.run.status != "DRAFT":
+            raise ValidationError(
+                "Adjustments allowed only in DRAFT state"
+            )
 
-def clean(self):
+        # 🔐 2️⃣ التأكد أن الموظف مدرج داخل نفس الدورة
+        exists = PayrollRecord.objects.filter(
+            run=self.run,
+            employee=self.employee,
+        ).exists()
 
-    # 🔐 1️⃣ منع التعديل خارج DRAFT
-    if self.run.status != "DRAFT":
-        raise ValidationError(
-            "Adjustments allowed only in DRAFT state"
-        )
+        if not exists:
+            raise ValidationError(
+                "Employee is not included in this PayrollRun"
+            )
 
-    # 🔐 2️⃣ التأكد أن الموظف مدرج داخل نفس الدورة
-    from payroll_center.models import PayrollRecord
-
-    exists = PayrollRecord.objects.filter(
-        run=self.run,
-        employee=self.employee,
-    ).exists()
-
-    if not exists:
-        raise ValidationError(
-            "Employee is not included in this PayrollRun"
-        )
 
 # ============================================================
 # 🧾 Journal Entry — Payroll Accounting (Hardened V3)
@@ -549,7 +574,6 @@ def clean(self):
 # ============================================================
 
 class JournalEntry(models.Model):
-
     class Source(models.TextChoices):
         PAYROLL = "PAYROLL", "Payroll"
         PAYROLL_PAYMENT = "PAYROLL_PAYMENT", "Payroll Payment"
@@ -584,29 +608,26 @@ class JournalEntry(models.Model):
     total_debit = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0
+        default=0,
     )
 
     total_credit = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0
+        default=0,
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-date"]
-
-        # 🔐 Unique only for PAYROLL (Run-Level)
         constraints = [
             models.UniqueConstraint(
                 fields=["company", "source", "source_id"],
                 condition=models.Q(source="PAYROLL"),
-                name="unique_payroll_run_journal_per_company"
+                name="unique_payroll_run_journal_per_company",
             )
         ]
-
         indexes = [
             models.Index(fields=["company", "date"]),
             models.Index(fields=["company", "source"]),
@@ -614,10 +635,8 @@ class JournalEntry(models.Model):
         ]
 
     def __str__(self):
-        return (
-            f"JournalEntry #{self.id} — "
-            f"{self.company.name} — {self.description}"
-        )
+        return f"JournalEntry #{self.id} — {self.company.name} — {self.description}"
+
 
 # ============================================================
 # 🧾 Journal Line — Debit / Credit
@@ -627,12 +646,12 @@ class JournalLine(models.Model):
     entry = models.ForeignKey(
         JournalEntry,
         related_name="lines",
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
     )
 
     account_code = models.CharField(
         max_length=20,
-        help_text="e.g. 5100, 2100"
+        help_text="e.g. 5100, 2100",
     )
 
     account_name = models.CharField(
@@ -642,17 +661,19 @@ class JournalLine(models.Model):
     debit = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0
+        default=0,
     )
 
     credit = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0
+        default=0,
     )
 
     def __str__(self):
         return f"{self.account_code} — D:{self.debit} C:{self.credit}"
+
+
 # ============================================================
 # 💰 Company Overtime Settings
 # ============================================================
@@ -661,25 +682,25 @@ class CompanyOvertimeSetting(models.Model):
     company = models.OneToOneField(
         Company,
         on_delete=models.CASCADE,
-        related_name="overtime_setting"
+        related_name="overtime_setting",
     )
 
     normal_multiplier = models.DecimalField(
         default=1.25,
         max_digits=4,
-        decimal_places=2
+        decimal_places=2,
     )
 
     weekend_multiplier = models.DecimalField(
         default=2.0,
         max_digits=4,
-        decimal_places=2
+        decimal_places=2,
     )
 
     holiday_multiplier = models.DecimalField(
         default=2.0,
         max_digits=4,
-        decimal_places=2
+        decimal_places=2,
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -687,6 +708,8 @@ class CompanyOvertimeSetting(models.Model):
 
     def __str__(self):
         return f"Overtime Setting — {self.company.name}"
+
+
 # ============================================================
 # 🧾 Payroll Slip Snapshot — Enterprise Freeze Layer (V1)
 # 🔐 Immutable Financial Archive
@@ -702,19 +725,19 @@ class PayrollSlipSnapshot(models.Model):
         PayrollRecord,
         on_delete=models.CASCADE,
         related_name="snapshot",
-        verbose_name="Payroll Record"
+        verbose_name="Payroll Record",
     )
 
     run = models.ForeignKey(
         PayrollRun,
         on_delete=models.CASCADE,
-        related_name="snapshots"
+        related_name="snapshots",
     )
 
     company = models.ForeignKey(
         Company,
         on_delete=models.CASCADE,
-        related_name="payroll_snapshots"
+        related_name="payroll_snapshots",
     )
 
     # 🔒 Frozen Financial Data

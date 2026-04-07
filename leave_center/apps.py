@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 leave_center/apps.py — LeaveCenterConfig V3.2 Ultra Safe + Signals
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✔ Signals loaded ALWAYS (shell / migrate safe)
 # ✔ APScheduler guarded from admin commands

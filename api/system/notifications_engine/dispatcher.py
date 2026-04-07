@@ -1,7 +1,7 @@
 """
 ====================================================================
 📤 Notifications Engine — Dispatcher (ABSTRACTION LAYER)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Unified send interface
 ✔ Channel-based dispatching

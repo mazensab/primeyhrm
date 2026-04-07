@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/selectors.py
-# Primey HR Cloud - WhatsApp Selectors
+# Mham Cloud - WhatsApp Selectors
 # ============================================================
 
 from __future__ import annotations

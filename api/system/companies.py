@@ -1,24 +1,33 @@
 # ====================================================================
-# 🟦 System Companies API — V12.4 Ultra Stable (AUTO ROLES ENABLED ✅)
-# Primey HR Cloud — Super Admin Dashboard
+# 🟦 System Companies API — V12.5 Clean Notifications
+# Mham Cloud — Super Admin Dashboard
+# ====================================================================
+# ✅ ربط إنشاء الشركة مع Notification Center
+# ✅ ربط تفعيل/تعطيل الشركة مع Notification Center
+# ✅ الحفاظ على المنطق الحالي
+# ✅ تنظيف التكرارات البسيطة في الاستيراد
 # ====================================================================
 
-from django.http import JsonResponse
-from django.utils.timezone import now
-from datetime import timedelta
-from django.db import transaction
-import json
+from __future__ import annotations
 
+import json
+from datetime import timedelta
+
+from django.db import transaction
+from django.db.models import Count
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+from django.utils.timezone import now
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
 
 from company_manager.models import (
     Company,
     CompanyUser,
-    CompanyRole,   # ✅ NEW
+    CompanyRole,
 )
-
 from billing_center.models import CompanySubscription, Invoice, AccountSubscription
+from notification_center.services import create_notification, notify_many
 
 
 # ====================================================================
@@ -64,41 +73,177 @@ DEFAULT_COMPANY_ROLES = [
 
 
 # ====================================================================
+# Helpers
+# ====================================================================
+
+def _safe_company_recipients(company):
+    recipients = []
+    seen_user_ids = set()
+
+    owner = getattr(company, "owner", None)
+    owner_id = getattr(owner, "id", None)
+    if owner and owner_id:
+        recipients.append(owner)
+        seen_user_ids.add(owner_id)
+
+    company_users = (
+        CompanyUser.objects
+        .filter(company=company, is_active=True, user__isnull=False)
+        .select_related("user")
+    )
+
+    for company_user in company_users:
+        user = getattr(company_user, "user", None)
+        user_id = getattr(user, "id", None)
+        if not user or not user_id or user_id in seen_user_ids:
+            continue
+
+        seen_user_ids.add(user_id)
+        recipients.append(user)
+
+    return recipients
+
+
+def _notify_company_created(*, company, actor=None):
+    recipients = _safe_company_recipients(company)
+
+    if recipients:
+        notify_many(
+            recipients=recipients,
+            title="تم إنشاء الشركة بنجاح",
+            message=f"تم إنشاء الشركة ({company.name}) بنجاح داخل النظام.",
+            notification_type="company",
+            severity="success",
+            send_email=True,
+            send_whatsapp=True,
+            link=None,
+            company=company,
+            event_code="company_created",
+            event_group="company",
+            actor=actor,
+            language_code="ar",
+            source="companies.company_create",
+            context={
+                "company_id": company.id,
+                "company_name": company.name,
+                "company_email": company.email or "",
+                "company_phone": company.phone or "",
+            },
+            target_object=company,
+            template_key="company_created",
+        )
+
+    if actor and getattr(actor, "is_authenticated", False):
+        create_notification(
+            recipient=actor,
+            title="تم إنشاء شركة جديدة",
+            message=f"تم إنشاء الشركة ({company.name}) بنجاح.",
+            notification_type="company_admin",
+            severity="success",
+            send_email=False,
+            send_whatsapp=False,
+            link=None,
+            company=company,
+            event_code="company_created_admin",
+            event_group="company",
+            actor=actor,
+            target_user=actor,
+            language_code="ar",
+            source="companies.company_create.admin",
+            context={
+                "company_id": company.id,
+                "company_name": company.name,
+            },
+            target_object=company,
+            template_key="company_created_admin",
+        )
+
+
+def _notify_company_status_changed(*, company, actor=None, is_active: bool):
+    recipients = _safe_company_recipients(company)
+
+    if is_active:
+        title = "تم تفعيل الشركة"
+        message = f"تم تفعيل الشركة ({company.name}) بنجاح."
+        severity = "success"
+        event_code = "company_activated"
+        admin_event_code = "company_activated_admin"
+    else:
+        title = "تم تعليق الشركة"
+        message = f"تم تعليق الشركة ({company.name})."
+        severity = "warning"
+        event_code = "company_suspended"
+        admin_event_code = "company_suspended_admin"
+
+    if recipients:
+        notify_many(
+            recipients=recipients,
+            title=title,
+            message=message,
+            notification_type="company",
+            severity=severity,
+            send_email=True,
+            send_whatsapp=False,
+            link=None,
+            company=company,
+            event_code=event_code,
+            event_group="company",
+            actor=actor,
+            language_code="ar",
+            source="companies.toggle_company_active",
+            context={
+                "company_id": company.id,
+                "company_name": company.name,
+                "is_active": bool(is_active),
+            },
+            target_object=company,
+            template_key=event_code,
+        )
+
+    if actor and getattr(actor, "is_authenticated", False):
+        create_notification(
+            recipient=actor,
+            title=title,
+            message=message,
+            notification_type="company_admin",
+            severity=severity,
+            send_email=False,
+            send_whatsapp=False,
+            link=None,
+            company=company,
+            event_code=admin_event_code,
+            event_group="company",
+            actor=actor,
+            target_user=actor,
+            language_code="ar",
+            source="companies.toggle_company_active.admin",
+            context={
+                "company_id": company.id,
+                "company_name": company.name,
+                "is_active": bool(is_active),
+            },
+            target_object=company,
+            template_key=admin_event_code,
+        )
+
+
+# ====================================================================
 # 1) Overview — KPIs
 # ====================================================================
-from django.db.models import Count
-from django.utils.timezone import now
-from datetime import timedelta
 
 def companies_overview(request):
     today = now().date()
 
-    # ===============================
-    # 🏢 Companies Stats
-    # ===============================
     total = Company.objects.count()
     active = Company.objects.filter(is_active=True).count()
     suspended = Company.objects.filter(is_active=False).count()
 
-    # ===============================
-    # 👥 Total Users (System Level)
-    # ===============================
     total_users = CompanyUser.objects.count()
-    # ===============================
-    # 📊 Subscriptions Stats (NEW)
-    # ===============================
+
     subscriptions_total = CompanySubscription.objects.count()
+    subscriptions_active = CompanySubscription.objects.filter(status="ACTIVE").count()
+    subscriptions_trial = CompanySubscription.objects.filter(status="TRIAL").count()
 
-    subscriptions_active = CompanySubscription.objects.filter(
-        status="ACTIVE"
-    ).count()
-
-    subscriptions_trial = CompanySubscription.objects.filter(
-        status="TRIAL"
-    ).count()
-    # ===============================
-    # 📦 Subscription Expiry Logic
-    # ===============================
     subs = CompanySubscription.objects.exclude(end_date__isnull=True)
 
     expiring_7 = subs.filter(
@@ -126,18 +271,18 @@ def companies_overview(request):
                 "active": subscriptions_active,
                 "trial": subscriptions_trial,
                 "expired": expired,
-
                 "expiring_7": expiring_7,
                 "expiring_30": expiring_30,
-                
             },
         },
         status=200,
     )
 
+
 # ====================================================================
 # 2) Companies List
 # ====================================================================
+
 def companies_list(request):
     companies = Company.objects.all().order_by("-created_at")
     result = []
@@ -157,27 +302,22 @@ def companies_list(request):
                 "name": company.name,
                 "is_active": company.is_active,
                 "created_at": company.created_at.isoformat() if company.created_at else None,
-
                 "owner": {
                     "id": company.owner.id if company.owner else None,
                     "name": f"{company.owner.first_name} {company.owner.last_name}".strip()
                     if company.owner else None,
                     "email": company.owner.email if company.owner else None,
                 },
-
                 "contact": {
                     "phone": company.phone,
                     "email": company.email,
                 },
-
                 "address": company.short_address or company.city or "-",
-
                 "subscription": {
                     "plan": sub.plan.name if sub and sub.plan else None,
                     "status": sub.status if sub else None,
                     "end_date": sub.end_date.isoformat() if sub and sub.end_date else None,
                 },
-
                 "users_count": CompanyUser.objects.filter(company=company).count(),
                 "devices_count": 0,
             }
@@ -189,6 +329,7 @@ def companies_list(request):
 # ====================================================================
 # 3) Company Detail
 # ====================================================================
+
 def company_detail(request, company_id):
     try:
         company = Company.objects.get(id=company_id)
@@ -280,6 +421,7 @@ def company_detail(request, company_id):
 # ====================================================================
 # Helper — Latest Invoice
 # ====================================================================
+
 def _get_latest_invoice(subscription):
     if not subscription:
         return None
@@ -309,22 +451,17 @@ system_company_detail = company_detail
 # ====================================================================
 # 4) Company Create — PAID ONLY (AUTO ROLES ENABLED ✅)
 # ====================================================================
+
 @login_required
 @require_POST
 def company_create(request):
     user = request.user
 
-    # ============================================================
-    # 📥 Payload (JSON + FORM SAFE)
-    # ============================================================
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except Exception:
         payload = request.POST
 
-    # ============================================================
-    # 🔒 ACTIVE PAID SUBSCRIPTION
-    # ============================================================
     sub = (
         AccountSubscription.objects
         .filter(owner=user, status="ACTIVE")
@@ -335,9 +472,6 @@ def company_create(request):
     if not sub or not sub.plan:
         return JsonResponse({"error": "لا يوجد اشتراك مدفوع نشط"}, status=403)
 
-    # ============================================================
-    # 🧮 Company Limit
-    # ============================================================
     used = (
         CompanyUser.objects
         .filter(user=user, is_active=True)
@@ -352,9 +486,6 @@ def company_create(request):
             status=403
         )
 
-    # ============================================================
-    # 🏢 Required Fields
-    # ============================================================
     name = payload.get("name")
     email = payload.get("email")
     phone = payload.get("phone")
@@ -362,13 +493,7 @@ def company_create(request):
     if not name:
         return JsonResponse({"error": "اسم الشركة مطلوب"}, status=400)
 
-    # ============================================================
-    # 🏢 Atomic Create (Company + Roles + Owner)
-    # ============================================================
     with transaction.atomic():
-        # ----------------------------
-        # 🏢 Create Company
-        # ----------------------------
         company = Company.objects.create(
             name=name,
             email=email,
@@ -377,9 +502,6 @@ def company_create(request):
             owner=user,
         )
 
-        # ----------------------------
-        # 👤 Link Owner
-        # ----------------------------
         CompanyUser.objects.create(
             user=user,
             company=company,
@@ -387,17 +509,11 @@ def company_create(request):
             is_active=True,
         )
 
-        # ----------------------------
-        # 📦 Subscription Stub
-        # ----------------------------
         CompanySubscription.objects.get_or_create(
             company=company,
             defaults={"status": "PENDING"},
         )
 
-        # ----------------------------
-        # 🎭 Auto Create Default Roles
-        # ----------------------------
         for role_data in DEFAULT_COMPANY_ROLES:
             CompanyRole.objects.create(
                 company=company,
@@ -407,6 +523,11 @@ def company_create(request):
                 is_system_role=role_data["is_system_role"],
             )
 
+    _notify_company_created(
+        company=company,
+        actor=user,
+    )
+
     return JsonResponse(
         {
             "id": company.id,
@@ -414,18 +535,14 @@ def company_create(request):
         },
         status=201,
     )
+
+
 # ================================================================
 # 🔁 Toggle Company Active
 # ================================================================
 
-from django.shortcuts import get_object_or_404
-from django.http import JsonResponse
-from company_manager.models import Company
-
-
 @login_required
 def toggle_company_active(request, company_id):
-
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
 
@@ -434,8 +551,14 @@ def toggle_company_active(request, company_id):
     company.is_active = not company.is_active
     company.save(update_fields=["is_active"])
 
+    _notify_company_status_changed(
+        company=company,
+        actor=request.user,
+        is_active=company.is_active,
+    )
+
     return JsonResponse({
         "success": True,
         "company_id": company.id,
-        "is_active": company.is_active
+        "is_active": company.is_active,
     })

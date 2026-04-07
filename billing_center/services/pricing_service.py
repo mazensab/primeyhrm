@@ -1,6 +1,6 @@
 # ============================================================
 # 💰 Pricing Service — V1 Ultra Stable (FINAL)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✔ Single Source of Truth
 # ✔ No DB Writes

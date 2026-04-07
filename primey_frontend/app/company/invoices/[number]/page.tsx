@@ -610,7 +610,7 @@ export default function CompanyInvoicePage() {
                       Sales Invoice
                     </CardTitle>
                     <p className="print-subtitle mt-1 text-sm text-muted-foreground">
-                      Primey HR Cloud Billing Document
+                      Mham Cloud Billing Document
                     </p>
                   </div>
                 </div>

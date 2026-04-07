@@ -9,7 +9,7 @@ class SubscriptionEnforcementMiddleware:
     """
     ============================================================
     🔐 Subscription Enforcement Middleware — HARD ENFORCEMENT
-    Primey HR Cloud | V3.1 ULTRA SAFE
+    Mham Cloud | V3.1 ULTRA SAFE
     ============================================================
 
     ✔ لا يتدخل في Auth / Login / WhoAmI

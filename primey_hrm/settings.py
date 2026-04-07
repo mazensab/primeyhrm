@@ -1,6 +1,6 @@
 """
 ====================================================================
-📦 Primey HR Cloud — Global Settings
+📦 Mham Cloud — Global Settings
 🛠️ Version: V16.0 Ultra Stable — API + Admin + Email Ready
 ====================================================================
 """
@@ -88,7 +88,7 @@ else:
 # 🌐 FRONTEND (Next.js)
 # ============================================================
 
-FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "https://primeyride.com")
+FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "https://mhamcloud.com")
 FRONTEND_LOGIN_URL = f"{FRONTEND_BASE_URL}/login"
 FRONTEND_HOME_URL = f"{FRONTEND_BASE_URL}/"
 
@@ -341,12 +341,12 @@ CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",     # Local Next.js
-    "https://primeyride.com",    # Production
+    "https://mhamcloud.com",    # Production
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
-    "https://primeyride.com",
+    "https://mhamcloud.com",
 ]
 
 CORS_ALLOW_HEADERS = [
@@ -416,7 +416,7 @@ CHANNEL_LAYERS = {
 }
 
 # ============================================================
-# 🗄️ DATABASE — MariaDB 10.11
+# 🗄️ DATABASE — MariaDB / MySQL
 # ============================================================
 
 DATABASES = {
@@ -429,10 +429,14 @@ DATABASES = {
         "PORT": env("DB_PORT", "3306"),
         "OPTIONS": {
             "charset": "utf8mb4",
+            "init_command": "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
+        },
+        "TEST": {
+            "CHARSET": "utf8mb4",
+            "COLLATION": "utf8mb4_unicode_ci",
         },
     }
 }
-
 # ============================================================
 # ☁️ GOOGLE DRIVE STORAGE (Employee Photos)
 # ============================================================
@@ -467,11 +471,11 @@ EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 20)
 
 DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL",
-    "Primey HR Cloud <info@primeyride.com>"
+    "Mham Cloud <info@mhamcloud.sa>"
 )
 SERVER_EMAIL = env("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 # اسم افتراضي مرسل يمكن استخدامه في أي templates أو helpers لاحقًا
-EMAIL_FROM_NAME = env("EMAIL_FROM_NAME", "Primey HR Cloud")
+EMAIL_FROM_NAME = env("EMAIL_FROM_NAME", "Mham Cloud")
 
 # تفعيل/تعطيل البريد على مستوى النظام
 EMAIL_NOTIFICATIONS_ENABLED = env_bool("EMAIL_NOTIFICATIONS_ENABLED", True)

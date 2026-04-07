@@ -696,7 +696,7 @@ async function buildSocket(state, { mode = "qr", phoneNumber = "" } = {}) {
       version,
       logger,
       printQRInTerminal: false,
-      browser: Browsers.windows("Primey HR Cloud"),
+      browser: Browsers.windows("Mham Cloud"),
       markOnlineOnConnect: false,
       syncFullHistory: false,
       defaultQueryTimeoutMs: 60000,
@@ -797,7 +797,7 @@ async function buildSocket(state, { mode = "qr", phoneNumber = "" } = {}) {
           state.lastError = ""
           state.lastConnectedAt = nowIso()
           state.connectedPhone = String(sock.user?.id || "").split(":")[0] || ""
-          state.deviceLabel = "Primey HR Cloud"
+          state.deviceLabel = "Mham Cloud"
           logger.info({ session: state.sessionName }, "WhatsApp session connected")
         }
 

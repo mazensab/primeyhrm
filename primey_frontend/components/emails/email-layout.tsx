@@ -23,7 +23,7 @@ export default function EmailLayout({
   previewText,
   title,
   children,
-  companyName = "Primey HR Cloud",
+  companyName = "Mham Cloud",
 }: EmailLayoutProps) {
   return (
     <Html lang="ar" dir="rtl">

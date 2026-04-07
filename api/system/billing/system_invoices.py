@@ -1,6 +1,6 @@
 # ============================================================
 # 🧾 SYSTEM — All Invoices (Super Admin)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.http import JsonResponse

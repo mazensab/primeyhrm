@@ -4,7 +4,7 @@ import { MediaListItemType } from "@/types"
 
 // ============================================================
 // 📂 الملف: components/whatsapp/media-list-item.tsx
-// 🟢 Primey HR Cloud - WhatsApp Media List Item
+// 🟢 Mham Cloud - WhatsApp Media List Item
 // ------------------------------------------------------------
 // ✅ توحيد أحجام الأيقونات
 // ✅ تحسين الإرجاع الافتراضي

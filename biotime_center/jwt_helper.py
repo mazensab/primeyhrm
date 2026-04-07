@@ -6,7 +6,7 @@
 # ✔ تخزين JWT + expiry
 # ✔ تجديد تلقائي في حال انتهاء الصلاحية
 # ✔ مستخدم من API Client (V7.0)
-# Developed by Mazen — Primey HR Cloud 2026
+# Developed by Mazen — Mham Cloud 2026
 # ============================================================
 
 import requests

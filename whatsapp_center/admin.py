@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/admin.py
-# Primey HR Cloud - WhatsApp Center Admin
+# Mham Cloud - WhatsApp Center Admin
 # ============================================================
 
 from django.contrib import admin

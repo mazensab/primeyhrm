@@ -1,6 +1,6 @@
 # ============================================================
 # 🔐 App Access Control Middleware — V2 Ultra Safe
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.http import JsonResponse

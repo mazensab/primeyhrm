@@ -1,6 +1,6 @@
 # ======================================================
 # 🔄 Migrate Legacy Plans & Subscriptions Apps
-# Primey HR Cloud
+# Mham Cloud
 # ======================================================
 
 from django.core.management.base import BaseCommand

@@ -1,6 +1,6 @@
 # ============================================================
 # 🕵️ Impersonation API — V2 Ultra Stable (Super Admin Only)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.http import JsonResponse

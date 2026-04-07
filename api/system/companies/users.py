@@ -1,6 +1,6 @@
 # ===============================================================
 # 👥 Company Users — SYSTEM API (Enhanced Actions + Enter As User)
-# Primey HR Cloud
+# Mham Cloud
 # ===============================================================
 
 from __future__ import annotations
@@ -13,21 +13,16 @@ from typing import Optional
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
-from django.core.mail import EmailMultiAlternatives
 from django.http import JsonResponse
-from django.utils.html import escape
 from django.views.decorators.http import require_GET, require_POST
 
+from auth_center.models import ActiveUserSession, UserProfile
 from company_manager.models import CompanyUser
-from auth_center.models import UserProfile, ActiveUserSession
+from notification_center import services_auth as auth_notification_services
+from notification_center import services_company as company_notification_services
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------
-# شعار الإيميل المعتمد
-# ---------------------------------------------------------------
-LOGO_URL = "https://drive.google.com/uc?export=view&id=1a0Y1SK3n-Hn9QDZa7Ge24r3--B8zXbTd"
 
 # ===============================================================
 # Constants
@@ -148,6 +143,10 @@ def _normalize_username(value: str) -> str:
     return (value or "").strip().lower()
 
 
+def _safe_value(value):
+    return value if value not in (None, "") else "-"
+
+
 def _generate_temp_password(length: int = 12) -> str:
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#$%"
     return "".join(secrets.choice(alphabet) for _ in range(length))
@@ -239,7 +238,7 @@ def _get_frontend_base_url() -> str:
         getattr(settings, "FRONTEND_BASE_URL", None)
         or getattr(settings, "FRONTEND_URL", None)
         or getattr(settings, "NEXT_PUBLIC_APP_URL", None)
-        or "https://primeyride.com"
+        or "https://mhamcloud.com"
     ).rstrip("/")
 
 
@@ -301,291 +300,239 @@ def _ensure_active_session_registry(request, user, *, session_version: int = 1):
     request.session.modified = True
 
 
-def _send_html_email(
-    *,
-    subject: str,
-    to_email: str,
-    text_content: str,
-    html_content: str,
-) -> tuple[bool, Optional[str]]:
-    """
-    إرسال إيميل HTML/TEXT بشكل آمن.
-    لا نرمي الاستثناء للأعلى حتى لا نكسر العملية الأساسية.
-    """
-    if not to_email:
-        return False, "Recipient email is empty"
+# ===============================================================
+# Notification Helpers
+# ===============================================================
 
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or getattr(
-        settings,
-        "EMAIL_HOST_USER",
-        None,
-    )
+def _dispatch_with_candidates(module, candidate_function_names, **kwargs) -> tuple[bool, Optional[str]]:
+    """
+    استدعاء مرن للطبقة الرسمية حتى لا ينكسر المسار أثناء مرحلة cleanup.
+    """
+    notify_func = None
 
-    if not from_email:
-        return False, "DEFAULT_FROM_EMAIL / EMAIL_HOST_USER not configured"
+    for func_name in candidate_function_names:
+        notify_func = getattr(module, func_name, None)
+        if callable(notify_func):
+            break
+
+    if not callable(notify_func):
+        return False, f"Notification service not found: {', '.join(candidate_function_names)}"
 
     try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_content,
-            from_email=from_email,
-            to=[to_email],
-        )
-        message.attach_alternative(html_content, "text/html")
-        message.send(fail_silently=False)
+        notify_func(**kwargs)
         return True, None
+    except TypeError:
+        pass
 
+    fallback_kwargs = dict(kwargs)
+
+    # extra_context -> context
+    if "extra_context" in fallback_kwargs:
+        fallback_context = fallback_kwargs.pop("extra_context")
+        try:
+            notify_func(**fallback_kwargs, context=fallback_context)
+            return True, None
+        except TypeError:
+            pass
+
+    # actor قد لا يكون مدعومًا في بعض الإصدارات
+    if "actor" in fallback_kwargs:
+        fallback_kwargs_no_actor = dict(fallback_kwargs)
+        fallback_kwargs_no_actor.pop("actor", None)
+
+        try:
+            notify_func(**fallback_kwargs_no_actor)
+            return True, None
+        except TypeError:
+            pass
+
+        if "extra_context" in kwargs:
+            try:
+                notify_func(
+                    **{
+                        k: v for k, v in fallback_kwargs_no_actor.items()
+                        if k != "context"
+                    },
+                    context=kwargs["extra_context"],
+                )
+                return True, None
+            except TypeError:
+                pass
+
+    try:
+        minimal_kwargs = {}
+        for key in ("company", "company_user", "user", "target_user", "new_password"):
+            if key in kwargs:
+                minimal_kwargs[key] = kwargs[key]
+
+        if minimal_kwargs:
+            notify_func(**minimal_kwargs)
+            return True, None
     except Exception as exc:
-        logger.exception("Company user email send failed: %s", exc)
+        logger.exception("Notification dispatch failed: %s", exc)
         return False, str(exc)
 
-
-def _build_email_shell(
-    *,
-    title: str,
-    intro: str,
-    rows: list[tuple[str, str]],
-    primary_button_label: str,
-    primary_button_url: str,
-    note: str = "",
-) -> tuple[str, str]:
-    """
-    بناء HTML بسيط وآمن ومتوافق مع الهوية الحالية.
-    """
-    safe_title = escape(title)
-    safe_intro = escape(intro)
-    safe_note = escape(note)
-    safe_button_label = escape(primary_button_label)
-    safe_button_url = escape(primary_button_url)
-
-    rows_html = ""
-    text_rows = []
-
-    for label, value in rows:
-        safe_label = escape(label)
-        safe_value = escape(value or "")
-        rows_html += f"""
-            <tr>
-                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;color:#0f172a;width:160px;">{safe_label}</td>
-                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#475569;">{safe_value}</td>
-            </tr>
-        """
-        text_rows.append(f"{label}: {value}")
-
-    html = f"""
-    <div dir="rtl" style="margin:0;padding:24px 12px;background:#f6f8fb;font-family:Tahoma,Arial,'Segoe UI',sans-serif;">
-      <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #e8eef7;border-radius:20px;overflow:hidden;">
-        <div style="background:#000000;padding:28px 24px;text-align:center;">
-          <img
-            src="{escape(LOGO_URL)}"
-            alt="Primey HR Cloud"
-            width="148"
-            height="48"
-            style="display:block;margin:0 auto 14px;object-fit:contain;"
-          />
-          <div style="font-size:14px;color:#cbd5e1;line-height:24px;">نظام احترافي لإدارة الشركات والموظفين والفوترة والاشتراكات</div>
-        </div>
-
-        <div style="padding:28px 24px 12px;">
-          <div style="margin:0 0 16px;font-size:24px;font-weight:700;color:#0f172a;line-height:1.5;">{safe_title}</div>
-
-          <div style="border:1px solid #e5e7eb;border-radius:16px;padding:24px;">
-            <p style="margin:0 0 18px;font-size:15px;line-height:28px;color:#334155;">{safe_intro}</p>
-
-            <table width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:0;border-collapse:collapse;overflow:hidden;">
-              {rows_html}
-            </table>
-
-            <div style="text-align:center;padding:24px 0 16px;">
-              <a href="{safe_button_url}" style="background:#0f172a;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;border-radius:12px;padding:14px 24px;display:inline-block;">
-                {safe_button_label}
-              </a>
-            </div>
-
-            {f'<p style="margin:0 0 10px;font-size:13px;line-height:24px;color:#b45309;">{safe_note}</p>' if safe_note else ''}
-            <p style="margin:0;font-size:13px;color:#64748b;">إذا لم يعمل الزر، استخدم الرابط التالي:</p>
-            <p style="margin:8px 0 0;">
-              <a href="{safe_button_url}" style="color:#2563eb;font-size:13px;text-decoration:none;">{safe_button_url}</a>
-            </p>
-          </div>
-        </div>
-
-        <div style="padding:8px 24px 26px;text-align:center;">
-          <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0 20px;" />
-          <p style="margin:0 0 8px;color:#475569;font-size:13px;line-height:22px;">تم إرسال هذه الرسالة من خلال نظام Primey HR Cloud.</p>
-          <p style="margin:0 0 8px;color:#475569;font-size:13px;line-height:22px;">الدعم الفني: info@primeyride.com</p>
-          <p style="margin:8px 0 0;color:#94a3b8;font-size:12px;line-height:20px;">© 2026 Primey HR Cloud. جميع الحقوق محفوظة.</p>
-        </div>
-      </div>
-    </div>
-    """
-
-    text = "\n".join(
-        [
-            title,
-            "",
-            intro,
-            "",
-            *text_rows,
-            "",
-            f"{primary_button_label}: {primary_button_url}",
-            "",
-            note or "",
-        ]
-    )
-
-    return text, html
+    return False, "Notification dispatch signature mismatch"
 
 
-# ===============================================================
-# Email Event Helpers
-# ===============================================================
-
-def _send_company_user_password_reset_email(item: CompanyUser, new_password: str) -> tuple[bool, Optional[str]]:
+def _build_company_user_common_context(item: CompanyUser) -> dict:
     user = item.user
-    if not user.email:
-        return False, "User has no email"
+    company = item.company
 
-    login_url = _get_login_url()
-    full_name = _get_full_name(user)
-    company_name = item.company.name if item.company else ""
-    role_label = item.role or "EMPLOYEE"
-
-    text_content, html_content = _build_email_shell(
-        title="تم تغيير كلمة المرور بنجاح",
-        intro="تمت إعادة تعيين كلمة مرور حسابك بنجاح من خلال إدارة النظام. يمكنك الآن تسجيل الدخول باستخدام كلمة المرور الجديدة الموضحة أدناه.",
-        rows=[
-            ("الشركة", company_name),
-            ("الاسم", full_name),
-            ("اسم المستخدم", user.username),
-            ("البريد الإلكتروني", user.email or ""),
-            ("الدور", role_label),
-            ("كلمة المرور الجديدة", new_password),
-        ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا لم تكن تتوقع هذا التغيير، يرجى التواصل مع مسؤول النظام فورًا.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم تحديث كلمة المرور",
-        to_email=user.email,
-        text_content=text_content,
-        html_content=html_content,
-    )
+    return {
+        "company_id": getattr(company, "id", None),
+        "company_name": _safe_value(getattr(company, "name", None) if company else None),
+        "company_user_id": item.id,
+        "target_user_id": getattr(user, "id", None),
+        "full_name": _safe_value(_get_full_name(user)),
+        "username": _safe_value(getattr(user, "username", None)),
+        "email": _safe_value(getattr(user, "email", None)),
+        "phone": _safe_value(_get_user_phone(user)),
+        "role": _safe_value(item.role or "EMPLOYEE"),
+        "login_url": _get_login_url(),
+        "company_dashboard_url": _get_company_dashboard_url(),
+        "system_companies_url": _get_system_companies_url(),
+    }
 
 
-def _send_company_user_update_email(
+def _notify_company_user_updated(
+    *,
+    actor,
     item: CompanyUser,
     old_username: str,
     old_email: str,
     new_username: str,
     new_email: str,
 ) -> tuple[bool, Optional[str]]:
-    target_email = new_email or old_email
-    if not target_email:
-        return False, "User has no email"
+    context = _build_company_user_common_context(item)
+    context.update({
+        "old_username": _safe_value(old_username),
+        "old_email": _safe_value(old_email),
+        "new_username": _safe_value(new_username),
+        "new_email": _safe_value(new_email),
+    })
 
-    user = item.user
-    login_url = _get_login_url()
-    full_name = _get_full_name(user)
-    company_name = item.company.name if item.company else ""
-    role_label = item.role or "EMPLOYEE"
-
-    text_content, html_content = _build_email_shell(
-        title="تم تحديث بيانات حسابك",
-        intro="تم تعديل بعض بيانات حسابك من خلال إدارة النظام. نرجو مراجعة التفاصيل التالية والتأكد من صحتها.",
-        rows=[
-            ("الشركة", company_name),
-            ("الاسم", full_name),
-            ("اسم المستخدم السابق", old_username or ""),
-            ("اسم المستخدم الجديد", new_username or ""),
-            ("البريد السابق", old_email or ""),
-            ("البريد الجديد", new_email or ""),
-            ("الدور الحالي", role_label),
+    return _dispatch_with_candidates(
+        company_notification_services,
+        [
+            "notify_company_user_updated",
+            "notify_system_company_user_updated",
+            "send_company_user_updated_notification",
         ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا لم تكن تتوقع هذا التحديث، يرجى التواصل مع مسؤول النظام فورًا.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم تحديث بيانات الحساب",
-        to_email=target_email,
-        text_content=text_content,
-        html_content=html_content,
+        actor=actor,
+        company=item.company,
+        company_user=item,
+        user=item.user,
+        target_user=item.user,
+        extra_context=context,
     )
 
 
-def _send_company_user_role_changed_email(
+def _notify_company_user_role_changed(
+    *,
+    actor,
     item: CompanyUser,
     old_role: str,
     new_role: str,
 ) -> tuple[bool, Optional[str]]:
-    user = item.user
-    if not user.email:
-        return False, "User has no email"
+    context = _build_company_user_common_context(item)
+    context.update({
+        "old_role": _safe_value(old_role),
+        "new_role": _safe_value(new_role),
+    })
 
-    login_url = _get_login_url()
-    full_name = _get_full_name(user)
-    company_name = item.company.name if item.company else ""
-
-    text_content, html_content = _build_email_shell(
-        title="تم تحديث صلاحية حسابك",
-        intro="تم تغيير الدور الوظيفي أو الصلاحية المرتبطة بحسابك من خلال إدارة النظام.",
-        rows=[
-            ("الشركة", company_name),
-            ("الاسم", full_name),
-            ("اسم المستخدم", user.username),
-            ("الدور السابق", old_role or ""),
-            ("الدور الجديد", new_role or ""),
+    return _dispatch_with_candidates(
+        company_notification_services,
+        [
+            "notify_company_user_role_changed",
+            "notify_system_company_user_role_changed",
+            "send_company_user_role_changed_notification",
         ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا لم تكن تتوقع هذا التغيير، يرجى التواصل مع مسؤول النظام فورًا.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم تحديث صلاحية الحساب",
-        to_email=user.email,
-        text_content=text_content,
-        html_content=html_content,
+        actor=actor,
+        company=item.company,
+        company_user=item,
+        user=item.user,
+        target_user=item.user,
+        extra_context=context,
     )
 
 
-def _send_company_user_status_changed_email(
+def _notify_company_user_status_changed(
+    *,
+    actor,
     item: CompanyUser,
     new_status: bool,
 ) -> tuple[bool, Optional[str]]:
-    user = item.user
-    if not user.email:
-        return False, "User has no email"
+    context = _build_company_user_common_context(item)
+    context.update({
+        "is_active": bool(new_status),
+        "status_label": "ACTIVE" if new_status else "INACTIVE",
+    })
 
-    login_url = _get_login_url()
-    full_name = _get_full_name(user)
-    company_name = item.company.name if item.company else ""
-    status_label = "ACTIVE" if new_status else "INACTIVE"
-
-    text_content, html_content = _build_email_shell(
-        title="تم تحديث حالة حسابك",
-        intro="تم تغيير حالة حسابك من خلال إدارة النظام. يمكنك مراجعة الحالة الحالية أدناه.",
-        rows=[
-            ("الشركة", company_name),
-            ("الاسم", full_name),
-            ("اسم المستخدم", user.username),
-            ("الحالة الحالية", status_label),
-            ("الدور الحالي", item.role or "EMPLOYEE"),
+    return _dispatch_with_candidates(
+        company_notification_services,
+        [
+            "notify_company_user_status_changed",
+            "notify_system_company_user_status_changed",
+            "send_company_user_status_changed_notification",
         ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا تم تعطيل الحساب ولم تكن تتوقع ذلك، يرجى التواصل مع مسؤول النظام.",
+        actor=actor,
+        company=item.company,
+        company_user=item,
+        user=item.user,
+        target_user=item.user,
+        extra_context=context,
     )
 
-    return _send_html_email(
-        subject="Primey HR Cloud | تم تحديث حالة الحساب",
-        to_email=user.email,
-        text_content=text_content,
-        html_content=html_content,
+
+def _notify_company_user_password_reset(
+    *,
+    actor,
+    item: CompanyUser,
+    new_password: str,
+) -> tuple[bool, Optional[str]]:
+    context = _build_company_user_common_context(item)
+    context.update({
+        "new_password": _safe_value(new_password),
+    })
+
+    # ------------------------------------------------------------
+    # نبدأ بطبقة auth لأنها الأقرب منطقيًا لحدث كلمة المرور
+    # ثم fallback إلى company services لو كانت هي المعتمدة حاليًا
+    # ------------------------------------------------------------
+    sent, error = _dispatch_with_candidates(
+        auth_notification_services,
+        [
+            "notify_password_reset_by_admin",
+            "notify_user_password_reset",
+            "notify_company_user_password_reset",
+            "send_password_reset_notification",
+        ],
+        actor=actor,
+        company=item.company,
+        company_user=item,
+        user=item.user,
+        target_user=item.user,
+        new_password=new_password,
+        extra_context=context,
+    )
+    if sent:
+        return sent, error
+
+    return _dispatch_with_candidates(
+        company_notification_services,
+        [
+            "notify_company_user_password_reset",
+            "notify_system_company_user_password_reset",
+            "send_company_user_password_reset_notification",
+        ],
+        actor=actor,
+        company=item.company,
+        company_user=item,
+        user=item.user,
+        target_user=item.user,
+        new_password=new_password,
+        extra_context=context,
     )
 
 
@@ -682,7 +629,8 @@ def system_company_user_update(request, company_id, company_user_id):
         email_error = None
 
         if email or old_email:
-            email_sent, email_error = _send_company_user_update_email(
+            email_sent, email_error = _notify_company_user_updated(
+                actor=request.user,
                 item=item,
                 old_username=old_username,
                 old_email=old_email,
@@ -736,7 +684,8 @@ def system_company_user_change_role(request, company_id, company_user_id):
         email_error = None
 
         if item.user.email:
-            email_sent, email_error = _send_company_user_role_changed_email(
+            email_sent, email_error = _notify_company_user_role_changed(
+                actor=request.user,
                 item=item,
                 old_role=old_role,
                 new_role=role,
@@ -781,7 +730,8 @@ def system_company_user_toggle_status(request, company_id, company_user_id):
         email_error = None
 
         if item.user.email:
-            email_sent, email_error = _send_company_user_status_changed_email(
+            email_sent, email_error = _notify_company_user_status_changed(
+                actor=request.user,
                 item=item,
                 new_status=item.is_active,
             )
@@ -838,7 +788,8 @@ def system_company_user_reset_password(request, company_id, company_user_id):
         email_error = None
 
         if user.email:
-            email_sent, email_error = _send_company_user_password_reset_email(
+            email_sent, email_error = _notify_company_user_password_reset(
+                actor=request.user,
                 item=item,
                 new_password=new_password,
             )

@@ -1,9 +1,9 @@
 # ============================================================
 # Tap Create Checkout API
-# Primey HR Cloud
+# Mham Cloud
 # Path: api/system/payments/tap_create_checkout.py
 # ------------------------------------------------------------
-# System Payment API
+# System/Public Payment API
 # - Creates Tap hosted checkout charge
 # - Supports onboarding draft flow directly
 # - Builds reference.order as DRAFT-<id>
@@ -11,6 +11,7 @@
 # - Creates local PaymentTransaction pending record
 # - Does NOT mark invoice as paid
 # - Does NOT activate subscription directly
+# - Supports public onboarding draft flow safely
 # ============================================================
 
 from __future__ import annotations
@@ -19,11 +20,12 @@ import json
 import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 from django.conf import settings
-from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from billing_center.models import CompanyOnboardingTransaction, PaymentTransaction
@@ -69,7 +71,7 @@ def _normalize_payment_method(value: Any) -> str:
 
 def _is_system_user(request) -> bool:
     user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
+    if not user or not getattr(user, "is_authenticated", False):
         return False
 
     if getattr(user, "is_superuser", False):
@@ -107,10 +109,10 @@ def _normalize_sa_phone(raw_phone: str) -> Dict[str, str]:
     """
     phone = "".join(ch for ch in _clean_str(raw_phone) if ch.isdigit())
 
-    if phone.startswith("966"):
-        local_number = phone[3:]
-    elif phone.startswith("00966"):
+    if phone.startswith("00966"):
         local_number = phone[5:]
+    elif phone.startswith("966"):
+        local_number = phone[3:]
     elif phone.startswith("0"):
         local_number = phone[1:]
     else:
@@ -122,24 +124,72 @@ def _normalize_sa_phone(raw_phone: str) -> Dict[str, str]:
     }
 
 
-def _get_default_success_url() -> str:
+def _get_frontend_base_url() -> str:
+    return _clean_str(
+        getattr(settings, "FRONTEND_BASE_URL", None),
+        "http://localhost:3000",
+    ).rstrip("/")
+
+
+def _get_backend_base_url() -> str:
+    return _clean_str(
+        getattr(settings, "BACKEND_BASE_URL", None)
+        or getattr(settings, "APP_BASE_URL", None)
+        or getattr(settings, "SITE_BASE_URL", None),
+        "http://127.0.0.1:8000",
+    ).rstrip("/")
+
+
+def _build_register_return_url(
+    *,
+    draft_id: int,
+    payment: str,
+) -> str:
+    """
+    بناء رابط رجوع مناسب لصفحة /register
+    حتى يفهم الفرونت حالة العملية بعد العودة من Tap.
+    """
+    base = f"{_get_frontend_base_url()}/register"
+    query = urlencode(
+        {
+            "draft_id": draft_id,
+            "payment_method": "CREDIT_CARD",
+            "payment": payment,
+        }
+    )
+    return f"{base}?{query}"
+
+
+def _get_default_success_url(*, draft_id: Optional[int] = None) -> str:
+    if draft_id:
+        return _build_register_return_url(
+            draft_id=draft_id,
+            payment="success",
+        )
+
     return _clean_str(
         getattr(settings, "TAP_SUCCESS_URL", None)
-        or f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:3000')}/billing/payment/success"
+        or f"{_get_frontend_base_url()}/billing/payment/success"
     )
 
 
-def _get_default_cancel_url() -> str:
+def _get_default_cancel_url(*, draft_id: Optional[int] = None) -> str:
+    if draft_id:
+        return _build_register_return_url(
+            draft_id=draft_id,
+            payment="cancelled",
+        )
+
     return _clean_str(
         getattr(settings, "TAP_CANCEL_URL", None)
-        or f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:3000')}/billing/payment/cancel"
+        or f"{_get_frontend_base_url()}/billing/payment/cancel"
     )
 
 
 def _get_default_webhook_url() -> str:
     return _clean_str(
         getattr(settings, "TAP_WEBHOOK_URL", None)
-        or "http://127.0.0.1:8000/api/system/payments/tap/webhook/"
+        or f"{_get_backend_base_url()}/api/system/payments/tap/webhook/"
     )
 
 
@@ -182,7 +232,7 @@ def _build_draft_charge_payload(
     *,
     payment_method: str,
 ) -> Dict[str, Any]:
-    company_name = _clean_str(getattr(draft, "company_name", None), "Primey HR Cloud")
+    company_name = _clean_str(getattr(draft, "company_name", None), "Mham Cloud")
     plan_name = _clean_str(getattr(getattr(draft, "plan", None), "name", None), "Primey Plan")
     admin_name = _clean_str(getattr(draft, "admin_name", None), "Customer")
     admin_email = _clean_str(getattr(draft, "admin_email", None))
@@ -202,9 +252,10 @@ def _build_draft_charge_payload(
         "statement_descriptor": "PrimeyHR",
         "metadata": {
             "draft_id": str(draft.id),
-            "platform": "Primey HR Cloud",
+            "platform": "Mham Cloud",
             "module": "system_onboarding",
             "payment_method": payment_method,
+            "cancel_url": _get_default_cancel_url(draft_id=draft.id),
         },
         "reference": {
             "transaction": transaction_reference,
@@ -227,7 +278,7 @@ def _build_draft_charge_payload(
             "id": _clean_str(getattr(settings, "TAP_SOURCE_ID", "src_all")),
         },
         "redirect": {
-            "url": _get_default_success_url(),
+            "url": _get_default_success_url(draft_id=draft.id),
         },
         "post": {
             "url": _get_default_webhook_url(),
@@ -236,8 +287,6 @@ def _build_draft_charge_payload(
 
     if not payload["merchant"]["id"]:
         payload.pop("merchant", None)
-
-    payload["metadata"]["cancel_url"] = _get_default_cancel_url()
 
     return payload
 
@@ -274,12 +323,14 @@ def _upsert_local_payment_tracking(
     """
     حفظ تتبع محلي بدون الحاجة لتغيير الموديل الحالي.
     """
+    normalized_status = _clean_str(tap_status).upper()
+
     PaymentTransaction.objects.create(
         company=None,
         invoice=None,
         amount=draft.total_amount,
         payment_method="card",
-        status="pending" if _clean_str(tap_status).upper() in {"INITIATED", "PENDING"} else "success",
+        status="pending" if normalized_status in {"INITIATED", "PENDING"} else "success",
         transaction_id=tap_charge_id or None,
         description=f"Onboarding draft #{draft.id} - Tap checkout",
         created_by=request_user if getattr(request_user, "is_authenticated", False) else None,
@@ -294,7 +345,7 @@ def _upsert_local_payment_tracking(
 # API
 # ============================================================
 
-@login_required
+@csrf_exempt
 @require_POST
 def tap_create_checkout(request):
     if not getattr(settings, "TAP_ENABLED", False):
@@ -304,15 +355,6 @@ def tap_create_checkout(request):
                 "message": "Tap payment gateway is disabled.",
             },
             status=503,
-        )
-
-    if not _is_system_user(request):
-        return JsonResponse(
-            {
-                "status": "error",
-                "message": "You do not have permission to create Tap checkout from system scope.",
-            },
-            status=403,
         )
 
     payload = _json_body(request)

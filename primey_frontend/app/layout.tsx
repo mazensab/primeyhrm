@@ -42,8 +42,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
   ),
-  title: "Primey HR Cloud",
-  description: "Primey HR Cloud Platform",
+  title: "Mham Cloud",
+  description: "Mham Cloud Platform",
   icons: {
     icon: "/favicon.ico",
   },

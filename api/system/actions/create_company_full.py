@@ -1,6 +1,6 @@
 # =====================================================================
 # 🟦 Create Company — V10.3 FINAL (FIRST COMPANY ONLY)
-# Primey HR Cloud
+# Mham Cloud
 # =====================================================================
 # ✔ Creates FIRST Company only (Signup / Go-Live)
 # ✔ Creates Admin + Roles + Subscription + Invoice

@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/urls.py
 # ⚙️ CLEAN ROOT ROUTER
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.urls import path, include

@@ -1,6 +1,6 @@
 # ============================================================
 # 📊 SYSTEM — Subscriptions Trend API
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.http import JsonResponse

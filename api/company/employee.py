@@ -1,47 +1,52 @@
 # ======================================================
 # 👥 Employee API — Company Scope
-# Primey HR Cloud
-# Version: D3.13 Ultra Pro (ACTIVE COMPANY SAFE ✅)
+# Mham Cloud
+# Version: D3.15 Ultra Pro (NOTIFICATION CENTER CLEANUP ✅)
 # ======================================================
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Q, F
+from django.db.models import F, Q
 from django.db.models.functions import Coalesce
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from auth_center.models import UserProfile
+from biotime_center.models import BiotimeEmployee
+from company_manager.models import (
+    CompanyBranch,
+    CompanyDepartment,
+    CompanyRole,
+    CompanyUser,
+    JobTitle,
+)
 from employee_center.models import (
     Employee,
-    EmploymentInfo,
     EmploymentHistory,
+    EmploymentInfo,
     FinancialInfo,
 )
 from payroll_center.models import PayrollRecord
-from company_manager.models import (
-    CompanyUser,
-    CompanyRole,
-    CompanyDepartment,
-    JobTitle,
-    CompanyBranch,
-)
 
-from biotime_center.models import BiotimeEmployee
-
+from attendance_center.models import WorkSchedule
 from attendance_center.services.sync_biotime_to_attendance import (
     sync_biotime_logs_to_attendance,
 )
-
-from attendance_center.models import WorkSchedule
+from notification_center.services_hr import (
+    notify_employee_activated,
+    notify_employee_created,
+    notify_employee_deactivated,
+)
+from whatsapp_center.utils import normalize_phone_number
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -75,6 +80,7 @@ def _clean_str(value):
         return None
     value = str(value).strip()
     return value or None
+
 
 def _clean_date(value):
     """
@@ -112,6 +118,73 @@ def _clean_float(value, default=0):
         return float(value)
     except (TypeError, ValueError):
         raise ValueError(f"Invalid numeric value: {value}")
+
+
+def _generate_next_employee_number(company) -> str:
+    """
+    توليد رقم موظف تلقائي على مستوى الشركة
+    الصيغة: EMP-002-00001
+    """
+    if not company or not getattr(company, "id", None):
+        timestamp_part = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        return f"EMP-GEN-{timestamp_part}"
+
+    prefix = f"EMP-{int(company.id):03d}-"
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+
+    existing_numbers = (
+        Employee.objects
+        .filter(company=company)
+        .exclude(employee_number__isnull=True)
+        .exclude(employee_number__exact="")
+        .values_list("employee_number", flat=True)
+    )
+
+    max_seq = 0
+    for value in existing_numbers:
+        match = pattern.match(str(value).strip())
+        if not match:
+            continue
+
+        try:
+            seq = int(match.group(1))
+            if seq > max_seq:
+                max_seq = seq
+        except (TypeError, ValueError):
+            continue
+
+    return f"{prefix}{max_seq + 1:05d}"
+
+
+def _sync_user_profile_contact(user, mobile_number: str | None) -> None:
+    """
+    مزامنة رقم الموظف داخل UserProfile حتى تعمل إشعارات واتساب
+    في المسارات الأخرى مثل:
+    - change_password
+    - reset_password
+    - profile_update
+    """
+    if not user:
+        return
+
+    raw_phone = _clean_str(mobile_number)
+    normalized_phone = normalize_phone_number(raw_phone) if raw_phone else ""
+
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    update_fields = []
+
+    if hasattr(profile, "phone_number"):
+        profile.phone_number = raw_phone or None
+        update_fields.append("phone_number")
+
+    if hasattr(profile, "whatsapp_number"):
+        profile.whatsapp_number = normalized_phone or raw_phone or None
+        update_fields.append("whatsapp_number")
+
+    if update_fields:
+        profile.save(update_fields=update_fields)
+
 
 def _resolve_company_user(request) -> CompanyUser | None:
     """
@@ -268,12 +341,6 @@ def _normalize_company_role_value(value) -> str:
     raw = str(value).strip().upper()
     return raw or "EMPLOYEE"
 
-def _normalize_company_role_value(value) -> str:
-    if value is None:
-        return "EMPLOYEE"
-
-    raw = str(value).strip().upper()
-    return raw or "EMPLOYEE"
 
 def _resolve_company_role_for_create(company, user_data) -> str | None:
     """
@@ -304,6 +371,7 @@ def _resolve_company_role_for_create(company, user_data) -> str | None:
                 return role_value
 
     return "EMPLOYEE"
+
 
 def _get_company_role_for_user(company, user) -> str:
     item = (
@@ -403,7 +471,7 @@ def employees_list(request):
 @require_GET
 @login_required
 def employees_report(request):
-    from django.db.models import Value, DecimalField
+    from django.db.models import DecimalField, Value
 
     company = _resolve_company(request)
     if not company:
@@ -438,19 +506,19 @@ def employees_report(request):
             basic_salary_value=Coalesce(
                 F("financial_info__basic_salary"),
                 Value(0),
-                output_field=DecimalField()
+                output_field=DecimalField(),
             )
         )
     )
 
     if search:
         qs = qs.filter(
-            Q(full_name__icontains=search) |
-            Q(arabic_name__icontains=search) |
-            Q(national_id__icontains=search) |
-            Q(employee_number__icontains=search) |
-            Q(user__username__icontains=search) |
-            Q(user__email__icontains=search)
+            Q(full_name__icontains=search)
+            | Q(arabic_name__icontains=search)
+            | Q(national_id__icontains=search)
+            | Q(employee_number__icontains=search)
+            | Q(user__username__icontains=search)
+            | Q(user__email__icontains=search)
         )
 
     if department_id:
@@ -515,6 +583,7 @@ def employees_report(request):
             "username": row["username"],
             "role": row["role"],
             "national_id": emp.national_id,
+            "employee_number": emp.employee_number,
             "department": emp.department.name if emp.department else None,
             "job_title": emp.job_title.name if emp.job_title else None,
             "branches": [b.name for b in emp.branches.all()],
@@ -745,6 +814,9 @@ def employee_create(request):
     user_data = payload.get("user", {}) or {}
 
     full_name = _clean_str(employee_data.get("full_name"))
+    arabic_name = _clean_str(employee_data.get("arabic_name"))
+    employee_number = _clean_str(employee_data.get("employee_number"))
+
     username = _clean_str(user_data.get("username"))
     password = user_data.get("password")
     email = _clean_str(user_data.get("email"))
@@ -752,7 +824,15 @@ def employee_create(request):
         employee_data.get("mobile_number") or user_data.get("phone")
     )
 
+    department_id = employee_data.get("department_id")
+    job_title_id = employee_data.get("job_title_id")
+    branch_ids = employee_data.get("branch_ids") or []
+
     requested_role = _resolve_company_role_for_create(company, user_data)
+
+    requested_status_raw = _clean_str(user_data.get("status")) or "ACTIVE"
+    requested_status = requested_status_raw.upper()
+    user_is_active = requested_status != "INACTIVE"
 
     if not full_name:
         return JsonResponse(
@@ -763,6 +843,12 @@ def employee_create(request):
     if not username or not password:
         return JsonResponse(
             {"status": "error", "message": "User username & password are required"},
+            status=400,
+        )
+
+    if not department_id:
+        return JsonResponse(
+            {"status": "error", "message": "department_id is required"},
             status=400,
         )
 
@@ -778,40 +864,71 @@ def employee_create(request):
             status=400,
         )
 
+    if email and User.objects.filter(email=email).exists():
+        return JsonResponse(
+            {"status": "error", "message": "Email already exists"},
+            status=400,
+        )
+
+    # =====================================================
+    # 🔢 Auto Employee Number
+    # إذا لم يرسل الفرونت رقم الموظف يتم توليده تلقائيًا
+    # =====================================================
+    if not employee_number:
+        employee_number = _generate_next_employee_number(company)
+
+    if Employee.objects.filter(
+        company=company,
+        employee_number=employee_number,
+    ).exists():
+        return JsonResponse(
+            {"status": "error", "message": "Employee number already exists"},
+            status=400,
+        )
+
+    department = CompanyDepartment.objects.filter(
+        id=department_id,
+        company=company,
+    ).first()
+
+    if not department:
+        return JsonResponse(
+            {"status": "error", "message": "Selected department not found"},
+            status=400,
+        )
+
+    job_title = None
+    if job_title_id:
+        job_title = JobTitle.objects.filter(
+            id=job_title_id,
+            company=company,
+        ).first()
+
     user = User.objects.create_user(
         username=username,
         password=password,
         email=email or "",
-        is_active=True,
+        is_active=user_is_active,
     )
 
-    CompanyUser.objects.create(
+    company_user = CompanyUser.objects.create(
         company=company,
         user=user,
         role=requested_role,
-        is_active=True,
+        is_active=user_is_active,
     )
 
     emp = Employee.objects.create(
         company=company,
         user=user,
         full_name=full_name,
+        arabic_name=arabic_name,
+        employee_number=employee_number,
         mobile_number=mobile_number,
+        department=department,
+        job_title=job_title,
     )
 
-    emp.department = CompanyDepartment.objects.filter(
-        id=employee_data.get("department_id"),
-        company=company,
-    ).first()
-
-    emp.job_title = JobTitle.objects.filter(
-        id=employee_data.get("job_title_id"),
-        company=company,
-    ).first()
-
-    emp.save()
-
-    branch_ids = employee_data.get("branch_ids") or []
     if isinstance(branch_ids, list) and branch_ids:
         branches = CompanyBranch.objects.filter(
             id__in=branch_ids,
@@ -821,13 +938,56 @@ def employee_create(request):
 
     EmploymentInfo.objects.get_or_create(employee=emp)
 
+    # =====================================================
+    # 📱 Sync employee mobile into UserProfile
+    # حتى تعمل إشعارات واتساب لباقي المسارات لاحقًا
+    # =====================================================
+    try:
+        _sync_user_profile_contact(user, mobile_number)
+    except Exception:
+        logger.exception(
+            "Failed syncing user profile contact after employee create | employee=%s | user=%s",
+            getattr(emp, "id", None),
+            getattr(user, "id", None),
+        )
+
+    # =====================================================
+    # 🔔 Notification Center Hook — Employee Created
+    # المسار الرسمي الموحد بدل الإرسال المباشر من الـ API
+    # =====================================================
+    try:
+        notify_employee_created(
+            emp,
+            send_email=True,
+            send_whatsapp=True,
+        )
+    except Exception:
+        logger.exception(
+            "⚠ Employee created notification hook failed (non-blocking) | employee=%s",
+            emp.id,
+        )
+
     return JsonResponse({
         "status": "success",
         "employee_id": emp.id,
+        "employee_number": emp.employee_number,
         "user_id": user.id,
         "role": requested_role,
+        "is_active": user_is_active,
+        "department": {
+            "id": department.id,
+            "name": department.name,
+        },
+        "job_title": (
+            {
+                "id": job_title.id,
+                "name": job_title.name,
+            }
+            if job_title else None
+        ),
+        "branches_count": emp.branches.count(),
+        "company_user_id": company_user.id,
     })
-
 
 # ======================================================
 # 🔗 Link Employee with Biotime
@@ -1012,10 +1172,8 @@ def employee_update(request, employee_id):
                 emp.gosi_number = _clean_str(profile.get("gosi_number"))
                 changed_fields.add("gosi_number")
 
-            mobile_number = None
             if "mobile_number" in profile:
-                mobile_number = _clean_str(profile.get("mobile_number"))
-                emp.mobile_number = mobile_number
+                emp.mobile_number = _clean_str(profile.get("mobile_number"))
                 changed_fields.add("mobile_number")
 
             if emp.user:
@@ -1047,7 +1205,22 @@ def employee_update(request, employee_id):
             profile = payload.get("profile") or {}
 
             if "employee_number" in profile:
-                emp.employee_number = _clean_str(profile.get("employee_number"))
+                new_employee_number = _clean_str(profile.get("employee_number"))
+
+                if new_employee_number:
+                    exists = (
+                        Employee.objects
+                        .filter(company=company, employee_number=new_employee_number)
+                        .exclude(id=emp.id)
+                        .exists()
+                    )
+                    if exists:
+                        return JsonResponse(
+                            {"status": "error", "message": "Employee number already exists"},
+                            status=409
+                        )
+
+                emp.employee_number = new_employee_number
                 changed_fields.add("employee_number")
 
             if "employment_type" in profile:
@@ -1229,10 +1402,10 @@ def employee_update(request, employee_id):
         if emp.biotime_code and biotime_sync_required:
             try:
                 from biotime_center.sync_service import (
-                    patch_employee_department,
-                    patch_employee_position,
-                    patch_employee_name,
                     patch_employee_areas_replace,
+                    patch_employee_department,
+                    patch_employee_name,
+                    patch_employee_position,
                 )
 
                 logger.info(
@@ -1429,6 +1602,7 @@ def employee_update(request, employee_id):
             status=500
         )
 
+
 # ======================================================
 # 🧍 Profile Update
 # ======================================================
@@ -1556,11 +1730,39 @@ def employee_toggle_status(request, employee_id):
         target_company_user.is_active = new_state
         target_company_user.save(update_fields=["is_active"])
 
+    # =====================================================
+    # 🔔 Notification Center Hook — Employee Status
+    # المسار الرسمي الموحد بدل الإرسال المباشر من الـ API
+    # =====================================================
+    try:
+        if new_state:
+            notify_employee_activated(
+                emp,
+                send_email_to_employee=True,
+                send_email_to_managers=False,
+                send_whatsapp_to_employee=True,
+                send_whatsapp_to_managers=True,
+            )
+        else:
+            notify_employee_deactivated(
+                emp,
+                send_email_to_employee=True,
+                send_email_to_managers=False,
+                send_whatsapp_to_employee=True,
+                send_whatsapp_to_managers=True,
+            )
+    except Exception:
+        logger.exception(
+            "⚠ Employee status notification hook failed (non-blocking) | employee=%s",
+            emp.id,
+        )
+
     return JsonResponse({
         "status": "success",
         "employee_status": _map_user_status(new_state),
         "is_active": new_state,
     })
+
 
 # ======================================================
 # 🔐 Change Company User Role
@@ -1970,6 +2172,19 @@ def update_employee_profile(request, employee_id):
         if value in (None, ""):
             continue
 
+        if field == "employee_number":
+            exists = (
+                Employee.objects
+                .filter(company=company, employee_number=value)
+                .exclude(id=employee.id)
+                .exists()
+            )
+            if exists:
+                return JsonResponse(
+                    {"message": "Employee number already exists"},
+                    status=409
+                )
+
         if field in DATE_FIELDS:
             try:
                 value = datetime.strptime(value, "%Y-%m-%d").date()
@@ -2136,11 +2351,11 @@ def employee_search(request):
         Employee.objects
         .filter(company=company)
         .filter(
-            Q(full_name__icontains=query) |
-            Q(arabic_name__icontains=query) |
-            Q(employee_number__icontains=query) |
-            Q(user__username__icontains=query) |
-            Q(user__email__icontains=query)
+            Q(full_name__icontains=query)
+            | Q(arabic_name__icontains=query)
+            | Q(employee_number__icontains=query)
+            | Q(user__username__icontains=query)
+            | Q(user__email__icontains=query)
         )
         .order_by("full_name")[:20]
     )

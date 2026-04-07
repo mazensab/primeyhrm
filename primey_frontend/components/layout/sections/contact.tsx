@@ -108,11 +108,11 @@ const content: Record<AppLang, ContactContent> = {
     },
     contactInfo: {
       locationLabel: "الموقع:",
-      locationValue: "123 Maple Lane, Springfield, IL 62704",
+      locationValue: "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz,  42316",
       phoneLabel: "اتصل بنا:",
-      phoneValue: "+1 (555) 987-6543",
+      phoneValue: "00966 (50) 526-3775",
       emailLabel: "راسلنا:",
-      emailValue: "info@primeyride.com",
+      emailValue: "info@mhamcloud.sa",
       businessHoursLabel: "ساعات العمل:",
       businessHoursValue: "من الثلاثاء إلى السبت، 9 صباحًا - 5 مساءً"
     },
@@ -163,13 +163,13 @@ const content: Record<AppLang, ContactContent> = {
     },
     contactInfo: {
       locationLabel: "Location:",
-      locationValue: "123 Maple Lane, Springfield, IL 62704",
+      locationValue: "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz,  42316",
       phoneLabel: "Call us:",
-      phoneValue: "+1 (555) 987-6543",
+      phoneValue: "+9 (665) 526-3775",
       emailLabel: "Email us:",
-      emailValue: "info@primeyride.com",
+      emailValue: "info@mhamcloud.sa",
       businessHoursLabel: "Business Hours:",
-      businessHoursValue: "Tuesday to Saturday, 9 AM - 5 PM"
+      businessHoursValue: "Saturday to Thursday, 9 AM - 5 PM"
     },
     form: {
       cardTitle: "Send Message",

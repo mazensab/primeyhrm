@@ -6,7 +6,7 @@
 # ✔ Idempotent Safe
 # ✔ Production Ready
 # ✔ No Breaking Changes
-# ✔ Developed for Primey HR Cloud 2026
+# ✔ Developed for Mham Cloud 2026
 # ============================================================
 
 import logging

@@ -1,6 +1,6 @@
 # ================================================================
 # 📂 auth_center/urls.py
-# 🧭 Authentication Routing — Primey HR Cloud V15.1 ULTRA STABLE
+# 🧭 Authentication Routing — Mham Cloud V15.1 ULTRA STABLE
 # ================================================================
 
 from django.urls import path

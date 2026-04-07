@@ -1,7 +1,7 @@
 """
 ====================================================================
 🔴 Realtime Notifications Consumer
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ User-scoped
 ✔ Session based

@@ -1,7 +1,7 @@
 """
 ====================================================================
 🚨 Alerts ACK API (READ ONLY / STATELESS)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Acknowledge alert (contract only)
 ✔ No DB

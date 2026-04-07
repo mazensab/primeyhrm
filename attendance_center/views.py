@@ -343,7 +343,7 @@ def attendance_policies_export_pdf(request):
     pdf.setFont("Helvetica", 12)
 
     y = 800
-    pdf.drawString(50, y, "📄 تقرير سياسات الحضور — Primey HR Cloud")
+    pdf.drawString(50, y, "📄 تقرير سياسات الحضور — Mham Cloud")
     y -= 40
 
     for p in qs:

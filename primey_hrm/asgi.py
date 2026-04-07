@@ -1,6 +1,6 @@
 # ================================================================
 # 📂 الملف: primey_hrm/asgi.py
-# 🧭 ASGI Configuration — Primey HR Cloud V7 Ultra Pro
+# 🧭 ASGI Configuration — Mham Cloud V7 Ultra Pro
 # ---------------------------------------------------------------
 # 🚀 يدعم: HTTP + WebSocket
 # 🔔 الإشعارات الحية (NotificationCenter V1)

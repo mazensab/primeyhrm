@@ -1,6 +1,6 @@
 # ============================================================
 # Tamara Webhook API
-# Primey HR Cloud
+# Mham Cloud
 # Path: api/system/payments/tamara_webhook.py
 # ------------------------------------------------------------
 # Webhook Endpoint

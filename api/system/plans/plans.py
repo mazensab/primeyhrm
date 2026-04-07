@@ -1,7 +1,7 @@
 # ======================================================
 # 📦 Plans API — Billing Center (Super Admin + System Read)
 # Version: V3.0 Ultra Stable (Companies + Apps Contract FINAL)
-# Primey HR Cloud
+# Mham Cloud
 # ======================================================
 
 from django.http import JsonResponse, HttpResponseBadRequest

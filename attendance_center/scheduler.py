@@ -1,6 +1,6 @@
 # ================================================================
 # 🕒 Auto Sync Scheduler Engine — V13 Ultra Pro (HARDENED)
-# Primey HR Cloud — Attendance Center
+# Mham Cloud — Attendance Center
 # ================================================================
 
 import requests

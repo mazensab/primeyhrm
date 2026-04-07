@@ -13,6 +13,9 @@ import {
   Fingerprint,
   GitBranch,
   Loader2,
+  LogIn,
+  LogOut,
+  PencilLine,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -33,6 +36,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
@@ -57,7 +68,11 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim()?.replace(/\/+$/, "") ||
   "http://localhost:8000"
 
+const ATTENDANCE_MANUAL_ENTRY_API = "/api/company/attendance/manual-entry/"
+const EMPLOYEE_SCHEDULE_PREVIEW_API = "/api/company/attendance/employee-schedule-preview/"
+
 type Locale = "ar" | "en"
+type ManualActionType = "check_in" | "check_out" | "both"
 
 type EmployeeItem = {
   id: number
@@ -140,6 +155,26 @@ type UnmappedLog = {
   terminal_alias?: string | null
   device_ip?: string | null
   raw_id?: string | number | null
+}
+
+type SchedulePreviewPeriod = {
+  start: string
+  end: string
+}
+
+type EmployeeSchedulePreview = {
+  schedule_type: string | null
+  periods: SchedulePreviewPeriod[]
+  is_weekend: boolean
+  target_daily_hours: string | null
+}
+
+type ManualEntryFormState = {
+  employeeId: string
+  date: string
+  actionType: ManualActionType
+  checkIn: string
+  checkOut: string
 }
 
 type Dictionary = {
@@ -256,6 +291,37 @@ type Dictionary = {
   savePolicyError: string
   syncDevicesError: string
   syncAttendanceError: string
+
+  manualEntryButton: string
+  manualEntryTitle: string
+  manualEntryDescription: string
+  manualEntryEmployee: string
+  manualEntrySelectEmployee: string
+  manualEntryEmployeeSearch: string
+  manualEntryActionType: string
+  manualEntryCheckInOnly: string
+  manualEntryCheckOutOnly: string
+  manualEntryBoth: string
+  manualEntryTime: string
+  manualEntryDate: string
+  manualEntrySchedulePreview: string
+  manualEntryNoSchedule: string
+  manualEntryWeekend: string
+  manualEntryWorkingDay: string
+  manualEntrySave: string
+  manualEntrySaving: string
+  manualEntryCancel: string
+  manualEntrySuccess: string
+  manualEntryError: string
+  manualEntrySelectEmployeeFirst: string
+  manualEntrySelectDateFirst: string
+  manualEntryCheckInRequired: string
+  manualEntryCheckOutRequired: string
+  manualEntryLoadScheduleError: string
+  manualEntryTypeLabel: string
+  manualEntryPeriodsLabel: string
+  manualEntryTargetHoursLabel: string
+  manualEntryNoPeriods: string
 }
 
 const translations: Record<Locale, Dictionary> = {
@@ -376,6 +442,36 @@ const translations: Record<Locale, Dictionary> = {
     savePolicyError: "فشل حفظ سياسة الحضور",
     syncDevicesError: "فشلت مزامنة الأجهزة",
     syncAttendanceError: "فشلت مزامنة الحضور",
+
+    manualEntryButton: "إدخال حركة",
+    manualEntryTitle: "إدخال حركة حضور يدويًا",
+    manualEntryEmployee: "الموظف",
+    manualEntrySelectEmployee: "اختر الموظف",
+    manualEntryEmployeeSearch: "ابحث باسم الموظف",
+    manualEntryActionType: "نوع الحركة",
+    manualEntryCheckInOnly: "دخول فقط",
+    manualEntryCheckOutOnly: "خروج فقط",
+    manualEntryBoth: "دخول وخروج",
+    manualEntryTime: "الوقت",
+    manualEntryDate: "تاريخ الحركة",
+    manualEntrySchedulePreview: "معاينة الجدول",
+    manualEntryNoSchedule: "لا يوجد جدول دوام مربوط لهذا الموظف في هذا التاريخ.",
+    manualEntryWeekend: "اليوم عطلة أسبوعية",
+    manualEntryWorkingDay: "يوم عمل",
+    manualEntrySave: "حفظ الحركة",
+    manualEntrySaving: "جارٍ الحفظ...",
+    manualEntryCancel: "إلغاء",
+    manualEntrySuccess: "تم حفظ الحركة اليدوية بنجاح",
+    manualEntryError: "فشل حفظ الحركة اليدوية",
+    manualEntrySelectEmployeeFirst: "اختر الموظف أولًا",
+    manualEntrySelectDateFirst: "اختر التاريخ أولًا",
+    manualEntryCheckInRequired: "وقت الدخول مطلوب",
+    manualEntryCheckOutRequired: "وقت الخروج مطلوب",
+    manualEntryLoadScheduleError: "تعذر تحميل جدول دوام الموظف",
+    manualEntryTypeLabel: "نوع الدوام",
+    manualEntryPeriodsLabel: "الفترات",
+    manualEntryTargetHoursLabel: "الساعات المطلوبة",
+    manualEntryNoPeriods: "لا توجد فترات ثابتة لهذا الجدول",
   },
   en: {
     headerBadge: "Company Attendance Center",
@@ -494,6 +590,38 @@ const translations: Record<Locale, Dictionary> = {
     savePolicyError: "Failed to save attendance policy",
     syncDevicesError: "Failed to synchronize devices",
     syncAttendanceError: "Failed to synchronize attendance",
+
+    manualEntryButton: "Manual Entry",
+    manualEntryTitle: "Manual Attendance Entry",
+    manualEntryDescription:
+      "Use this dialog to register an official employee check-in or check-out when a punch was missed or needs correction.",
+    manualEntryEmployee: "Employee",
+    manualEntrySelectEmployee: "Select employee",
+    manualEntryEmployeeSearch: "Search employee by name",
+    manualEntryActionType: "Action Type",
+    manualEntryCheckInOnly: "Check-in only",
+    manualEntryCheckOutOnly: "Check-out only",
+    manualEntryBoth: "Check-in and Check-out",
+    manualEntryTime: "Time",
+    manualEntryDate: "Attendance Date",
+    manualEntrySchedulePreview: "Schedule Preview",
+    manualEntryNoSchedule: "No work schedule is linked for this employee on this date.",
+    manualEntryWeekend: "Weekend",
+    manualEntryWorkingDay: "Working day",
+    manualEntrySave: "Save Entry",
+    manualEntrySaving: "Saving...",
+    manualEntryCancel: "Cancel",
+    manualEntrySuccess: "Manual attendance entry saved successfully",
+    manualEntryError: "Failed to save manual attendance entry",
+    manualEntrySelectEmployeeFirst: "Please select an employee first",
+    manualEntrySelectDateFirst: "Please select a date first",
+    manualEntryCheckInRequired: "Check-in time is required",
+    manualEntryCheckOutRequired: "Check-out time is required",
+    manualEntryLoadScheduleError: "Unable to load employee schedule preview",
+    manualEntryTypeLabel: "Schedule Type",
+    manualEntryPeriodsLabel: "Periods",
+    manualEntryTargetHoursLabel: "Target Hours",
+    manualEntryNoPeriods: "No fixed periods for this schedule",
   },
 }
 
@@ -779,6 +907,19 @@ export default function CompanyAttendancePage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [showUnmapped, setShowUnmapped] = useState(false)
 
+  const [manualEntryOpen, setManualEntryOpen] = useState(false)
+  const [manualEntryEmployeeSearch, setManualEntryEmployeeSearch] = useState("")
+  const [manualEntryLoading, setManualEntryLoading] = useState(false)
+  const [loadingSchedulePreview, setLoadingSchedulePreview] = useState(false)
+  const [schedulePreview, setSchedulePreview] = useState<EmployeeSchedulePreview | null>(null)
+  const [manualEntryForm, setManualEntryForm] = useState<ManualEntryFormState>({
+    employeeId: "",
+    date: "",
+    actionType: "both",
+    checkIn: "",
+    checkOut: "",
+  })
+
   const today = useMemo(() => new Date().toLocaleDateString("en-CA"), [])
   const isArabic = locale === "ar"
   const dir = isArabic ? "rtl" : "ltr"
@@ -787,6 +928,10 @@ export default function CompanyAttendancePage() {
   useEffect(() => {
     setFromDate(today)
     setToDate(today)
+    setManualEntryForm((prev) => ({
+      ...prev,
+      date: today,
+    }))
   }, [today])
 
   useEffect(() => {
@@ -997,6 +1142,144 @@ export default function CompanyAttendancePage() {
     }
   }
 
+  const resetManualEntryForm = useCallback(() => {
+    setManualEntryEmployeeSearch("")
+    setSchedulePreview(null)
+    setManualEntryForm({
+      employeeId: "",
+      date: today,
+      actionType: "both",
+      checkIn: "",
+      checkOut: "",
+    })
+  }, [today])
+
+  const loadEmployeeSchedulePreview = useCallback(
+    async (employeeId: string, workDate: string) => {
+      if (!employeeId) {
+        setSchedulePreview(null)
+        return
+      }
+
+      if (!workDate) {
+        setSchedulePreview(null)
+        return
+      }
+
+      setLoadingSchedulePreview(true)
+      try {
+        const params = new URLSearchParams({
+          employee_id: employeeId,
+          date: workDate,
+        })
+
+        const data = await fetchJson(
+          `${EMPLOYEE_SCHEDULE_PREVIEW_API}?${params.toString()}`
+        )
+
+        setSchedulePreview({
+          schedule_type: data?.schedule_type ?? null,
+          periods: Array.isArray(data?.periods) ? data.periods : [],
+          is_weekend: Boolean(data?.is_weekend),
+          target_daily_hours: data?.target_daily_hours
+            ? String(data.target_daily_hours)
+            : null,
+        })
+      } catch (error) {
+        console.error("Employee schedule preview load error:", error)
+        setSchedulePreview(null)
+        toast.error(error instanceof Error ? error.message : t.manualEntryLoadScheduleError)
+      } finally {
+        setLoadingSchedulePreview(false)
+      }
+    },
+    [fetchJson, t.manualEntryLoadScheduleError]
+  )
+
+  useEffect(() => {
+    if (!manualEntryOpen) return
+    if (!manualEntryForm.employeeId || !manualEntryForm.date) {
+      setSchedulePreview(null)
+      return
+    }
+
+    void loadEmployeeSchedulePreview(manualEntryForm.employeeId, manualEntryForm.date)
+  }, [
+    manualEntryForm.employeeId,
+    manualEntryForm.date,
+    manualEntryOpen,
+    loadEmployeeSchedulePreview,
+  ])
+
+  const handleOpenManualEntry = () => {
+    resetManualEntryForm()
+    setManualEntryOpen(true)
+  }
+
+  const handleCloseManualEntry = () => {
+    setManualEntryOpen(false)
+    resetManualEntryForm()
+  }
+
+  const handleSubmitManualEntry = async () => {
+    if (!manualEntryForm.employeeId) {
+      toast.error(t.manualEntrySelectEmployeeFirst)
+      return
+    }
+
+    if (!manualEntryForm.date) {
+      toast.error(t.manualEntrySelectDateFirst)
+      return
+    }
+
+    if (
+      (manualEntryForm.actionType === "check_in" || manualEntryForm.actionType === "both") &&
+      !manualEntryForm.checkIn
+    ) {
+      toast.error(t.manualEntryCheckInRequired)
+      return
+    }
+
+    if (
+      (manualEntryForm.actionType === "check_out" || manualEntryForm.actionType === "both") &&
+      !manualEntryForm.checkOut
+    ) {
+      toast.error(t.manualEntryCheckOutRequired)
+      return
+    }
+
+    const payload: Record<string, unknown> = {
+      employee_id: Number(manualEntryForm.employeeId),
+      date: manualEntryForm.date,
+    }
+
+    if (manualEntryForm.actionType === "check_in" || manualEntryForm.actionType === "both") {
+      payload.check_in = manualEntryForm.checkIn
+    }
+
+    if (manualEntryForm.actionType === "check_out" || manualEntryForm.actionType === "both") {
+      payload.check_out = manualEntryForm.checkOut
+    }
+
+    setManualEntryLoading(true)
+    try {
+      const data = await fetchJson(ATTENDANCE_MANUAL_ENTRY_API, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+
+      toast.success(data?.message || t.manualEntrySuccess)
+
+      handleCloseManualEntry()
+      await Promise.all([loadDashboard(), loadRows()])
+    } catch (error) {
+      console.error("Manual attendance entry error:", error)
+      toast.error(error instanceof Error ? error.message : t.manualEntryError)
+    } finally {
+      setManualEntryLoading(false)
+    }
+  }
+
   const filteredEmployees = useMemo(() => {
     const query = employeeSearch.trim().toLowerCase()
     if (!query) return employees
@@ -1010,6 +1293,20 @@ export default function CompanyAttendancePage() {
       )
     })
   }, [employeeSearch, employees])
+
+  const manualEntryFilteredEmployees = useMemo(() => {
+    const query = manualEntryEmployeeSearch.trim().toLowerCase()
+    if (!query) return employees
+
+    return employees.filter((emp) => {
+      return (
+        String(emp.full_name || emp.name || "").toLowerCase().includes(query) ||
+        String(emp.department || "").toLowerCase().includes(query) ||
+        String(emp.job_title || "").toLowerCase().includes(query) ||
+        String(emp.biotime_code || "").toLowerCase().includes(query)
+      )
+    })
+  }, [employees, manualEntryEmployeeSearch])
 
   const filteredRows = useMemo(() => {
     const query = reportSearch.trim().toLowerCase()
@@ -1025,6 +1322,19 @@ export default function CompanyAttendancePage() {
       )
     })
   }, [reportSearch, rows, locale])
+
+  const selectedManualEmployee = useMemo(() => {
+    return employees.find((emp) => String(emp.id) === manualEntryForm.employeeId) || null
+  }, [employees, manualEntryForm.employeeId])
+
+  const manualEntryPeriodsText = useMemo(() => {
+    if (!schedulePreview) return t.unknown
+    if (!schedulePreview.periods.length) return t.manualEntryNoPeriods
+
+    return schedulePreview.periods
+      .map((period) => `${formatTime(period.start)} → ${formatTime(period.end)}`)
+      .join(" | ")
+  }, [schedulePreview, t.manualEntryNoPeriods, t.unknown])
 
   const summary = useMemo(() => {
     const linkedEmployees = employees.filter((emp) => !!emp.biotime_code).length
@@ -1082,6 +1392,16 @@ export default function CompanyAttendancePage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
+            onClick={handleOpenManualEntry}
+            disabled={refreshing || syncingDevices || syncingAttendance}
+            className="gap-2"
+          >
+            <PencilLine className="h-4 w-4" />
+            {t.manualEntryButton}
+          </Button>
+
+          <Button
+            variant="outline"
             onClick={() => void loadAll(true)}
             disabled={refreshing || syncingDevices || syncingAttendance}
             className="gap-2"
@@ -1110,6 +1430,238 @@ export default function CompanyAttendancePage() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={manualEntryOpen} onOpenChange={(open) => (!open ? handleCloseManualEntry() : setManualEntryOpen(true))}>
+        <DialogContent className="max-w-3xl rounded-2xl">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <PencilLine className="h-5 w-5" />
+              {t.manualEntryTitle}
+            </DialogTitle>
+            <DialogDescription>{t.manualEntryDescription}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <Label>{t.manualEntryEmployee}</Label>
+
+                <div className="relative">
+                  <Search
+                    className={[
+                      "pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                      isArabic ? "right-3" : "left-3",
+                    ].join(" ")}
+                  />
+                  <Input
+                    value={manualEntryEmployeeSearch}
+                    onChange={(e) => setManualEntryEmployeeSearch(e.target.value)}
+                    placeholder={t.manualEntryEmployeeSearch}
+                    className={isArabic ? "pr-10" : "pl-10"}
+                  />
+                </div>
+
+                <Select
+                  value={manualEntryForm.employeeId}
+                  onValueChange={(value) =>
+                    setManualEntryForm((prev) => ({
+                      ...prev,
+                      employeeId: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger dir={dir}>
+                    <SelectValue placeholder={t.manualEntrySelectEmployee} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {manualEntryFilteredEmployees.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        {t.noMatchingEmployees}
+                      </div>
+                    ) : (
+                      manualEntryFilteredEmployees.slice(0, 30).map((emp) => (
+                        <SelectItem key={emp.id} value={String(emp.id)}>
+                          {emp.full_name || emp.name || `#${emp.id}`}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+
+                {selectedManualEmployee ? (
+                  <div className="rounded-2xl border border-border/60 bg-muted/30 px-4 py-3 text-sm">
+                    <div className="font-medium">{selectedManualEmployee.full_name || selectedManualEmployee.name}</div>
+                    <div className="mt-1 text-muted-foreground">
+                      {selectedManualEmployee.department || t.unknown} •{" "}
+                      {selectedManualEmployee.job_title || t.unknown}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.manualEntryDate}</Label>
+                <Input
+                  type="date"
+                  dir="ltr"
+                  value={manualEntryForm.date}
+                  onChange={(e) =>
+                    setManualEntryForm((prev) => ({
+                      ...prev,
+                      date: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.manualEntryActionType}</Label>
+                <Select
+                  value={manualEntryForm.actionType}
+                  onValueChange={(value: ManualActionType) =>
+                    setManualEntryForm((prev) => ({
+                      ...prev,
+                      actionType: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger dir={dir}>
+                    <SelectValue placeholder={t.manualEntryActionType} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="check_in">{t.manualEntryCheckInOnly}</SelectItem>
+                    <SelectItem value="check_out">{t.manualEntryCheckOutOnly}</SelectItem>
+                    <SelectItem value="both">{t.manualEntryBoth}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {(manualEntryForm.actionType === "check_in" || manualEntryForm.actionType === "both") && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <LogIn className="h-4 w-4" />
+                    {t.checkIn}
+                  </Label>
+                  <Input
+                    type="time"
+                    dir="ltr"
+                    value={manualEntryForm.checkIn}
+                    onChange={(e) =>
+                      setManualEntryForm((prev) => ({
+                        ...prev,
+                        checkIn: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              )}
+
+              {(manualEntryForm.actionType === "check_out" || manualEntryForm.actionType === "both") && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <LogOut className="h-4 w-4" />
+                    {t.checkOut}
+                  </Label>
+                  <Input
+                    type="time"
+                    dir="ltr"
+                    value={manualEntryForm.checkOut}
+                    onChange={(e) =>
+                      setManualEntryForm((prev) => ({
+                        ...prev,
+                        checkOut: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
+            <div className="rounded-2xl border border-border/60 bg-muted/30 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold">{t.manualEntrySchedulePreview}</h3>
+                  <p className="text-sm text-muted-foreground">{t.schedule}</p>
+                </div>
+
+                {loadingSchedulePreview ? (
+                  <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t.loadingPage}
+                  </div>
+                ) : schedulePreview ? (
+                  <Badge className={getStatusBadgeClass(schedulePreview.is_weekend ? "weekend" : "active")}>
+                    {schedulePreview.is_weekend ? t.manualEntryWeekend : t.manualEntryWorkingDay}
+                  </Badge>
+                ) : null}
+              </div>
+
+              {!manualEntryForm.employeeId || !manualEntryForm.date ? (
+                <div className="text-sm text-muted-foreground">{t.manualEntryNoSchedule}</div>
+              ) : loadingSchedulePreview ? (
+                <div className="text-sm text-muted-foreground">{t.loadingPage}</div>
+              ) : !schedulePreview ? (
+                <div className="text-sm text-muted-foreground">{t.manualEntryNoSchedule}</div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-border/60 bg-background p-3">
+                    <div className="text-xs text-muted-foreground">{t.manualEntryTypeLabel}</div>
+                    <div className="mt-1 font-medium">
+                      {getScheduleTypeLabel(schedulePreview.schedule_type, locale)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 bg-background p-3">
+                    <div className="text-xs text-muted-foreground">{t.manualEntryPeriodsLabel}</div>
+                    <div className="mt-1 font-medium">{manualEntryPeriodsText}</div>
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 bg-background p-3">
+                    <div className="text-xs text-muted-foreground">{t.manualEntryTargetHoursLabel}</div>
+                    <div className="mt-1 font-medium">
+                      {schedulePreview.target_daily_hours
+                        ? formatDecimal(schedulePreview.target_daily_hours)
+                        : t.unknown}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCloseManualEntry}
+              disabled={manualEntryLoading}
+            >
+              {t.manualEntryCancel}
+            </Button>
+
+            <Button
+              type="button"
+              onClick={handleSubmitManualEntry}
+              disabled={manualEntryLoading}
+              className="gap-2"
+            >
+              {manualEntryLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t.manualEntrySaving}
+                </>
+              ) : (
+                <>
+                  <PencilLine className="h-4 w-4" />
+                  {t.manualEntrySave}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard

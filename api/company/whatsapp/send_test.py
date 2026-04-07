@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/company/whatsapp/send_test.py
 # 🏢 Company WhatsApp Test Send API
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def company_whatsapp_send_test(request):
                 "company_name": getattr(company, "name", "") or "",
                 "recipient_name": recipient_name or "User",
                 "message": custom_message or (
-                    "This is a company WhatsApp test message from Primey HR Cloud."
+                    "This is a company WhatsApp test message from Mham Cloud."
                 ),
             },
             related_model="Company",

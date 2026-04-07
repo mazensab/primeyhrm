@@ -14,7 +14,7 @@ const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export default function EmailFooter({
-  companyName = "Primey HR Cloud",
+  companyName = "Mham Cloud",
 }: EmailFooterProps) {
   return (
     <Section style={footer}>
@@ -35,8 +35,8 @@ export default function EmailFooter({
       <Text style={footerText}>
         الدعم الفني:
         {" "}
-        <Link href="mailto:info@primeyride.com" style={link}>
-          info@primeyride.com
+        <Link href="mailto:info@mhamcloud.sa" style={link}>
+          info@mhamcloud.sa
         </Link>
       </Text>
 

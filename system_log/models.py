@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from company_manager.models import Company
 
 # ================================================================
-# 📝 System Log Model — Audit Trail V1 (Primey HR Cloud)
+# 📝 System Log Model — Audit Trail V1 (Mham Cloud)
 # ================================================================
 # هذا الموديل مسؤول عن تسجيل جميع الأحداث الحساسة داخل النظام
 # مثل: (تسجيل الدخول – تعديل بيانات – حذف – مزامنة – أخطاء – صلاحيات)

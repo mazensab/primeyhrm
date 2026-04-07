@@ -1,7 +1,7 @@
 """
 ====================================================================
 📥 In-App Notification Provider (CONTRACT)
-Primey HR Cloud | Notifications Engine
+Mham Cloud | Notifications Engine
 ====================================================================
 ✔ Interface only
 ✔ No DB

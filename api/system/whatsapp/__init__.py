@@ -1,4 +1,4 @@
 # ============================================================
 # 📂 api/system/whatsapp/__init__.py
-# Primey HR Cloud - System WhatsApp APIs
+# Mham Cloud - System WhatsApp APIs
 # ============================================================

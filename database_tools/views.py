@@ -41,7 +41,7 @@ def create_backup_ajax(request):
 
     fake_path = os.path.join(backup_dir, filename)
     with open(fake_path, "w", encoding="utf-8") as f:
-        f.write("-- 🔒 Primey HR Cloud Backup (Simulated)\n")
+        f.write("-- 🔒 Mham Cloud Backup (Simulated)\n")
         f.write(f"-- Database: {settings.DATABASES['default']['NAME']}\n")
         f.write(f"-- Created: {timezone.now()}\n")
         f.write("-- Content: [Simulated dump data]\n")

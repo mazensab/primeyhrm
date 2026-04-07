@@ -44,15 +44,15 @@ export default function UserActivationEmail({
   username = "system_user",
   email = "user@example.com",
   role = "SYSTEM_ADMIN",
-  companyName = "Primey HR Cloud",
+  companyName = "Mham Cloud",
   activationUrl = "http://localhost:3000/activate-account/token",
   expiresAt = "2026-03-10 01:00 AM",
 }: UserActivationEmailProps) {
   return (
     <EmailLayout
-      previewText={`تفعيل حساب ${fullName} في Primey HR Cloud`}
-      title="تفعيل حسابك في Primey HR Cloud"
-      companyName="Primey HR Cloud"
+      previewText={`تفعيل حساب ${fullName} في Mham Cloud`}
+      title="تفعيل حسابك في Mham Cloud"
+      companyName="Mham Cloud"
     >
       <Text style={paragraph}>
         تم إنشاء حسابك بنجاح. لإكمال التفعيل، يرجى الضغط على الزر التالي

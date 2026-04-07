@@ -1,6 +1,6 @@
 # ===============================================================
 # 🔐 RBAC ENGINE V1 — Backend Enforcement Only
-# Primey HR Cloud
+# Mham Cloud
 # ===============================================================
 # ✔ Company Scoped
 # ✔ ManyToMany Roles

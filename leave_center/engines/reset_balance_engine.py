@@ -1,6 +1,6 @@
 # ================================================================
 # 🔁 ResetBalanceEngine — V1 Ultra Pro
-# Primey HR Cloud — Leave Center Reset Engine
+# Mham Cloud — Leave Center Reset Engine
 # ================================================================
 
 from django.utils.timezone import now

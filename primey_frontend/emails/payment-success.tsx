@@ -54,7 +54,7 @@ export default function PaymentSuccessEmail({
     <EmailLayout
       previewText={`تم استلام دفعتك بنجاح للشركة ${companyName}`}
       title="تم استلام دفعتك بنجاح ✅"
-      companyName="Primey HR Cloud"
+      companyName="Mham Cloud"
     >
       <Text style={paragraph}>
         نشكرك على السداد. تم تسجيل عملية الدفع بنجاح وتحديث حالة الفاتورة

@@ -1,5 +1,5 @@
 # ================================================================
-# 🛰️ System Log Live Consumer — V4 (Primey HR Cloud)
+# 🛰️ System Log Live Consumer — V4 (Mham Cloud)
 # ================================================================
 # 🔥 يقوم ببث السجلات الجديدة مباشرة إلى المتصفح (Real-Time)
 # 🔌 يعمل عبر Django Channels + Redis

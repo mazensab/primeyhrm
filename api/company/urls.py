@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/company/urls.py
 # 🏢 Company APIs Router
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.urls import path
@@ -72,6 +72,27 @@ from api.company.leaves import (
     company_annual_leave_policy,
 )
 
+
+from api.company.payroll.runs import (
+    PayrollRunListAPIView,
+    PayrollRunCreateAPIView,
+    PayrollRunDetailAPIView,
+    PayrollRunCalculateAPIView,
+    PayrollRunApproveAPIView,
+    PayrollRunResetAPIView,
+    PayrollRunPayAPIView,
+)
+
+from api.company.payroll.records import (
+    PayrollRunRecordsListAPIView,
+    PayrollRecordDetailAPIView,
+    PayrollRecordLedgerAPIView,
+    PayrollRecordPayAPIView,
+)
+
+from api.company.payroll.salary_slip import (
+    CompanyPayrollSalarySlipAPIView,
+)
 # ============================================================
 # 🧬 Biotime APIs
 # ============================================================
@@ -762,4 +783,70 @@ urlpatterns = [
         company_whatsapp_session_disconnect,
         name="company_whatsapp_session_disconnect_no_slash",
     ),
+
+        # ========================================================
+    # 💰 Payroll
+    # ========================================================
+    path(
+        "payroll/runs/",
+        PayrollRunListAPIView.as_view(),
+        name="company_payroll_runs_list",
+    ),
+    path(
+        "payroll/runs/create/",
+        PayrollRunCreateAPIView.as_view(),
+        name="company_payroll_runs_create",
+    ),
+    path(
+        "payroll/runs/<int:run_id>/",
+        PayrollRunDetailAPIView.as_view(),
+        name="company_payroll_run_detail",
+    ),
+    path(
+        "payroll/runs/<int:run_id>/calculate/",
+        PayrollRunCalculateAPIView.as_view(),
+        name="company_payroll_run_calculate",
+    ),
+    path(
+        "payroll/runs/<int:run_id>/approve/",
+        PayrollRunApproveAPIView.as_view(),
+        name="company_payroll_run_approve",
+    ),
+    path(
+        "payroll/runs/<int:run_id>/reset/",
+        PayrollRunResetAPIView.as_view(),
+        name="company_payroll_run_reset",
+    ),
+    path(
+        "payroll/runs/<int:run_id>/pay/",
+        PayrollRunPayAPIView.as_view(),
+        name="company_payroll_run_pay",
+    ),
+
+    path(
+        "payroll/runs/<int:run_id>/records/",
+        PayrollRunRecordsListAPIView.as_view(),
+        name="company_payroll_run_records",
+    ),
+    path(
+        "payroll/records/<int:record_id>/",
+        PayrollRecordDetailAPIView.as_view(),
+        name="company_payroll_record_detail",
+    ),
+    path(
+        "payroll/records/<int:record_id>/ledger/",
+        PayrollRecordLedgerAPIView.as_view(),
+        name="company_payroll_record_ledger",
+    ),
+    path(
+        "payroll/records/<int:record_id>/pay/",
+        PayrollRecordPayAPIView.as_view(),
+        name="company_payroll_record_pay",
+    ),
+    path(
+        "payroll/slip/<int:record_id>/",
+        CompanyPayrollSalarySlipAPIView.as_view(),
+        name="company_payroll_salary_slip",
+    ),
+    
 ]

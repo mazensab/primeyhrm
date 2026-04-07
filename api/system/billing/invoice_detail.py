@@ -1,6 +1,6 @@
 # ============================================================
 # 🧾 SYSTEM — Invoice Detail API
-# Primey HR Cloud | V3.2 ULTRA STABLE
+# Mham Cloud | V3.2 ULTRA STABLE
 # ============================================================
 # ✔ Invoice Single Source of Truth
 # ✔ Includes Subscription Snapshot

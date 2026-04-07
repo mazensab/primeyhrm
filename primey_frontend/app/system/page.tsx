@@ -20,7 +20,7 @@ const API = process.env.NEXT_PUBLIC_API_URL
 const translations = {
   ar: {
     pageTitle: "لوحة تحكم النظام",
-    pageSubtitle: "Primey HR Cloud — مركز تحكم السوبر أدمن",
+    pageSubtitle: "Mham Cloud — مركز تحكم السوبر أدمن",
 
     systemOverview: "نظرة عامة على النظام",
     globalPlatformStats: "إحصائيات المنصة العامة",
@@ -52,7 +52,7 @@ const translations = {
   },
   en: {
     pageTitle: "System Dashboard",
-    pageSubtitle: "Primey HR Cloud — Super Admin Control Center",
+    pageSubtitle: "Mham Cloud — Super Admin Control Center",
 
     systemOverview: "System Overview",
     globalPlatformStats: "Global platform statistics",

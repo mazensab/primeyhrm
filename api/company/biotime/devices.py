@@ -1,7 +1,7 @@
 # ================================================================
 # 📂 api/company/biotime/devices.py
 # ⚙️ Version: V17.6 FINAL — PRODUCTION SAFE 🔒
-# Primey HR Cloud
+# Mham Cloud
 # ================================================================
 
 import logging

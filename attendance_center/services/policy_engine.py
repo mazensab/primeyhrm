@@ -1,6 +1,6 @@
 # ================================================================
 # 🧠 Attendance Policy Engine — Phase F.1
-# Primey HR Cloud — Attendance Center
+# Mham Cloud — Attendance Center
 # ------------------------------------------------
 # الهدف:
 #   - إنشاء AttendancePolicy افتراضية لكل شركة لا تملك سياسة.

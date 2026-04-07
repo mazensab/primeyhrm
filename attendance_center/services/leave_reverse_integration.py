@@ -1,5 +1,5 @@
 # ================================================================
-# 📘 LeaveAttendanceIntegrator — Primey HR Cloud V2 Ultra Pro
+# 📘 LeaveAttendanceIntegrator — Mham Cloud V2 Ultra Pro
 # ================================================================
 # مسؤول عن:
 # 1) تطبيق الإجازة على الحضور عند الموافقة (Apply)

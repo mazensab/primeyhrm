@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/whatsapp/broadcasts.py
 # 🛡 System WhatsApp Broadcast APIs
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/apps.py
-# Primey HR Cloud - WhatsApp Center App Config
+# Mham Cloud - WhatsApp Center App Config
 # ============================================================
 # ✅ تشغيل تلقائي لـ WhatsApp Session Gateway
 # ✅ آمن مع Django runserver + StatReloader

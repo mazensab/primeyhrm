@@ -1,5 +1,5 @@
 // ======================================================
-// 🔐 PRIMEY HR CLOUD — SYSTEM LAYOUT
+// 🔐 Mham Cloud — SYSTEM LAYOUT
 // Uses Shared DashboardFrame with System Sidebar
 // ======================================================
 

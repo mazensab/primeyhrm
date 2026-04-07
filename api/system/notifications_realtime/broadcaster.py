@@ -1,7 +1,7 @@
 """
 ====================================================================
 📣 Notification Broadcaster (SYNC SAFE)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Optional
 ✔ Safe to call

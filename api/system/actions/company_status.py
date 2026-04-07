@@ -1,6 +1,6 @@
 # ============================================================
 # 🏢 Company Status Actions — FINAL
-# Primey HR Cloud | System
+# Mham Cloud | System
 # ============================================================
 
 from django.http import JsonResponse

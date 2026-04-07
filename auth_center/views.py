@@ -1,6 +1,6 @@
 # ================================================================
 # 📂 auth_center/views.py
-# 🧭 Authentication & Identity — Primey HR Cloud V15.1 ULTRA STABLE
+# 🧭 Authentication & Identity — Mham Cloud V15.1 ULTRA STABLE
 # ================================================================
 
 import json

@@ -1,6 +1,6 @@
 // ============================================================
 // 📂 الملف: lib/whatsapp/mappers.ts
-// 🟢 Primey HR Cloud - WhatsApp Data Mappers
+// 🟢 Mham Cloud - WhatsApp Data Mappers
 // ------------------------------------------------------------
 // ✅ تحويل بيانات API إلى Models جاهزة للواجهة
 // ✅ الحفاظ على طبقة فصل واضحة بين الـ backend والـ UI

@@ -1,6 +1,6 @@
 # ======================================================
 # 🏢 Department API — Company Scope
-# Primey HR Cloud
+# Mham Cloud
 # Version: D2.6 FINAL (UPSERT + BIOTIME SYNC ✅)
 # ======================================================
 # ✔ Create OR Update (Upsert Safe)

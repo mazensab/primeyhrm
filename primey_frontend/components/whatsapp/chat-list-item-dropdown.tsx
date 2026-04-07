@@ -2,7 +2,7 @@
 
 // ============================================================
 // 📂 الملف: components/whatsapp/chat-list-item-dropdown.tsx
-// 🟢 Primey HR Cloud - WhatsApp Chat List Item Dropdown
+// 🟢 Mham Cloud - WhatsApp Chat List Item Dropdown
 // ============================================================
 
 import { Archive, BellOff, MoreHorizontal, Trash2 } from "lucide-react"

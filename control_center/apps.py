@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 الملف: control_center/apps.py
-# 🧭 Primey HR Cloud — Control Center V16.0 (Glass White Sync)
+# 🧭 Mham Cloud — Control Center V16.0 (Glass White Sync)
 # 🚀 يتضمن: لوحة التحكم + إدارة المستخدمين والأدوار V10.1
 # 💡 تكامل ذكي مع Billing, Payroll, Employee, AI & Attendance
 # ============================================================

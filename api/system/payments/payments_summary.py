@@ -1,6 +1,6 @@
 # ============================================================
 # 💰 SYSTEM — Revenue Summary API
-# Primey HR Cloud | Hybrid Dashboard Architecture
+# Mham Cloud | Hybrid Dashboard Architecture
 # ============================================================
 
 from django.http import JsonResponse

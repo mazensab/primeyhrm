@@ -1,6 +1,6 @@
 # ===============================================================
 # 🧾 Company Subscription — SYSTEM API (SAFE)
-# Primey HR Cloud
+# Mham Cloud
 # ===============================================================
 
 from django.http import JsonResponse

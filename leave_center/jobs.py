@@ -1,6 +1,6 @@
 # ============================================================
 # 🕒 Auto Reset Leave Balance — Cron Job V6.1 Ultra Pro (Fixed)
-# 📦 Primey HR Cloud — Leave Center Auto Scheduler Engine
+# 📦 Mham Cloud — Leave Center Auto Scheduler Engine
 # + Notification Center Integration (create_notification)
 # ============================================================
 

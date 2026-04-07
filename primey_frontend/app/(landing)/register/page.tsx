@@ -882,14 +882,9 @@ function RegisterCompanyPageContent() {
       }
     }
 
-    const candidateEndpoints = [
-      `${API}/api/system/onboarding/start-payment/`,
-      `${API}/api/public/onboarding/start-payment/`,
-    ]
-
-    for (const endpoint of candidateEndpoints) {
+    if (selectedPaymentMethod === "TAMARA") {
       try {
-        const res = await fetch(endpoint, {
+        const res = await fetch(`${API}/api/system/payments/tamara/create-checkout/`, {
           method: "POST",
           credentials: "include",
           headers: {
@@ -898,7 +893,7 @@ function RegisterCompanyPageContent() {
           },
           body: JSON.stringify({
             draft_id: currentDraftId,
-            payment_method: selectedPaymentMethod,
+            payment_method: "TAMARA",
             billing_cycle: billingCycle,
             discount_code: discountCode || null,
           }),
@@ -907,7 +902,13 @@ function RegisterCompanyPageContent() {
         const data: StartPaymentResponse | null = await res.json().catch(() => null)
 
         if (!res.ok || !data) {
-          continue
+          toast.error(
+            data?.message ||
+              (isArabic
+                ? "فشل إنشاء رابط الدفع عبر تمارا"
+                : "Failed to create Tamara checkout URL")
+          )
+          return false
         }
 
         const checkoutUrl =
@@ -930,23 +931,27 @@ function RegisterCompanyPageContent() {
         if (checkoutUrl && typeof window !== "undefined") {
           toast.success(
             isArabic
-              ? "جارٍ تحويلك إلى بوابة الدفع..."
-              : "Redirecting to payment gateway..."
+              ? "جارٍ تحويلك إلى بوابة تمارا..."
+              : "Redirecting to Tamara..."
           )
           window.location.href = checkoutUrl
           return true
         }
 
-        if (data.status || data.success || data.ok) {
-          toast.success(
-            isArabic
-              ? "تم إنشاء طلب التسجيل بنجاح"
-              : "Registration request created successfully"
-          )
-          return true
-        }
+        toast.error(
+          isArabic
+            ? "لم يتم استلام رابط تمارا من الخادم"
+            : "No Tamara checkout URL was returned from the server"
+        )
+        return false
       } catch (error) {
-        console.error(`Payment start failed for ${endpoint}:`, error)
+        console.error("Tamara payment start failed:", error)
+        toast.error(
+          isArabic
+            ? "حدث خطأ أثناء بدء الدفع عبر تمارا"
+            : "An error occurred while starting Tamara payment"
+        )
+        return false
       }
     }
 

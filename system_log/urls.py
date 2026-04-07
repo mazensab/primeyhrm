@@ -4,7 +4,7 @@ from . import views
 app_name = "system_log"
 
 # ================================================================
-# 🌐 System Log URLs — V3 (Primey HR Cloud)
+# 🌐 System Log URLs — V3 (Mham Cloud)
 # ================================================================
 
 urlpatterns = [

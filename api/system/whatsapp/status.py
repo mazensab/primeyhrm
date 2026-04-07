@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/whatsapp/status.py
 # 🛡 System WhatsApp Status + Session APIs
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations

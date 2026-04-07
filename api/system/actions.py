@@ -1,9 +1,20 @@
+# ================================================================
+# 🟦 System Actions API — Clean Notification Version
+# Mham Cloud
+# ================================================================
+# ✅ تنظيف الإرسال المباشر للبريد من هذا الملف
+# ✅ الاعتماد على Notification Center في broadcast
+# ✅ الحفاظ على السلوك الحالي قدر الإمكان
+# ================================================================
+
+from __future__ import annotations
+
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from django.utils.timezone import now
 
 from company_manager.models import Company
-from django.core.mail import send_mail
+from notification_center.services import notify_many
 
 
 # ================================================================
@@ -44,7 +55,7 @@ def create_company(request):
     return JsonResponse({
         "status": "success",
         "message": "Company created successfully",
-        "company_id": company.id
+        "company_id": company.id,
     }, status=201)
 
 
@@ -63,7 +74,10 @@ def toggle_company_status(request):
     action = get_param(request, "action")
 
     if not company_id or not action:
-        return JsonResponse({"error": "company_id and action are required"}, status=400)
+        return JsonResponse(
+            {"error": "company_id and action are required"},
+            status=400,
+        )
 
     try:
         company = Company.objects.get(id=company_id)
@@ -77,11 +91,11 @@ def toggle_company_status(request):
     else:
         return JsonResponse({"error": "Invalid action"}, status=400)
 
-    company.save()
+    company.save(update_fields=["is_active"])
 
     return JsonResponse({
         "status": "success",
-        "message": f"Company {action}d successfully"
+        "message": f"Company {action}d successfully",
     }, status=200)
 
 
@@ -100,7 +114,10 @@ def change_plan(request):
     plan = get_param(request, "subscription_plan")
 
     if not company_id or not plan:
-        return JsonResponse({"error": "company_id and subscription_plan are required"}, status=400)
+        return JsonResponse(
+            {"error": "company_id and subscription_plan are required"},
+            status=400,
+        )
 
     try:
         company = Company.objects.get(id=company_id)
@@ -108,11 +125,11 @@ def change_plan(request):
         return JsonResponse({"error": "Company not found"}, status=404)
 
     company.subscription_plan = plan
-    company.save()
+    company.save(update_fields=["subscription_plan"])
 
     return JsonResponse({
         "status": "success",
-        "message": "Subscription plan updated"
+        "message": "Subscription plan updated",
     }, status=200)
 
 
@@ -122,7 +139,7 @@ def change_plan(request):
 @require_POST
 def broadcast_message(request):
     """
-    إرسال رسالة بريدية إلى جميع الشركات:
+    إرسال رسالة جماعية إلى ملاك الشركات عبر Notification Center
         - subject
         - message
     """
@@ -131,21 +148,65 @@ def broadcast_message(request):
     message = get_param(request, "message")
 
     if not subject or not message:
-        return JsonResponse({"error": "subject and message are required"}, status=400)
+        return JsonResponse(
+            {"error": "subject and message are required"},
+            status=400,
+        )
 
-    emails = Company.objects.exclude(owner_email=None).values_list("owner_email", flat=True)
+    recipients = []
+    seen_user_ids = set()
 
-    # Placeholder — Email backend must be configured
-    for email in emails:
-        try:
-            send_mail(subject, message, "noreply@primey.cloud", [email])
-        except:
-            pass  # لن نكسر الـ API
+    companies = (
+        Company.objects
+        .select_related("owner")
+        .filter(owner__isnull=False)
+    )
+
+    for company in companies:
+        owner = getattr(company, "owner", None)
+        if not owner:
+            continue
+
+        owner_id = getattr(owner, "id", None)
+        if not owner_id or owner_id in seen_user_ids:
+            continue
+
+        seen_user_ids.add(owner_id)
+        recipients.append(owner)
+
+    notes = notify_many(
+        recipients=recipients,
+        title=subject,
+        message=message,
+        notification_type="system_broadcast",
+        severity="info",
+        send_email=True,
+        send_whatsapp=False,
+        company=None,
+        event_code="system_broadcast_message",
+        event_group="system",
+        actor=getattr(request, "user", None),
+        language_code="ar",
+        source="actions.broadcast_message",
+        context={
+            "subject": subject,
+            "message": message,
+            "audience": "company_owners",
+            "companies_count": len(list(companies)),
+            "recipients_count": len(recipients),
+        },
+        target_object=None,
+        template_key="system_broadcast_message",
+    )
 
     return JsonResponse({
         "status": "success",
-        "message": "Broadcast message sent"
+        "message": "Broadcast message sent",
+        "recipients_count": len(recipients),
+        "notifications_count": len(notes),
     }, status=200)
+
+
 # ================================================================
 # 🟦 5) Impersonate a Company (SUPER ADMIN ONLY)
 # ================================================================
@@ -169,8 +230,8 @@ def impersonate_company(request):
 
     # إنشاء رمز جلسة جديد مع بيانات impersonation
     session_payload = {
-        "role": "COMPANY_OWNER",         # الدور الظاهري
-        "true_role": "SUPER_ADMIN",      # الدور الحقيقي
+        "role": "COMPANY_OWNER",
+        "true_role": "SUPER_ADMIN",
         "impersonate_company_id": str(company.id),
         "timestamp": str(now()),
     }
@@ -179,5 +240,5 @@ def impersonate_company(request):
     return JsonResponse({
         "status": "success",
         "message": f"Impersonating company {company.name}",
-        "session": session_payload
+        "session": session_payload,
     }, status=200)

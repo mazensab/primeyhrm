@@ -50,9 +50,9 @@ export default function CompanyWelcomeEmail({
 }: CompanyWelcomeEmailProps) {
   return (
     <EmailLayout
-      previewText={`تم تسجيل شركتك ${companyName} بنجاح في Primey HR Cloud`}
-      title="مرحبًا بك في Primey HR Cloud 🎉"
-      companyName="Primey HR Cloud"
+      previewText={`تم تسجيل شركتك ${companyName} بنجاح في Mham Cloud`}
+      title="مرحبًا بك في Mham Cloud 🎉"
+      companyName="Mham Cloud"
     >
       <Text style={paragraph}>
         يسعدنا إبلاغك بأنه تم تسجيل شركتك بنجاح داخل المنصة،

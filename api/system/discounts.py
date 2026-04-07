@@ -1,6 +1,6 @@
 # ============================================================
 # 🏷️ SYSTEM — Discounts API
-# Primey HR Cloud | V1.7 Ultra Stable — FINAL
+# Mham Cloud | V1.7 Ultra Stable — FINAL
 # ============================================================
 # ✔ JSON + form-data
 # ✔ CSRF Safe

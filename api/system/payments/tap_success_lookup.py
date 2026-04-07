@@ -1,22 +1,21 @@
 # ============================================================
 # 📂 api/system/payments/tap_success_lookup.py
 # ✅ Tap Success Lookup
-# Primey HR Cloud
+# Mham Cloud
 # ------------------------------------------------------------
 # الهدف:
 # - استقبال tap_id من صفحة نجاح الدفع في الفرونت
 # - محاولة ربط tap_id بفاتورة داخل النظام
 # - إرجاع invoice_number + redirect_url
-# - مناسب لصفحة:
-#   /system/payments/success?tap_id=...
+# - مناسب للتسجيل الخارجي بدون login
 # ============================================================
 
 from __future__ import annotations
 
 import re
 
-from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
 from billing_center.models import (
@@ -57,7 +56,12 @@ def _extract_draft_id_from_description(description: str) -> int | None:
         return None
 
 
-def _build_invoice_payload(invoice: Invoice, *, source: str, payment_tx: PaymentTransaction | None = None):
+def _build_invoice_payload(
+    invoice: Invoice,
+    *,
+    source: str,
+    payment_tx: PaymentTransaction | None = None,
+):
     return {
         "success": True,
         "status": "resolved",
@@ -142,7 +146,6 @@ def _resolve_invoice_from_tap_id(tap_id: str):
             )
 
             if draft:
-                # إذا العملية لم تكتمل بعد، نرجع pending
                 if draft.status != "PAID":
                     return {
                         "success": True,
@@ -155,7 +158,6 @@ def _resolve_invoice_from_tap_id(tap_id: str):
                         "retry_after_ms": 2500,
                     }
 
-                # محاولة إيجاد الشركة التي أُنشئت من نفس بيانات المسودة
                 company = (
                     Company.objects
                     .filter(name=draft.company_name)
@@ -214,8 +216,8 @@ def _resolve_invoice_from_tap_id(tap_id: str):
 # GET /api/system/payments/tap/success-lookup/?tap_id=chg_...
 # ============================================================
 
+@csrf_exempt
 @require_GET
-@login_required
 def tap_success_lookup(request):
     tap_id = _clean_str(request.GET.get("tap_id"))
 

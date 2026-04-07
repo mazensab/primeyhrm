@@ -4,7 +4,7 @@ const API = process.env.NEXT_PUBLIC_API_URL;
 
 /*
 ==================================================
-✅ PRIMEY HR CLOUD — AUTH MIDDLEWARE V5.4
+✅ Mham Cloud — AUTH MIDDLEWARE V5.4
 Optimized Session Guard
 ✅ Compatible with project original API pattern
 ==================================================

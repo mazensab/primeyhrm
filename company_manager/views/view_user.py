@@ -1,5 +1,5 @@
 # ======================================================================
-# 📌 Primey HR Cloud — Company Manager
+# 📌 Mham Cloud — Company Manager
 # 📁 File: view_user.py (LEGH Edition + Subscription Enforced)
 # ======================================================================
 

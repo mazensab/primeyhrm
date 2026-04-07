@@ -52,7 +52,7 @@ export default function EmployeeActivationEmail({
     <EmailLayout
       previewText={`تم تجهيز حساب الموظف ${employeeName}`}
       title="تم إنشاء حساب الموظف بنجاح"
-      companyName="Primey HR Cloud"
+      companyName="Mham Cloud"
     >
       <Text style={paragraph}>
         تم تجهيز حسابك للدخول إلى بوابة الموظفين. يمكنك الآن تفعيل الحساب

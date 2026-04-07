@@ -1,7 +1,7 @@
 # ================================================================
 # 📂 الملف: biotime_center/admin.py
 # ✔ متوافق 100% مع IClock Models V9.0
-# ✔ Developed by Mazen — Primey HR Cloud 2026
+# ✔ Developed by Mazen — Mham Cloud 2026
 # ================================================================
 
 from django.contrib import admin

@@ -17,7 +17,7 @@ import MessageStatusIcon from "./message-status-icon"
 
 // ============================================================
 // 📂 الملف: components/whatsapp/chat-bubbles.tsx
-// 🟢 Primey HR Cloud - WhatsApp Chat Bubbles
+// 🟢 Mham Cloud - WhatsApp Chat Bubbles
 // ------------------------------------------------------------
 // ✅ ضبط الفقاعات لتقترب من المرجع المدفوع
 // ✅ تصحيح موضع زر الثلاث نقاط

@@ -1,7 +1,7 @@
 """
 ====================================================================
 🔔 Notifications Engine — Constants (SINGLE SOURCE OF TRUTH)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Notification Channels
 ✔ Priority Levels

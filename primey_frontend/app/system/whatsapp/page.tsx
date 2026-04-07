@@ -2,7 +2,7 @@
 
 // ============================================================
 // 📂 الملف: app/system/whatsapp/page.tsx
-// 🟢 Primey HR Cloud - System WhatsApp Dashboard
+// 🟢 Mham Cloud - System WhatsApp Dashboard
 // ------------------------------------------------------------
 // ✅ الصفحة الرئيسية لموديول واتساب النظام
 // ✅ Dashboard نظيف واحترافي

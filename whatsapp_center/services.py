@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/services.py
-# Primey HR Cloud - WhatsApp Services
+# Mham Cloud - WhatsApp Services
 # ============================================================
 
 from __future__ import annotations
@@ -47,10 +47,68 @@ def _build_client_from_config(config) -> WhatsAppClient:
 
 
 def _get_scope_config(scope_type: str, company=None):
-    if scope_type == ScopeType.COMPANY:
-        return get_active_company_whatsapp_config(company)
-    return get_active_system_whatsapp_config()
+    """
+    جلب WhatsApp config حسب الـ scope مع fallback آمن:
 
+    1) إذا كان scope = COMPANY:
+       - نحاول أولاً Company Config
+       - إذا لم يوجد Company Config نعمل fallback إلى System Config
+
+    2) إذا كان scope = SYSTEM:
+       - نستخدم System Config مباشرة
+
+    الهدف:
+    - أحداث Auth / Notification Center التي تمرّر company في السياق
+      لا تنكسر إذا لم يوجد للشركة config واتساب خاص بها.
+    - الحفاظ على سلوك الشركة الطبيعي إذا كان عندها config فعلي.
+    """
+    if scope_type == ScopeType.COMPANY:
+        company_config = None
+
+        try:
+            if company is not None:
+                company_config = get_active_company_whatsapp_config(company)
+        except Exception:
+            logger.exception(
+                "Failed while resolving company WhatsApp config | company_id=%s",
+                getattr(company, "id", None) if company else None,
+            )
+            company_config = None
+
+        if company_config:
+            return company_config
+
+        # ----------------------------------------------------
+        # Fallback مهم:
+        # إذا لم يوجد config للشركة نرجع إلى system config
+        # حتى لا تفشل أحداث Notification Center / Auth
+        # برسالة No active WhatsApp config found
+        # ----------------------------------------------------
+        system_config = None
+        try:
+            system_config = get_active_system_whatsapp_config()
+        except Exception:
+            logger.exception("Failed while resolving fallback system WhatsApp config")
+            system_config = None
+
+        if system_config:
+            logger.info(
+                "WhatsApp config fallback applied | requested_scope=COMPANY | company_id=%s | fallback_scope=SYSTEM | system_config_id=%s",
+                getattr(company, "id", None) if company else None,
+                getattr(system_config, "id", None),
+            )
+            return system_config
+
+        return None
+
+    # --------------------------------------------------------
+    # SYSTEM scope
+    # --------------------------------------------------------
+    try:
+        return get_active_system_whatsapp_config()
+    except Exception:
+        logger.exception("Failed while resolving system WhatsApp config")
+        return None
 
 def _build_fallback_body(*, event_code: str, context: dict) -> str:
     """
@@ -60,17 +118,28 @@ def _build_fallback_body(*, event_code: str, context: dict) -> str:
     if explicit_message:
         return explicit_message
 
-    recipient_name = safe_text(context.get("recipient_name")) or "User"
+    recipient_name = (
+        safe_text(context.get("recipient_name"))
+        or safe_text(context.get("employee_name_ar"))
+        or safe_text(context.get("employee_arabic_name"))
+        or safe_text(context.get("employee_name"))
+        or "User"
+    )
     company_name = safe_text(context.get("company_name"))
-    employee_name = safe_text(context.get("employee_name"))
+    employee_name = (
+        safe_text(context.get("employee_name_ar"))
+        or safe_text(context.get("employee_arabic_name"))
+        or safe_text(context.get("employee_name"))
+        or recipient_name
+    )
     days_left = context.get("days_left")
 
     if event_code == "system_test_message":
-        return explicit_message or "This is a system WhatsApp test message from Primey HR Cloud."
+        return explicit_message or "This is a system WhatsApp test message from Mham Cloud."
 
     if event_code == "onboarding_draft_created":
         return (
-            f"تم إنشاء الطلب المبدئي بنجاح داخل Primey HR Cloud.\n"
+            f"تم إنشاء الطلب المبدئي بنجاح داخل Mham Cloud.\n"
             f"اسم الشركة: {company_name or safe_text(context.get('company_name'))}\n"
             f"اسم المسؤول: {safe_text(context.get('admin_name'))}\n"
             f"اسم المستخدم: {safe_text(context.get('admin_username'))}\n"
@@ -82,7 +151,7 @@ def _build_fallback_body(*, event_code: str, context: dict) -> str:
 
     if event_code == "onboarding_draft_confirmed":
         return (
-            f"تم تأكيد الطلب بنجاح داخل Primey HR Cloud.\n"
+            f"تم تأكيد الطلب بنجاح داخل Mham Cloud.\n"
             f"اسم الشركة: {company_name or safe_text(context.get('company_name'))}\n"
             f"الباقة: {safe_text(context.get('plan_name'))}\n"
             f"المدة: {safe_text(context.get('duration'))}\n"
@@ -92,8 +161,8 @@ def _build_fallback_body(*, event_code: str, context: dict) -> str:
 
     if event_code == "company_created":
         if company_name:
-            return f"Welcome to Primey HR Cloud. Your company '{company_name}' has been created successfully."
-        return "Welcome to Primey HR Cloud. Your company has been created successfully."
+            return f"Welcome to Mham Cloud. Your company '{company_name}' has been created successfully."
+        return "Welcome to Mham Cloud. Your company has been created successfully."
 
     if event_code == "payment_details_sent":
         return (
@@ -155,7 +224,64 @@ def _build_fallback_body(*, event_code: str, context: dict) -> str:
             return f"Attendance alert: employee {employee_name} is marked absent."
         return "Attendance alert: an employee is marked absent."
 
-    return f"Primey HR Cloud notification for {recipient_name}."
+    if event_code == "attendance_present":
+        return (
+            f"تنبيه حضور:\n"
+            f"تم تسجيل حضور الموظف {employee_name or recipient_name} بتاريخ {safe_text(context.get('attendance_date'))}.\n"
+            f"وقت الدخول: {safe_text(context.get('check_in'))}\n"
+            f"وقت الخروج: {safe_text(context.get('check_out'))}"
+        )
+
+    if event_code == "attendance_check_in":
+        return (
+            f"تنبيه حركة حضور:\n"
+            f"قام الموظف {employee_name or recipient_name} بتسجيل الدخول بتاريخ {safe_text(context.get('attendance_date'))}.\n"
+            f"وقت الدخول: {safe_text(context.get('check_in'))}"
+        )
+
+    if event_code == "attendance_check_out":
+        return (
+            f"تنبيه حركة حضور:\n"
+            f"قام الموظف {employee_name or recipient_name} بتسجيل الخروج بتاريخ {safe_text(context.get('attendance_date'))}.\n"
+            f"وقت الخروج: {safe_text(context.get('check_out'))}"
+        )
+
+    if event_code == "leave_request_submitted":
+        return (
+            f"تم تقديم طلب إجازة جديد.\n"
+            f"الموظف: {employee_name or recipient_name}\n"
+            f"نوع الإجازة: {safe_text(context.get('leave_type'))}\n"
+            f"من: {safe_text(context.get('start_date'))}\n"
+            f"إلى: {safe_text(context.get('end_date'))}\n"
+            f"الحالة: {safe_text(context.get('status'))}"
+        )
+
+    if event_code == "payroll_paid":
+        return (
+            f"تم صرف الراتب بنجاح.\n"
+            f"الموظف: {employee_name or recipient_name}\n"
+            f"الدورة: {safe_text(context.get('payroll_period'))}\n"
+            f"صافي الراتب: {safe_text(context.get('net_salary'))}\n"
+            f"المبلغ المصروف: {safe_text(context.get('paid_amount'))}\n"
+            f"طريقة الدفع: {safe_text(context.get('payment_method'))}\n"
+            f"الحالة: {safe_text(context.get('payment_status'))}"
+        )
+
+    if event_code == "employee_activated":
+        return (
+            f"تم تفعيل الموظف بنجاح.\n"
+            f"اسم الموظف: {employee_name or recipient_name}\n"
+            f"الحالة الحالية: {safe_text(context.get('status'))}"
+        )
+
+    if event_code == "employee_deactivated":
+        return (
+            f"تم تعطيل الموظف.\n"
+            f"اسم الموظف: {employee_name or recipient_name}\n"
+            f"الحالة الحالية: {safe_text(context.get('status'))}"
+        )
+
+    return f"Mham Cloud notification for {recipient_name}."
 
 
 def _set_attr_if_exists(instance, field_name: str, value) -> bool:
@@ -207,6 +333,301 @@ def _session_result_to_payload(result: WhatsAppSessionResult) -> dict[str, Any]:
     return asdict(result)
 
 
+def _is_session_not_connected_failure(log: WhatsAppMessageLog) -> bool:
+    """
+    التحقق هل فشل الرسالة كان بسبب أن الجلسة غير متصلة.
+    """
+    failure_reason = safe_text(getattr(log, "failure_reason", ""))
+    response_json = getattr(log, "response_json", {}) or {}
+    payload_json = getattr(log, "payload_json", {}) or {}
+
+    candidates = [
+        failure_reason,
+        safe_text(getattr(log, "provider_status", "")),
+        safe_text(response_json.get("message")),
+        safe_text(response_json.get("error")),
+        safe_text(payload_json.get("message")),
+    ]
+
+    normalized_text = " | ".join([item.lower() for item in candidates if item]).strip()
+
+    session_markers = [
+        "whatsapp session is not connected",
+        "session is not connected",
+        "not connected",
+        "gateway_failed",
+    ]
+
+    return any(marker in normalized_text for marker in session_markers)
+
+
+def _retry_existing_whatsapp_log(log: WhatsAppMessageLog):
+    """
+    إعادة إرسال نفس السجل الفاشل بدون إنشاء WhatsAppMessageLog جديد.
+    ينشئ Attempt جديد فقط ويحدث نفس السجل.
+    """
+    if not log:
+        return None
+
+    scope_type = getattr(log, "scope_type", "")
+    company = getattr(log, "company", None)
+
+    config = _get_scope_config(scope_type=scope_type, company=company)
+    if not config:
+        log.delivery_status = DeliveryStatus.FAILED
+        log.provider_status = "gateway_failed"
+        log.failure_reason = "No active WhatsApp config found during retry"
+        log.failed_at = timezone.now()
+        log.save(
+            update_fields=[
+                "delivery_status",
+                "provider_status",
+                "failure_reason",
+                "failed_at",
+                "updated_at",
+            ]
+        )
+        return log
+
+    recipient_phone = normalize_phone_number(getattr(log, "recipient_phone", ""))
+    if not recipient_phone:
+        log.delivery_status = DeliveryStatus.FAILED
+        log.provider_status = "validation_failed"
+        log.failure_reason = "Invalid or missing recipient phone number during retry"
+        log.failed_at = timezone.now()
+        log.save(
+            update_fields=[
+                "delivery_status",
+                "provider_status",
+                "failure_reason",
+                "failed_at",
+                "updated_at",
+            ]
+        )
+        return log
+
+    client = _build_client_from_config(config)
+
+    last_attempt_number = (
+        WhatsAppMessageAttempt.objects
+        .filter(message_log=log)
+        .order_by("-attempt_number")
+        .values_list("attempt_number", flat=True)
+        .first()
+        or 0
+    )
+
+    log.delivery_status = DeliveryStatus.QUEUED
+    log.failure_reason = ""
+    log.provider_status = ""
+    log.save(
+        update_fields=[
+            "delivery_status",
+            "failure_reason",
+            "provider_status",
+            "updated_at",
+        ]
+    )
+
+    attempt = WhatsAppMessageAttempt.objects.create(
+        message_log=log,
+        attempt_number=last_attempt_number + 1,
+        request_payload={
+            "recipient_phone": recipient_phone,
+            "event_code": getattr(log, "event_code", ""),
+            "scope_type": scope_type,
+            "attachment_url": getattr(log, "attachment_url", ""),
+            "provider": getattr(config, "provider", ""),
+            "session_name": getattr(config, "session_name", ""),
+            "retry": True,
+        },
+    )
+
+    attachment_url = getattr(log, "attachment_url", "") or ""
+    attachment_name = getattr(log, "attachment_name", "") or ""
+
+    if attachment_url:
+        result = client.send_document_message(
+            to_phone=recipient_phone,
+            document_url=attachment_url,
+            caption=getattr(log, "message_body", "") or "",
+            filename=attachment_name,
+        )
+    else:
+        result = client.send_text_message(
+            to_phone=recipient_phone,
+            body=getattr(log, "message_body", "") or "",
+        )
+
+    attempt.response_payload = result.response_data or {}
+    attempt.status_code = result.status_code
+    attempt.provider_status = result.provider_status
+    attempt.is_success = result.success
+    attempt.error_message = result.error_message
+    attempt.finished_at = timezone.now()
+    attempt.save(
+        update_fields=[
+            "response_payload",
+            "status_code",
+            "provider_status",
+            "is_success",
+            "error_message",
+            "finished_at",
+        ]
+    )
+
+    response_data = result.response_data or {}
+    if isinstance(response_data, dict) and any(
+        key in response_data
+        for key in [
+            "session_status",
+            "connected",
+            "connected_phone",
+            "device_label",
+            "qr_code",
+            "pairing_code",
+            "last_connected_at",
+            "message",
+        ]
+    ):
+        session_result = WhatsAppSessionResult(
+            success=bool(response_data.get("success", result.success)),
+            status_code=int(response_data.get("status_code", result.status_code or 200)),
+            session_status=str(response_data.get("session_status") or "disconnected"),
+            connected=bool(response_data.get("connected", False)),
+            connected_phone=str(response_data.get("connected_phone") or ""),
+            device_label=str(response_data.get("device_label") or ""),
+            qr_code=str(response_data.get("qr_code") or ""),
+            pairing_code=str(response_data.get("pairing_code") or ""),
+            last_connected_at=str(response_data.get("last_connected_at") or ""),
+            response_data=response_data,
+            error_message=str(response_data.get("message") or result.error_message or ""),
+        )
+        _sync_config_session_fields_from_result(config, session_result)
+
+    if result.success:
+        log.delivery_status = DeliveryStatus.SENT
+        log.provider_status = result.provider_status
+        log.external_message_id = result.external_message_id
+        log.response_json = result.response_data or {}
+        log.failure_reason = ""
+        log.sent_at = timezone.now()
+        log.failed_at = None
+        log.save(
+            update_fields=[
+                "delivery_status",
+                "provider_status",
+                "external_message_id",
+                "response_json",
+                "failure_reason",
+                "sent_at",
+                "failed_at",
+                "updated_at",
+            ]
+        )
+    else:
+        log.delivery_status = DeliveryStatus.FAILED
+        log.provider_status = result.provider_status
+        log.failure_reason = result.error_message
+        log.response_json = result.response_data or {}
+        log.failed_at = timezone.now()
+        log.save(
+            update_fields=[
+                "delivery_status",
+                "provider_status",
+                "failure_reason",
+                "response_json",
+                "failed_at",
+                "updated_at",
+            ]
+        )
+
+    return log
+
+
+@transaction.atomic
+def retry_failed_whatsapp_messages_for_scope(
+    *,
+    scope_type: str,
+    company=None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """
+    إعادة إرسال الرسائل الفاشلة تلقائيًا عند رجوع الجلسة.
+    يعيد فقط الرسائل التي فشلت بسبب انقطاع الجلسة.
+    """
+    logs_qs = (
+        WhatsAppMessageLog.objects
+        .select_related("template", "company")
+        .filter(
+            scope_type=scope_type,
+            delivery_status=DeliveryStatus.FAILED,
+        )
+        .order_by("created_at")
+    )
+
+    if scope_type == ScopeType.COMPANY:
+        logs_qs = logs_qs.filter(company=company)
+    else:
+        logs_qs = logs_qs.filter(company__isnull=True)
+
+    retried = 0
+    sent = 0
+    failed_again = 0
+    skipped = 0
+
+    for log in logs_qs[:limit]:
+        if not _is_session_not_connected_failure(log):
+            skipped += 1
+            continue
+
+        retried += 1
+        updated_log = _retry_existing_whatsapp_log(log)
+
+        if updated_log and getattr(updated_log, "delivery_status", "") == DeliveryStatus.SENT:
+            sent += 1
+        else:
+            failed_again += 1
+
+    return {
+        "success": True,
+        "retried": retried,
+        "sent": sent,
+        "failed_again": failed_again,
+        "skipped": skipped,
+        "scope_type": scope_type,
+        "company_id": getattr(company, "id", None) if company else None,
+    }
+
+
+def _auto_retry_failed_messages_after_reconnect(
+    *,
+    scope_type: str,
+    company=None,
+    connected: bool,
+) -> dict[str, Any]:
+    """
+    إذا أصبحت الجلسة متصلة يتم تشغيل إعادة الإرسال التلقائي.
+    """
+    if not connected:
+        return {
+            "success": True,
+            "retried": 0,
+            "sent": 0,
+            "failed_again": 0,
+            "skipped": 0,
+            "auto_retry_triggered": False,
+        }
+
+    retry_result = retry_failed_whatsapp_messages_for_scope(
+        scope_type=scope_type,
+        company=company,
+        limit=100,
+    )
+    retry_result["auto_retry_triggered"] = True
+    return retry_result
+
+
 # ============================================================
 # 👥 Recipient Resolvers + Domain Notification Helpers
 # ============================================================
@@ -230,8 +651,11 @@ def _stringify(value) -> str:
 def _resolve_employee_phone(employee) -> str:
     """
     استخراج جوال الموظف بشكل مرن حسب الحقول المتوفرة في الموديل.
+    ✅ يدعم mobile_number لأنه المستخدم فعليًا في Employee API.
+    ✅ يحاول أيضًا fallback إلى اليوزر المرتبط إذا وُجد.
     """
     candidates = [
+        "mobile_number",
         "mobile",
         "phone",
         "phone_number",
@@ -239,11 +663,97 @@ def _resolve_employee_phone(employee) -> str:
         "personal_phone",
         "work_phone",
     ]
+
     for field_name in candidates:
         value = _stringify(_safe_getattr(employee, field_name, ""))
         if value:
             return value
+
+    related_user = _resolve_related_user_for_employee(employee)
+    if related_user:
+        related_user_phone = _resolve_user_phone(related_user)
+        if related_user_phone:
+            return related_user_phone
+
     return ""
+
+
+def _build_employee_created_context(employee, extra_context: dict | None = None) -> dict[str, Any]:
+    user = _safe_getattr(employee, "user", None)
+    department = _safe_getattr(employee, "department", None)
+    job_title = _safe_getattr(employee, "job_title", None)
+
+    context = {
+        "recipient_name": _stringify(_safe_getattr(employee, "full_name", "")),
+        "employee_name": _stringify(_safe_getattr(employee, "full_name", "")),
+        "employee_code": _stringify(_safe_getattr(employee, "employee_number", "")),
+        "job_title": _stringify(_safe_getattr(job_title, "name", "")),
+        "department_name": _stringify(_safe_getattr(department, "name", "")),
+        "username": _stringify(_safe_getattr(user, "username", "")),
+        "email": _stringify(_safe_getattr(user, "email", "")),
+        "employee_id": _safe_getattr(employee, "id", ""),
+    }
+
+    if extra_context:
+        context.update(extra_context)
+
+    return context
+
+
+def send_employee_created_whatsapp_notifications(
+    *,
+    employee,
+    company=None,
+    send_to_employee: bool = True,
+    send_to_user: bool = True,
+    send_to_manager: bool = True,
+    extra_context: dict | None = None,
+) -> dict[str, Any]:
+    """
+    إرسال إشعار إنشاء موظف جديد.
+    يستخدم event_code = employee_added
+    """
+    if not employee:
+        return {
+            "success": False,
+            "message": "employee_not_found",
+            "sent_count": 0,
+        }
+
+    context = _build_employee_created_context(employee, extra_context=extra_context)
+    sent_count = 0
+    event_code = "employee_added"
+
+    recipients = _collect_employee_notification_recipients(
+        employee=employee,
+        company=company,
+        send_to_employee=send_to_employee,
+        send_to_user=send_to_user,
+        send_to_manager=send_to_manager,
+    )
+
+    for recipient in recipients:
+        result = _send_event_to_recipient_if_possible(
+            scope_type=ScopeType.COMPANY,
+            event_code=event_code,
+            recipient_phone=recipient["phone"],
+            recipient_name=recipient["name"],
+            recipient_role=recipient["role"],
+            trigger_source=TriggerSource.EMPLOYEE,
+            company=company,
+            language_code=recipient["language_code"],
+            context=context,
+            related_model="employee",
+            related_object_id=_safe_getattr(employee, "id", ""),
+        )
+        if result:
+            sent_count += 1
+
+    return {
+        "success": True,
+        "event_code": event_code,
+        "sent_count": sent_count,
+    }
 
 
 def _resolve_employee_language(company=None, employee=None) -> str:
@@ -256,14 +766,15 @@ def _resolve_employee_language(company=None, employee=None) -> str:
 
     if company and hasattr(company, "whatsapp_config") and company.whatsapp_config:
         cfg_lang = _stringify(_safe_getattr(company.whatsapp_config, "default_language_code", ""))
-        if cfg_lang:
+        if cfg_lang in ["ar", "en"]:
             return cfg_lang
 
     return "ar"
 
 
-def _resolve_employee_recipient(employee, company=None) -> dict[str, str]:
+def _resolve_employee_recipient(employee, company=None) -> dict[str, Any]:
     return {
+        "user": None,
         "phone": _resolve_employee_phone(employee),
         "name": _stringify(_safe_getattr(employee, "full_name", "")) or _stringify(employee),
         "role": "employee",
@@ -299,15 +810,233 @@ def _resolve_user_phone(user) -> str:
     return ""
 
 
+def _resolve_user_display_name(user) -> str:
+    user_name = ""
+    get_full_name_fn = _safe_getattr(user, "get_full_name", None)
+    if callable(get_full_name_fn):
+        user_name = _stringify(get_full_name_fn())
+    if not user_name:
+        user_name = _stringify(_safe_getattr(user, "full_name", ""))
+    if not user_name:
+        user_name = _stringify(user)
+    return user_name
+
+
+def _resolve_user_language(user, company=None) -> str:
+    language = _stringify(_safe_getattr(user, "preferred_language", ""))
+    if language in ["ar", "en"]:
+        return language
+
+    for profile_attr in ["profile", "userprofile"]:
+        profile = _safe_getattr(user, profile_attr, None)
+        if profile:
+            profile_lang = _stringify(_safe_getattr(profile, "preferred_language", ""))
+            if profile_lang in ["ar", "en"]:
+                return profile_lang
+
+    if company and hasattr(company, "whatsapp_config") and company.whatsapp_config:
+        cfg_lang = _stringify(_safe_getattr(company.whatsapp_config, "default_language_code", ""))
+        if cfg_lang in ["ar", "en"]:
+            return cfg_lang
+
+    return "ar"
+
+
 def _resolve_related_user_for_employee(employee, company=None):
     """
     محاولة ربط الموظف بيوزر.
     """
-    user = _safe_getattr(employee, "user", None)
-    if user:
-        return user
+    direct_candidates = [
+        "user",
+        "auth_user",
+        "account_user",
+        "linked_user",
+    ]
+
+    for attr_name in direct_candidates:
+        user = _safe_getattr(employee, attr_name, None)
+        if user:
+            return user
 
     return None
+
+
+def _extract_user_from_candidate(candidate):
+    """
+    يحاول استخراج User من أي كيان محتمل:
+    - User مباشرة
+    - Employee -> user
+    - Profile-like object -> user
+    """
+    if not candidate:
+        return None
+
+    if _safe_getattr(candidate, "is_authenticated", None) is not None:
+        return candidate
+
+    nested_user = _safe_getattr(candidate, "user", None)
+    if nested_user:
+        return nested_user
+
+    return None
+
+
+def _resolve_direct_manager_user_for_employee(employee, company=None):
+    """
+    محاولة مرنة لاستخراج المدير المباشر للموظف.
+    لا تكسر النظام إذا لم تكن الحقول موجودة.
+    """
+    direct_manager_candidates = [
+        "manager",
+        "line_manager",
+        "direct_manager",
+        "reporting_manager",
+        "supervisor",
+        "manager_user",
+        "line_manager_user",
+        "direct_manager_user",
+        "supervisor_user",
+    ]
+
+    for attr_name in direct_manager_candidates:
+        manager_obj = _safe_getattr(employee, attr_name, None)
+        manager_user = _extract_user_from_candidate(manager_obj)
+        if manager_user:
+            return manager_user
+
+    # محاولة ثانية عبر القسم / الوحدة التنظيمية
+    structure_candidates = [
+        "department",
+        "section",
+        "team",
+        "unit",
+        "position",
+        "job_title",
+    ]
+
+    structure_manager_fields = [
+        "manager",
+        "line_manager",
+        "direct_manager",
+        "supervisor",
+        "head",
+        "director",
+        "responsible_user",
+        "user",
+    ]
+
+    for structure_attr in structure_candidates:
+        structure_obj = _safe_getattr(employee, structure_attr, None)
+        if not structure_obj:
+            continue
+
+        for manager_field in structure_manager_fields:
+            manager_candidate = _safe_getattr(structure_obj, manager_field, None)
+            manager_user = _extract_user_from_candidate(manager_candidate)
+            if manager_user:
+                return manager_user
+
+    return None
+
+
+def _resolve_user_recipient(user, company=None, role: str = "user") -> dict[str, Any]:
+    if not user:
+        return {
+            "user": None,
+            "phone": "",
+            "name": "",
+            "role": role,
+            "language_code": "ar",
+        }
+
+    return {
+        "user": user,
+        "phone": _resolve_user_phone(user),
+        "name": _resolve_user_display_name(user),
+        "role": role,
+        "language_code": _resolve_user_language(user, company=company),
+    }
+
+
+def _resolve_manager_recipient(employee, company=None) -> dict[str, Any]:
+    """
+    تجهيز بيانات مستلم المدير المباشر.
+    """
+    manager_user = _resolve_direct_manager_user_for_employee(employee, company=company)
+    if not manager_user:
+        return {
+            "user": None,
+            "phone": "",
+            "name": "",
+            "role": "manager",
+            "language_code": "ar",
+        }
+
+    return _resolve_user_recipient(manager_user, company=company, role="manager")
+
+
+def _build_recipient_dedupe_key(recipient: dict[str, Any]) -> str:
+    """
+    منع تكرار الإرسال لنفس الشخص:
+    - أولاً على user.pk إن وجد
+    - ثم على رقم الجوال بعد التطبيع
+    - ثم fallback على role + name
+    """
+    user = recipient.get("user")
+    user_pk = _safe_getattr(user, "pk", None)
+    if user_pk:
+        return f"user:{user_pk}"
+
+    normalized_phone = normalize_phone_number(recipient.get("phone", ""))
+    if normalized_phone:
+        return f"phone:{normalized_phone}"
+
+    return f"fallback:{recipient.get('role', '')}:{recipient.get('name', '')}"
+
+
+def _collect_employee_notification_recipients(
+    *,
+    employee,
+    company=None,
+    send_to_employee: bool = True,
+    send_to_user: bool = True,
+    send_to_manager: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    بناء قائمة المستلمين النهائية مع:
+    - employee
+    - linked user
+    - direct manager
+    + منع التكرار
+    """
+    recipients: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _append_if_unique(recipient: dict[str, Any] | None):
+        if not recipient:
+            return
+
+        key = _build_recipient_dedupe_key(recipient)
+        if key in seen:
+            return
+
+        seen.add(key)
+        recipients.append(recipient)
+
+    if send_to_employee:
+        _append_if_unique(_resolve_employee_recipient(employee, company=company))
+
+    if send_to_user:
+        related_user = _resolve_related_user_for_employee(employee, company=company)
+        if related_user:
+            _append_if_unique(_resolve_user_recipient(related_user, company=company, role="user"))
+
+    if send_to_manager:
+        manager_recipient = _resolve_manager_recipient(employee, company=company)
+        if manager_recipient.get("user") or manager_recipient.get("phone"):
+            _append_if_unique(manager_recipient)
+
+    return recipients
 
 
 def _resolve_leave_type_name(leave_request) -> str:
@@ -392,6 +1121,157 @@ def _build_attendance_context(record, extra_context: dict | None = None) -> dict
     return context
 
 
+def _build_payroll_context(payroll_record, extra_context: dict | None = None) -> dict[str, Any]:
+    employee = _safe_getattr(payroll_record, "employee", None)
+    run = _safe_getattr(payroll_record, "run", None)
+
+    payroll_period = ""
+    try:
+        month_value = _safe_getattr(run, "month", None) or _safe_getattr(payroll_record, "month", None)
+        if month_value and hasattr(month_value, "strftime"):
+            payroll_period = month_value.strftime("%Y-%m")
+        elif month_value:
+            payroll_period = _stringify(month_value)
+    except Exception:
+        payroll_period = _stringify(_safe_getattr(payroll_record, "month", ""))
+
+    context = {
+        "recipient_name": _stringify(_safe_getattr(employee, "full_name", "")),
+        "employee_name": _stringify(_safe_getattr(employee, "full_name", "")),
+        "payroll_period": payroll_period,
+        "pay_date": _safe_getattr(_safe_getattr(payroll_record, "paid_at", None), "date", lambda: "")()
+        if _safe_getattr(payroll_record, "paid_at", None)
+        else "",
+        "payment_status": _stringify(_safe_getattr(payroll_record, "status", "")),
+        "payment_method": _stringify(_safe_getattr(payroll_record, "payment_method", "")),
+        "paid_amount": _safe_getattr(payroll_record, "paid_amount", 0) or 0,
+        "remaining_amount": _safe_getattr(payroll_record, "remaining_amount", 0) or 0,
+        "net_salary": _safe_getattr(payroll_record, "net_salary", 0) or 0,
+        "record_id": _safe_getattr(payroll_record, "id", ""),
+    }
+
+    if extra_context:
+        context.update(extra_context)
+
+    return context
+
+def _build_employee_status_values(employee) -> dict[str, Any]:
+    """
+    توحيد قيم حالة الموظف لاستخدامها في:
+    - المسار المباشر داخل whatsapp_center
+    - Notification Center Bridge
+    - القوالب الحالية التي تعتمد على {{status}}
+    """
+
+    user = _safe_getattr(employee, "user", None)
+    is_active = bool(_safe_getattr(user, "is_active", False))
+
+    return {
+        "status": "نشط" if is_active else "معطل",
+        "status_code": "ACTIVE" if is_active else "INACTIVE",
+        "status_label": "نشط" if is_active else "معطل",
+        "status_label_en": "Active" if is_active else "Inactive",
+        "is_active": is_active,
+    }
+
+
+def _build_employee_status_context(employee, extra_context: dict | None = None) -> dict[str, Any]:
+    status_values = _build_employee_status_values(employee)
+
+    employee_name = (
+        _stringify(_safe_getattr(employee, "full_name_ar", ""))
+        or _stringify(_safe_getattr(employee, "arabic_name", ""))
+        or _stringify(_safe_getattr(employee, "name_ar", ""))
+        or _stringify(_safe_getattr(employee, "full_name", ""))
+    )
+
+    context = {
+        "recipient_name": employee_name,
+        "employee_name": employee_name,
+        "employee_name_ar": employee_name,
+        "employee_arabic_name": employee_name,
+        "employee_code": _stringify(_safe_getattr(employee, "employee_number", "")),
+        "employee_id": _safe_getattr(employee, "id", ""),
+        **status_values,
+    }
+
+    if extra_context:
+        context.update(extra_context)
+
+    return context
+
+
+def _inject_employee_status_context_if_missing(*, event=None, context: dict) -> dict[str, Any]:
+    """
+    حقن status تلقائيًا إذا كان الحدث متعلقًا بتفعيل/تعطيل الموظف
+    ولم تكن القيم موجودة داخل event.context.
+    """
+    resolved_context = dict(context or {})
+
+    event_code = _stringify(_safe_getattr(event, "event_code", "")).lower()
+    if event_code not in {"employee_activated", "employee_deactivated"}:
+        return resolved_context
+
+    target_object = _safe_getattr(event, "target_object", None)
+
+    employee = None
+
+    if target_object and (
+        hasattr(target_object, "employee_number")
+        or hasattr(target_object, "mobile_number")
+        or hasattr(target_object, "work_start_date")
+    ):
+        employee = target_object
+
+    if not employee:
+        employee = _safe_getattr(target_object, "employee", None)
+
+    if employee:
+        status_values = _build_employee_status_values(employee)
+
+        for key, value in status_values.items():
+            if key not in resolved_context or resolved_context.get(key) in [None, "", "{{status}}"]:
+                resolved_context[key] = value
+
+        employee_name = (
+            _stringify(_safe_getattr(employee, "full_name_ar", ""))
+            or _stringify(_safe_getattr(employee, "arabic_name", ""))
+            or _stringify(_safe_getattr(employee, "name_ar", ""))
+            or _stringify(_safe_getattr(employee, "full_name", ""))
+        )
+
+        if not resolved_context.get("employee_name") or resolved_context.get("employee_name") == "{{employee_name}}":
+            resolved_context["employee_name"] = employee_name
+
+        if not resolved_context.get("employee_name_ar"):
+            resolved_context["employee_name_ar"] = employee_name
+
+        if not resolved_context.get("employee_arabic_name"):
+            resolved_context["employee_arabic_name"] = employee_name
+
+        if not resolved_context.get("recipient_name"):
+            resolved_context["recipient_name"] = employee_name
+
+        if not resolved_context.get("employee_code"):
+            resolved_context["employee_code"] = _stringify(_safe_getattr(employee, "employee_number", ""))
+
+        return resolved_context
+
+    if not resolved_context.get("status") or resolved_context.get("status") == "{{status}}":
+        resolved_context["status"] = "نشط" if event_code == "employee_activated" else "معطل"
+
+    if not resolved_context.get("status_code"):
+        resolved_context["status_code"] = "ACTIVE" if event_code == "employee_activated" else "INACTIVE"
+
+    if not resolved_context.get("status_label"):
+        resolved_context["status_label"] = "نشط" if event_code == "employee_activated" else "معطل"
+
+    if not resolved_context.get("status_label_en"):
+        resolved_context["status_label_en"] = "Active" if event_code == "employee_activated" else "Inactive"
+
+    return resolved_context
+
+
 def _send_event_to_recipient_if_possible(
     *,
     scope_type: str,
@@ -449,6 +1329,7 @@ def send_leave_status_whatsapp_notifications(
     action: str,
     send_to_employee: bool = True,
     send_to_user: bool = True,
+    send_to_manager: bool = True,
     extra_context: dict | None = None,
 ) -> dict[str, Any]:
     """
@@ -481,51 +1362,30 @@ def send_leave_status_whatsapp_notifications(
     context = _build_leave_context(leave_request, extra_context=extra_context)
     sent_count = 0
 
-    if send_to_employee:
-        employee_recipient = _resolve_employee_recipient(employee, company=company)
+    recipients = _collect_employee_notification_recipients(
+        employee=employee,
+        company=company,
+        send_to_employee=send_to_employee,
+        send_to_user=send_to_user,
+        send_to_manager=send_to_manager,
+    )
+
+    for recipient in recipients:
         result = _send_event_to_recipient_if_possible(
             scope_type=ScopeType.COMPANY,
             event_code=event_code,
-            recipient_phone=employee_recipient["phone"],
-            recipient_name=employee_recipient["name"],
-            recipient_role=employee_recipient["role"],
+            recipient_phone=recipient["phone"],
+            recipient_name=recipient["name"],
+            recipient_role=recipient["role"],
             trigger_source=TriggerSource.LEAVE,
             company=company,
-            language_code=employee_recipient["language_code"],
+            language_code=recipient["language_code"],
             context=context,
             related_model="leave_request",
             related_object_id=_safe_getattr(leave_request, "id", ""),
         )
         if result:
             sent_count += 1
-
-    if send_to_user:
-        related_user = _resolve_related_user_for_employee(employee, company=company)
-        if related_user:
-            user_phone = _resolve_user_phone(related_user)
-            user_language = _stringify(_safe_getattr(related_user, "preferred_language", "")) or "ar"
-            user_name = ""
-            get_full_name_fn = _safe_getattr(related_user, "get_full_name", None)
-            if callable(get_full_name_fn):
-                user_name = _stringify(get_full_name_fn())
-            if not user_name:
-                user_name = _stringify(related_user)
-
-            result = _send_event_to_recipient_if_possible(
-                scope_type=ScopeType.COMPANY,
-                event_code=event_code,
-                recipient_phone=user_phone,
-                recipient_name=user_name,
-                recipient_role="user",
-                trigger_source=TriggerSource.LEAVE,
-                company=company,
-                language_code=user_language if user_language in ["ar", "en"] else "ar",
-                context=context,
-                related_model="leave_request",
-                related_object_id=_safe_getattr(leave_request, "id", ""),
-            )
-            if result:
-                sent_count += 1
 
     return {
         "success": True,
@@ -535,15 +1395,198 @@ def send_leave_status_whatsapp_notifications(
     }
 
 
+def send_leave_submitted_whatsapp_notifications(
+    *,
+    leave_request,
+    company=None,
+    send_to_employee: bool = True,
+    send_to_user: bool = True,
+    send_to_manager: bool = True,
+    extra_context: dict | None = None,
+) -> dict[str, Any]:
+    """
+    إرسال إشعار تقديم طلب إجازة / استئذان.
+    """
+    employee = _safe_getattr(leave_request, "employee", None)
+    if not employee:
+        return {
+            "success": False,
+            "message": "employee_not_found",
+            "sent_count": 0,
+        }
+
+    context = _build_leave_context(leave_request, extra_context=extra_context)
+    sent_count = 0
+    event_code = "leave_request_submitted"
+
+    recipients = _collect_employee_notification_recipients(
+        employee=employee,
+        company=company,
+        send_to_employee=send_to_employee,
+        send_to_user=send_to_user,
+        send_to_manager=send_to_manager,
+    )
+
+    for recipient in recipients:
+        result = _send_event_to_recipient_if_possible(
+            scope_type=ScopeType.COMPANY,
+            event_code=event_code,
+            recipient_phone=recipient["phone"],
+            recipient_name=recipient["name"],
+            recipient_role=recipient["role"],
+            trigger_source=TriggerSource.LEAVE,
+            company=company,
+            language_code=recipient["language_code"],
+            context=context,
+            related_model="leave_request",
+            related_object_id=_safe_getattr(leave_request, "id", ""),
+        )
+        if result:
+            sent_count += 1
+
+    return {
+        "success": True,
+        "event_code": event_code,
+        "sent_count": sent_count,
+    }
+
+
+def send_payroll_whatsapp_notifications(
+    *,
+    payroll_record,
+    company=None,
+    send_to_employee: bool = True,
+    send_to_user: bool = True,
+    send_to_manager: bool = True,
+    extra_context: dict | None = None,
+) -> dict[str, Any]:
+    """
+    إرسال إشعار صرف راتب الموظف.
+    """
+    employee = _safe_getattr(payroll_record, "employee", None)
+    if not employee:
+        return {
+            "success": False,
+            "message": "employee_not_found",
+            "sent_count": 0,
+        }
+
+    context = _build_payroll_context(payroll_record, extra_context=extra_context)
+    sent_count = 0
+    event_code = "payroll_paid"
+
+    recipients = _collect_employee_notification_recipients(
+        employee=employee,
+        company=company,
+        send_to_employee=send_to_employee,
+        send_to_user=send_to_user,
+        send_to_manager=send_to_manager,
+    )
+
+    for recipient in recipients:
+        result = _send_event_to_recipient_if_possible(
+            scope_type=ScopeType.COMPANY,
+            event_code=event_code,
+            recipient_phone=recipient["phone"],
+            recipient_name=recipient["name"],
+            recipient_role=recipient["role"],
+            trigger_source=TriggerSource.PAYROLL,
+            company=company,
+            language_code=recipient["language_code"],
+            context=context,
+            related_model="payroll_record",
+            related_object_id=_safe_getattr(payroll_record, "id", ""),
+        )
+        if result:
+            sent_count += 1
+
+    return {
+        "success": True,
+        "event_code": event_code,
+        "sent_count": sent_count,
+    }
+
+
+def send_employee_status_whatsapp_notifications(
+    *,
+    employee,
+    company=None,
+    send_to_employee: bool = True,
+    send_to_user: bool = True,
+    send_to_manager: bool = True,
+    extra_context: dict | None = None,
+) -> dict[str, Any]:
+    """
+    إرسال إشعار تفعيل / تعطيل الموظف.
+    """
+    if not employee:
+        return {
+            "success": False,
+            "message": "employee_not_found",
+            "sent_count": 0,
+        }
+
+    user = _safe_getattr(employee, "user", None)
+    is_active = bool(_safe_getattr(user, "is_active", False))
+    event_code = "employee_activated" if is_active else "employee_deactivated"
+
+    context = _build_employee_status_context(employee, extra_context=extra_context)
+    sent_count = 0
+
+    recipients = _collect_employee_notification_recipients(
+        employee=employee,
+        company=company,
+        send_to_employee=send_to_employee,
+        send_to_user=send_to_user,
+        send_to_manager=send_to_manager,
+    )
+
+    for recipient in recipients:
+        result = _send_event_to_recipient_if_possible(
+            scope_type=ScopeType.COMPANY,
+            event_code=event_code,
+            recipient_phone=recipient["phone"],
+            recipient_name=recipient["name"],
+            recipient_role=recipient["role"],
+            trigger_source=TriggerSource.EMPLOYEE,
+            company=company,
+            language_code=recipient["language_code"],
+            context=context,
+            related_model="employee",
+            related_object_id=_safe_getattr(employee, "id", ""),
+        )
+        if result:
+            sent_count += 1
+
+    return {
+        "success": True,
+        "event_code": event_code,
+        "sent_count": sent_count,
+        "is_active": is_active,
+    }
+
+
 def send_attendance_status_whatsapp_notifications(
     *,
     attendance_record,
     company=None,
     send_to_employee: bool = True,
     send_to_user: bool = True,
+    send_to_manager: bool = True,
+    action: str | None = None,
+    extra_context: dict | None = None,
 ) -> dict[str, Any]:
     """
-    إرسال إشعار تأخير / غياب.
+    إرسال إشعار الحضور:
+    - absent
+    - late
+    - present
+    - check_in
+    - check_out
+
+    ملاحظة:
+    للحفاظ على التوافق الخلفي:
+    - إذا لم يُرسل action فسيتم استنتاجه من status الحالي كما كان سابقًا.
     """
     employee = _safe_getattr(attendance_record, "employee", None)
     if not employee:
@@ -556,10 +1599,20 @@ def send_attendance_status_whatsapp_notifications(
     status_value = _stringify(_safe_getattr(attendance_record, "status", "")).lower()
     late_minutes = int(_safe_getattr(attendance_record, "late_minutes", 0) or 0)
 
-    if status_value == "absent":
+    normalized_action = _stringify(action).lower()
+
+    if normalized_action == "check_in":
+        event_code = "attendance_check_in"
+    elif normalized_action == "check_out":
+        event_code = "attendance_check_out"
+    elif normalized_action == "present":
+        event_code = "attendance_present"
+    elif status_value == "absent":
         event_code = "attendance_absent_alert"
     elif status_value == "late" or late_minutes > 0:
         event_code = "attendance_late_alert"
+    elif status_value == "present":
+        event_code = "attendance_present"
     else:
         return {
             "success": False,
@@ -567,20 +1620,27 @@ def send_attendance_status_whatsapp_notifications(
             "sent_count": 0,
         }
 
-    context = _build_attendance_context(attendance_record)
+    context = _build_attendance_context(attendance_record, extra_context=extra_context)
     sent_count = 0
 
-    if send_to_employee:
-        employee_recipient = _resolve_employee_recipient(employee, company=company)
+    recipients = _collect_employee_notification_recipients(
+        employee=employee,
+        company=company,
+        send_to_employee=send_to_employee,
+        send_to_user=send_to_user,
+        send_to_manager=send_to_manager,
+    )
+
+    for recipient in recipients:
         result = _send_event_to_recipient_if_possible(
             scope_type=ScopeType.COMPANY,
             event_code=event_code,
-            recipient_phone=employee_recipient["phone"],
-            recipient_name=employee_recipient["name"],
-            recipient_role=employee_recipient["role"],
+            recipient_phone=recipient["phone"],
+            recipient_name=recipient["name"],
+            recipient_role=recipient["role"],
             trigger_source=TriggerSource.ATTENDANCE,
             company=company,
-            language_code=employee_recipient["language_code"],
+            language_code=recipient["language_code"],
             context=context,
             related_model="attendance_record",
             related_object_id=_safe_getattr(attendance_record, "id", ""),
@@ -588,39 +1648,12 @@ def send_attendance_status_whatsapp_notifications(
         if result:
             sent_count += 1
 
-    if send_to_user:
-        related_user = _resolve_related_user_for_employee(employee, company=company)
-        if related_user:
-            user_phone = _resolve_user_phone(related_user)
-            user_language = _stringify(_safe_getattr(related_user, "preferred_language", "")) or "ar"
-            user_name = ""
-            get_full_name_fn = _safe_getattr(related_user, "get_full_name", None)
-            if callable(get_full_name_fn):
-                user_name = _stringify(get_full_name_fn())
-            if not user_name:
-                user_name = _stringify(related_user)
-
-            result = _send_event_to_recipient_if_possible(
-                scope_type=ScopeType.COMPANY,
-                event_code=event_code,
-                recipient_phone=user_phone,
-                recipient_name=user_name,
-                recipient_role="user",
-                trigger_source=TriggerSource.ATTENDANCE,
-                company=company,
-                language_code=user_language if user_language in ["ar", "en"] else "ar",
-                context=context,
-                related_model="attendance_record",
-                related_object_id=_safe_getattr(attendance_record, "id", ""),
-            )
-            if result:
-                sent_count += 1
-
     return {
         "success": True,
         "event_code": event_code,
         "sent_count": sent_count,
         "status": status_value,
+        "action": normalized_action or status_value,
     }
 
 
@@ -667,7 +1700,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "مرحبًا {{company_name}}،\n"
-                "تم إنشاء شركتكم بنجاح في Primey HR Cloud.\n\n"
+                "تم إنشاء شركتكم بنجاح في Mham Cloud.\n\n"
                 "تفاصيل الاشتراك:\n"
                 "- الباقة: {{plan_name}}\n"
                 "- تاريخ البداية: {{start_date}}\n"
@@ -696,7 +1729,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "Hello {{company_name}},\n"
-                "Your company has been created successfully in Primey HR Cloud.\n\n"
+                "Your company has been created successfully in Mham Cloud.\n\n"
                 "Subscription details:\n"
                 "- Plan: {{plan_name}}\n"
                 "- Start Date: {{start_date}}\n"
@@ -893,7 +1926,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "مرحبًا {{{company_name}}،\n"
-                "تم تحديث باقتكم بنجاح في Primey HR Cloud.\n\n"
+                "تم تحديث باقتكم بنجاح في Mham Cloud.\n\n"
                 "تفاصيل التغيير:\n"
                 "- الباقة السابقة: {{old_plan_name}}\n"
                 "- الباقة الجديدة: {{new_plan_name}}\n"
@@ -921,7 +1954,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "Hello {{company_name}},\n"
-                "Your subscription plan has been updated successfully in Primey HR Cloud.\n\n"
+                "Your subscription plan has been updated successfully in Mham Cloud.\n\n"
                 "Change details:\n"
                 "- Previous Plan: {{old_plan_name}}\n"
                 "- New Plan: {{new_plan_name}}\n"
@@ -949,7 +1982,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "مرحبًا {{companyy_name}}،\n"
-                "نود إشعاركم بأنه تم إيقاف اشتراككم الحالي في Primey HR Cloud.\n\n"
+                "نود إشعاركم بأنه تم إيقاف اشتراككم الحالي في Mham Cloud.\n\n"
                 "تفاصيل الحالة:\n"
                 "- الباقة: {{plan_name}}\n"
                 "- تاريخ الإيقاف: {{stopped_at}}\n"
@@ -977,7 +2010,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "Hello {{company_name}},\n"
-                "We would like to inform you that your current subscription in Primey HR Cloud has been stopped.\n\n"
+                "We would like to inform you that your current subscription in Mham Cloud has been stopped.\n\n"
                 "Status details:\n"
                 "- Plan: {{plan_name}}\n"
                 "- Stopped At: {{stopped_at}}\n"
@@ -1005,7 +2038,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "مرحبًا {{full_name}}،\n"
-                "nتم إنشاء حسابك بنجاح في Primey HR Cloud.\n\n"
+                "nتم إنشاء حسابك بنجاح في Mham Cloud.\n\n"
                 "بيانات الدخول:\n"
                 "- اسم المستخدم: {{username}}\n"
                 "- البريد الإلكتروني: {{email}}\n"
@@ -1034,7 +2067,7 @@ def _system_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "Hello {{full_name}},\n"
-                "Your account has been created successfully in Primey HR Cloud.\n\n"
+                "Your account has been created successfully in Mham Cloud.\n\n"
                 "Login details:\n"
                 "- Username: {{username}}\n"
                 "- Email: {{email}}\n"
@@ -1129,7 +2162,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
             "template_key": "company_created",
             "header_text": "",
             "body_text": (
-                "مرحبًا {{company_name}}، تم إنشاء شركتكم بنجاح في Primey HR Cloud.\n"
+                "مرحبًا {{company_name}}، تم إنشاء شركتكم بنجاح في Mham Cloud.\n"
                 "تفاصيل الاشتراك:\n"
                 "- الباقة: {{plan_name}}\n"
                 "- تاريخ البداية: {{start_date}}\n"
@@ -1138,7 +2171,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "{{login_url}}\n"
                 "يسعدنا خدمتكم ونتطلع لتجربة موفقة."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "company_created",
@@ -1147,7 +2180,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
             "template_key": "company_created",
             "header_text": "",
             "body_text": (
-                "Hello {{company_name}}, your company has been created successfully in Primey HR Cloud.\n"
+                "Hello {{company_name}}, your company has been created successfully in Mham Cloud.\n"
                 "Subscription details:\n"
                 "- Plan: {{plan_name}}\n"
                 "- Start Date: {{start_date}}\n"
@@ -1156,7 +2189,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "{{login_url}}\n"
                 "We are pleased to serve you and wish you a great experience."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "payment_details_sent",
@@ -1171,7 +2204,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "الرابط: {{payment_url}}\n"
                 "يرجى إتمام السداد لإكمال التفعيل."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "payment_details_sent",
@@ -1186,7 +2219,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Payment Link: {{payment_url}}\n"
                 "Please complete the payment to finish activation."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "subscription_plan_upgrade_created",
@@ -1203,7 +2236,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "المبلغ المستحق: {{amount}}\n"
                 "الحالة: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "subscription_plan_upgrade_created",
@@ -1220,7 +2253,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Amount Due: {{amount}}\n"
                 "Status: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "subscription_plan_downgrade_requested",
@@ -1235,7 +2268,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "الباقة المطلوبة: {{new_plan_name}}\n"
                 "سيتم تنفيذ الطلب بعد استكمال طبقة الجدولة الرسمية."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "subscription_plan_downgrade_requested",
@@ -1250,7 +2283,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Requested Plan: {{new_plan_name}}\n"
                 "This request will be applied after the official scheduling layer is completed."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "subscription_renewal_invoice_created",
@@ -1267,7 +2300,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "المبلغ: {{amount}}\n"
                 "الحالة: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "subscription_renewal_invoice_created",
@@ -1284,7 +2317,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Amount: {{amount}}\n"
                 "Status: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "payment_confirmed_company_activated",
@@ -1303,7 +2336,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "الإجمالي: {{amount}}\n"
                 "الحالة: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "payment_confirmed_company_activated",
@@ -1322,7 +2355,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Total: {{amount}}\n"
                 "Status: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "cash_payment_confirmed",
@@ -1341,7 +2374,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "الإجمالي: {{amount}}\n"
                 "الحالة: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "cash_payment_confirmed",
@@ -1360,7 +2393,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Total: {{amount}}\n"
                 "Status: {{status}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "welcome_message",
@@ -1370,11 +2403,11 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "مرحبًا {{recipient_name}}، أهلاً بك في {{company_name}}.\n"
-                "تم تجهيز حسابك على Primey HR Cloud.\n"
+                "تم تجهيز حسابك على Mham Cloud.\n"
                 "اسم المستخدم: {{username}}\n"
                 "رابط الدخول: {{login_url}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "welcome_message",
@@ -1384,11 +2417,11 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
             "header_text": "",
             "body_text": (
                 "Hello {{recipient_name}}, welcome to {{company_name}}.\n"
-                "Your account on Primey HR Cloud is ready.\n"
+                "Your account on Mham Cloud is ready.\n"
                 "Username: {{username}}\n"
                 "Login URL: {{login_url}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "password_changed",
@@ -1400,7 +2433,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "مرحبًا {{recipient_name}}، تم تغيير كلمة المرور الخاصة بحسابك بنجاح.\n"
                 "إذا لم تقم بهذا الإجراء، يرجى التواصل مع إدارة النظام فورًا."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "password_changed",
@@ -1412,7 +2445,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Hello {{recipient_name}}, your account password has been changed successfully.\n"
                 "If you did not perform this action, please contact the system administrator immediately."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "employee_added",
@@ -1425,7 +2458,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "الرقم الوظيفي: {{employee_code}}\n"
                 "المسمى الوظيفي: {{job_title}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "employee_added",
@@ -1438,7 +2471,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Employee Code: {{employee_code}}\n"
                 "Job Title: {{job_title}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "contract_created",
@@ -1452,7 +2485,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "تاريخ البداية: {{start_date}}\n"
                 "تاريخ النهاية: {{end_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "contract_created",
@@ -1466,7 +2499,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Start Date: {{start_date}}\n"
                 "End Date: {{end_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "payroll_ready",
@@ -1479,7 +2512,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "الدورة: {{payroll_period}}\n"
                 "تاريخ الصرف: {{pay_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "payroll_ready",
@@ -1492,7 +2525,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Period: {{payroll_period}}\n"
                 "Pay Date: {{pay_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "leave_request_submitted",
@@ -1506,7 +2539,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "نوع الإجازة: {{leave_type}}\n"
                 "من {{start_date}} إلى {{end_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "leave_request_submitted",
@@ -1520,7 +2553,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Leave Type: {{leave_type}}\n"
                 "From {{start_date}} to {{end_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "leave_request_approved",
@@ -1533,7 +2566,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "نوع الإجازة: {{leave_type}}\n"
                 "من {{start_date}} إلى {{end_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "leave_request_approved",
@@ -1546,7 +2579,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Leave Type: {{leave_type}}\n"
                 "From {{start_date}} to {{end_date}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "leave_request_rejected",
@@ -1559,7 +2592,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "نوع الإجازة: {{leave_type}}\n"
                 "سبب الرفض: {{reason}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "leave_request_rejected",
@@ -1572,7 +2605,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Leave Type: {{leave_type}}\n"
                 "Reason: {{reason}}"
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "attendance_absent_alert",
@@ -1584,7 +2617,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "تنبيه حضور:\n"
                 "تم تسجيل الموظف {{employee_name}} كغائب بتاريخ {{attendance_date}}."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "attendance_absent_alert",
@@ -1596,7 +2629,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Attendance Alert:\n"
                 "Employee {{employee_name}} has been marked absent on {{attendance_date}}."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "attendance_late_alert",
@@ -1608,7 +2641,7 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "تنبيه حضور:\n"
                 "تم تسجيل تأخر الموظف {{employee_name}} بتاريخ {{attendance_date}} لمدة {{late_minutes}} دقيقة."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
         },
         {
             "event_code": "attendance_late_alert",
@@ -1620,7 +2653,167 @@ def _company_template_seed_rows() -> list[dict[str, Any]]:
                 "Attendance Alert:\n"
                 "Employee {{employee_name}} was marked late on {{attendance_date}} by {{late_minutes}} minutes."
             ),
-            "footer_text": "Primey HR Cloud",
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "attendance_present",
+            "language_code": "ar",
+            "template_name": "تسجيل حضور",
+            "template_key": "attendance_present",
+            "header_text": "",
+            "body_text": (
+                "تنبيه حضور:\n"
+                "تم تسجيل حضور الموظف {{employee_name}} بتاريخ {{attendance_date}}.\n"
+                "وقت الدخول: {{check_in}}\n"
+                "وقت الخروج: {{check_out}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "attendance_present",
+            "language_code": "en",
+            "template_name": "Attendance Present",
+            "template_key": "attendance_present",
+            "header_text": "",
+            "body_text": (
+                "Attendance Update:\n"
+                "Employee {{employee_name}} was marked present on {{attendance_date}}.\n"
+                "Check In: {{check_in}}\n"
+                "Check Out: {{check_out}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "attendance_check_in",
+            "language_code": "ar",
+            "template_name": "تسجيل دخول",
+            "template_key": "attendance_check_in",
+            "header_text": "",
+            "body_text": (
+                "تنبيه حركة حضور:\n"
+                "قام الموظف {{employee_name}} بتسجيل الدخول بتاريخ {{attendance_date}}.\n"
+                "وقت الدخول: {{check_in}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "attendance_check_in",
+            "language_code": "en",
+            "template_name": "Attendance Check In",
+            "template_key": "attendance_check_in",
+            "header_text": "",
+            "body_text": (
+                "Attendance Movement:\n"
+                "Employee {{employee_name}} checked in on {{attendance_date}}.\n"
+                "Check In: {{check_in}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "attendance_check_out",
+            "language_code": "ar",
+            "template_name": "تسجيل خروج",
+            "template_key": "attendance_check_out",
+            "header_text": "",
+            "body_text": (
+                "تنبيه حركة حضور:\n"
+                "قام الموظف {{employee_name}} بتسجيل الخروج بتاريخ {{attendance_date}}.\n"
+                "وقت الخروج: {{check_out}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "attendance_check_out",
+            "language_code": "en",
+            "template_name": "Attendance Check Out",
+            "template_key": "attendance_check_out",
+            "header_text": "",
+            "body_text": (
+                "Attendance Movement:\n"
+                "Employee {{employee_name}} checked out on {{attendance_date}}.\n"
+                "Check Out: {{check_out}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "payroll_paid",
+            "language_code": "ar",
+            "template_name": "صرف راتب",
+            "template_key": "payroll_paid",
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{recipient_name}}، تم صرف راتبك بنجاح.\n"
+                "الدورة: {{payroll_period}}\n"
+                "صافي الراتب: {{net_salary}}\n"
+                "المبلغ المصروف: {{paid_amount}}\n"
+                "طريقة الدفع: {{payment_method}}\n"
+                "الحالة: {{payment_status}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "payroll_paid",
+            "language_code": "en",
+            "template_name": "Payroll Paid",
+            "template_key": "payroll_paid",
+            "header_text": "",
+            "body_text": (
+                "Hello {{recipient_name}}, your salary has been paid successfully.\n"
+                "Period: {{payroll_period}}\n"
+                "Net Salary: {{net_salary}}\n"
+                "Paid Amount: {{paid_amount}}\n"
+                "Payment Method: {{payment_method}}\n"
+                "Status: {{payment_status}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "employee_activated",
+            "language_code": "ar",
+            "template_name": "تفعيل موظف",
+            "template_key": "employee_activated",
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{recipient_name}}، تم تفعيل حالة الموظف {{employee_name}} بنجاح.\n"
+                "الحالة الحالية: {{status}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "employee_activated",
+            "language_code": "en",
+            "template_name": "Employee Activated",
+            "template_key": "employee_activated",
+            "header_text": "",
+            "body_text": (
+                "Hello {{recipient_name}}, employee {{employee_name}} has been activated successfully.\n"
+                "Current Status: {{status}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "employee_deactivated",
+            "language_code": "ar",
+            "template_name": "تعطيل موظف",
+            "template_key": "employee_deactivated",
+            "header_text": "",
+            "body_text": (
+                "مرحبًا {{recipient_name}}، تم تعطيل حالة الموظف {{employee_name}}.\n"
+                "الحالة الحالية: {{status}}"
+            ),
+            "footer_text": "Mham Cloud",
+        },
+        {
+            "event_code": "employee_deactivated",
+            "language_code": "en",
+            "template_name": "Employee Deactivated",
+            "template_key": "employee_deactivated",
+            "header_text": "",
+            "body_text": (
+                "Hello {{recipient_name}}, employee {{employee_name}} has been deactivated.\n"
+                "Current Status: {{status}}"
+            ),
+            "footer_text": "Mham Cloud",
         },
     ]
 
@@ -1713,10 +2906,11 @@ def ensure_system_default_whatsapp_templates(user=None) -> dict[str, Any]:
 @transaction.atomic
 def ensure_company_default_whatsapp_templates(company, user=None) -> dict[str, Any]:
     """
-    إنشاء القوالب الافتراضية الخاصة بالشركة عند عدم وجودها.
+    إنشاء القوالب الافتراضية الخاصة بالشركة.
     - آمن ضد التكرار
     - لا يخلط مع قوالب النظام
     - ينشئ النسخ العربية والإنجليزية
+    - ✅ يضيف القوالب الناقصة فقط للشركات القديمة دون المساس بالقوالب الموجودة
     """
     if not company:
         return {
@@ -1725,19 +2919,8 @@ def ensure_company_default_whatsapp_templates(company, user=None) -> dict[str, A
             "total_company_templates": 0,
         }
 
-    existing_company_count = WhatsAppTemplate.objects.filter(
-        scope_type=ScopeType.COMPANY,
-        company=company,
-    ).count()
-
-    if existing_company_count > 0:
-        return {
-            "created": 0,
-            "existing": existing_company_count,
-            "total_company_templates": existing_company_count,
-        }
-
     created_count = 0
+    existing_count = 0
 
     for seed in _company_template_seed_rows():
         _, created = _create_or_get_seed_template(
@@ -1748,6 +2931,8 @@ def ensure_company_default_whatsapp_templates(company, user=None) -> dict[str, A
         )
         if created:
             created_count += 1
+        else:
+            existing_count += 1
 
     total_company_templates = WhatsAppTemplate.objects.filter(
         scope_type=ScopeType.COMPANY,
@@ -1756,14 +2941,10 @@ def ensure_company_default_whatsapp_templates(company, user=None) -> dict[str, A
 
     return {
         "created": created_count,
-        "existing": total_company_templates - created_count,
+        "existing": existing_count,
         "total_company_templates": total_company_templates,
     }
 
-
-# ============================================================
-# 🔌 Session Management Services
-# ============================================================
 
 @transaction.atomic
 def get_whatsapp_session_status(
@@ -1773,6 +2954,8 @@ def get_whatsapp_session_status(
 ) -> dict[str, Any]:
     """
     جلب حالة الجلسة الحالية من الـ gateway ثم مزامنتها داخل config.
+    وإذا كانت الجلسة متصلة يتم إعادة إرسال الرسائل الفاشلة تلقائيًا
+    التي فشلت بسبب انقطاع الجلسة.
     """
     config = _get_scope_config(scope_type=scope_type, company=company)
 
@@ -1792,6 +2975,14 @@ def get_whatsapp_session_status(
     payload = _session_result_to_payload(result)
     payload["session_name"] = getattr(config, "session_name", "") or "primey-system-session"
     payload["provider"] = getattr(config, "provider", "") or ""
+
+    retry_result = _auto_retry_failed_messages_after_reconnect(
+        scope_type=scope_type,
+        company=company,
+        connected=bool(result.connected),
+    )
+    payload["retry_result"] = retry_result
+
     return payload
 
 
@@ -1803,6 +2994,7 @@ def create_whatsapp_qr_session(
 ) -> dict[str, Any]:
     """
     إنشاء QR جديد للجلسة.
+    وإذا رجعت الجلسة متصلة يتم إعادة إرسال الرسائل الفاشلة تلقائيًا.
     """
     config = _get_scope_config(scope_type=scope_type, company=company)
 
@@ -1822,6 +3014,14 @@ def create_whatsapp_qr_session(
     payload = _session_result_to_payload(result)
     payload["session_name"] = getattr(config, "session_name", "") or "primey-system-session"
     payload["provider"] = getattr(config, "provider", "") or ""
+
+    retry_result = _auto_retry_failed_messages_after_reconnect(
+        scope_type=scope_type,
+        company=company,
+        connected=bool(result.connected),
+    )
+    payload["retry_result"] = retry_result
+
     return payload
 
 
@@ -1834,6 +3034,7 @@ def create_whatsapp_pairing_code_session(
 ) -> dict[str, Any]:
     """
     إنشاء Pairing Code برقم الجوال.
+    وإذا رجعت الجلسة متصلة يتم إعادة إرسال الرسائل الفاشلة تلقائيًا.
     """
     config = _get_scope_config(scope_type=scope_type, company=company)
 
@@ -1863,6 +3064,14 @@ def create_whatsapp_pairing_code_session(
     payload = _session_result_to_payload(result)
     payload["session_name"] = getattr(config, "session_name", "") or "primey-system-session"
     payload["provider"] = getattr(config, "provider", "") or ""
+
+    retry_result = _auto_retry_failed_messages_after_reconnect(
+        scope_type=scope_type,
+        company=company,
+        connected=bool(result.connected),
+    )
+    payload["retry_result"] = retry_result
+
     return payload
 
 
@@ -2113,5 +3322,248 @@ def send_event_whatsapp_message(
                 "updated_at",
             ]
         )
+
+    return log
+
+
+# ============================================================
+# 🔗 Notification Center Bridge — WhatsApp Channel
+# ============================================================
+
+def _infer_scope_type_from_company(company=None) -> str:
+    return ScopeType.COMPANY if company is not None else ScopeType.SYSTEM
+
+
+def _map_event_group_to_trigger_source(event_group: str | None) -> str:
+    normalized = safe_text(event_group).lower()
+
+    if normalized == "billing":
+        return TriggerSource.BILLING
+    if normalized in {"attendance", "biotime"}:
+        return TriggerSource.ATTENDANCE
+    if normalized == "leave":
+        return TriggerSource.LEAVE
+    if normalized == "payroll":
+        return TriggerSource.PAYROLL
+    if normalized in {"employee", "hr"}:
+        return TriggerSource.EMPLOYEE
+    if normalized == "company":
+        return TriggerSource.COMPANY
+    if normalized == "broadcast":
+        return TriggerSource.BROADCAST
+
+    return TriggerSource.SYSTEM
+
+
+def _build_notification_center_context(
+    *,
+    event=None,
+    delivery=None,
+    recipient_name: str = "",
+    base_context: dict | None = None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+
+    if isinstance(base_context, dict):
+        context.update(base_context)
+
+    if event:
+        event_context = getattr(event, "context", {}) or {}
+        if isinstance(event_context, dict):
+            context.update(event_context)
+
+        if not context.get("message"):
+            context["message"] = safe_text(getattr(event, "message", ""))
+
+        if not context.get("recipient_name"):
+            context["recipient_name"] = recipient_name or safe_text(
+                getattr(getattr(event, "target_user", None), "get_full_name", lambda: "")()
+            ) or safe_text(getattr(getattr(event, "target_user", None), "username", ""))
+
+        company = getattr(event, "company", None)
+        if company and not context.get("company_name"):
+            context["company_name"] = safe_text(getattr(company, "name", ""))
+
+        if not context.get("event_code"):
+            context["event_code"] = safe_text(getattr(event, "event_code", ""))
+
+        if not context.get("title"):
+            context["title"] = safe_text(getattr(event, "title", ""))
+
+        if not context.get("link"):
+            context["link"] = safe_text(getattr(event, "link", ""))
+
+    if delivery:
+        if not context.get("delivery_id"):
+            context["delivery_id"] = getattr(delivery, "id", None)
+
+        if not context.get("subject"):
+            context["subject"] = safe_text(getattr(delivery, "subject", ""))
+
+        if not context.get("message"):
+            context["message"] = safe_text(getattr(delivery, "rendered_message", ""))
+
+    if recipient_name and not context.get("recipient_name"):
+        context["recipient_name"] = recipient_name
+
+    context = _inject_employee_status_context_if_missing(
+        event=event,
+        context=context,
+    )
+
+    if not context.get("employee_name") or context.get("employee_name") == "{{employee_name}}":
+        context["employee_name"] = (
+            safe_text(context.get("employee_name_ar"))
+            or safe_text(context.get("employee_arabic_name"))
+            or safe_text(context.get("recipient_name"))
+            or safe_text(context.get("employee_name"))
+        )
+
+    if not context.get("employee_name_ar"):
+        context["employee_name_ar"] = safe_text(context.get("employee_name"))
+
+    if not context.get("employee_arabic_name"):
+        context["employee_arabic_name"] = safe_text(context.get("employee_name"))
+
+    return context
+
+
+@transaction.atomic
+def send_notification_center_whatsapp_delivery(
+    *,
+    delivery,
+    recipient_phone: str,
+    recipient_name: str = "",
+    recipient_role: str = "user",
+    company=None,
+    language_code: str = "ar",
+    context: dict | None = None,
+    attachment_url: str = "",
+    attachment_name: str = "",
+    mime_type: str = "",
+):
+    """
+    جسر رسمي بين Notification Center و WhatsApp Center.
+
+    المتوقع:
+    - delivery = NotificationDelivery من notification_center
+    - event = delivery.event
+    - تحديث delivery بناءً على نتيجة الإرسال
+    - إنشاء WhatsAppMessageLog كـ audit فعلي داخل whatsapp_center
+    """
+    if not delivery:
+        return None
+
+    event = getattr(delivery, "event", None)
+    resolved_company = company or getattr(delivery, "company", None) or getattr(event, "company", None)
+    resolved_language = safe_text(language_code) or safe_text(getattr(delivery, "language_code", "")) or "ar"
+    resolved_event_code = safe_text(getattr(event, "event_code", "")) or "system_notification"
+    resolved_event_group = safe_text(getattr(event, "event_group", "")) or "system"
+    resolved_scope_type = _infer_scope_type_from_company(resolved_company)
+    resolved_trigger_source = _map_event_group_to_trigger_source(resolved_event_group)
+
+    final_context = _build_notification_center_context(
+        event=event,
+        delivery=delivery,
+        recipient_name=recipient_name,
+        base_context=context,
+    )
+
+    normalized_phone = normalize_phone_number(recipient_phone)
+    if not normalized_phone:
+        try:
+            delivery.mark_attempt()
+            delivery.mark_failed(
+                error_message="Invalid or missing WhatsApp recipient phone",
+                provider_response={
+                    "channel": "whatsapp",
+                    "reason": "INVALID_PHONE",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to update NotificationDelivery as failed بسبب رقم واتساب غير صالح | delivery_id=%s",
+                getattr(delivery, "id", None),
+            )
+        return None
+
+    try:
+        delivery.mark_attempt()
+    except Exception:
+        logger.exception(
+            "Failed to mark attempt on NotificationDelivery | delivery_id=%s",
+            getattr(delivery, "id", None),
+        )
+
+    log = send_event_whatsapp_message(
+        scope_type=resolved_scope_type,
+        event_code=resolved_event_code,
+        recipient_phone=normalized_phone,
+        recipient_name=recipient_name or safe_text(final_context.get("recipient_name")),
+        recipient_role=recipient_role,
+        trigger_source=resolved_trigger_source,
+        company=resolved_company,
+        language_code=resolved_language,
+        context=final_context,
+        related_model=safe_text(getattr(event, "target_model", "")) or "notification_event",
+        related_object_id=safe_text(getattr(event, "target_object_id", "")) or safe_text(getattr(event, "id", "")),
+        attachment_url=attachment_url,
+        attachment_name=attachment_name,
+        mime_type=mime_type,
+    )
+
+    if not log:
+        try:
+            delivery.mark_failed(
+                error_message="WhatsApp log was not created",
+                provider_response={
+                    "channel": "whatsapp",
+                    "reason": "LOG_NOT_CREATED",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to update NotificationDelivery after WhatsApp log missing | delivery_id=%s",
+                getattr(delivery, "id", None),
+            )
+        return None
+
+    provider_response = {
+        "channel": "whatsapp",
+        "scope_type": resolved_scope_type,
+        "event_code": resolved_event_code,
+        "trigger_source": resolved_trigger_source,
+        "log_id": getattr(log, "id", None),
+        "provider_status": safe_text(getattr(log, "provider_status", "")),
+        "delivery_status": safe_text(getattr(log, "delivery_status", "")),
+        "external_message_id": safe_text(getattr(log, "external_message_id", "")),
+        "response_json": getattr(log, "response_json", {}) or {},
+        "failure_reason": safe_text(getattr(log, "failure_reason", "")),
+    }
+
+    if getattr(log, "delivery_status", "") == DeliveryStatus.SENT:
+        try:
+            delivery.mark_sent(
+                provider_message_id=safe_text(getattr(log, "external_message_id", "")) or str(getattr(log, "id", "")),
+                provider_response=provider_response,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to mark NotificationDelivery as sent | delivery_id=%s | log_id=%s",
+                getattr(delivery, "id", None),
+                getattr(log, "id", None),
+            )
+    else:
+        try:
+            delivery.mark_failed(
+                error_message=safe_text(getattr(log, "failure_reason", "")) or "WHATSAPP_SEND_FAILED",
+                provider_response=provider_response,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to mark NotificationDelivery as failed | delivery_id=%s | log_id=%s",
+                getattr(delivery, "id", None),
+                getattr(log, "id", None),
+            )
 
     return log

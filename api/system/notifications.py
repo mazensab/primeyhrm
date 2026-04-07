@@ -1,6 +1,6 @@
 # ============================================================
 # 🔔 Notifications API — System Level (V1.1)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✔ Session-based Auth
 # ✔ SAFE MODE friendly

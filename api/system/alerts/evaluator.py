@@ -1,7 +1,7 @@
 """
 ====================================================================
 🚨 Alerts Engine — Threshold Evaluator (STATELESS)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Evaluates metrics against thresholds
 ✔ No persistence

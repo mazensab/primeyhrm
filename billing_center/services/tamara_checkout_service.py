@@ -1,6 +1,6 @@
 # ============================================================
 # Tamara Checkout Service
-# Primey HR Cloud
+# Mham Cloud
 # Path: billing_center/services/tamara_checkout_service.py
 # ------------------------------------------------------------
 # Service Layer only
@@ -389,7 +389,7 @@ def _build_fallback_item(invoice_or_data: Any, *, currency: str) -> Dict[str, An
         _safe_get(invoice_or_data, "description"),
         _safe_get(invoice_or_data, "plan_name"),
         _safe_get(invoice_or_data, "invoice_title"),
-        default="Primey HR Cloud Subscription",
+        default="Mham Cloud Subscription",
     )
     reference = _build_order_reference_id(invoice_or_data)
 
@@ -412,7 +412,7 @@ def _build_fallback_item(invoice_or_data: Any, *, currency: str) -> Dict[str, An
     item: Dict[str, Any] = {
         "reference_id": reference,
         "type": "Digital",
-        "name": _clean_str(title, "Primey HR Cloud Subscription"),
+        "name": _clean_str(title, "Mham Cloud Subscription"),
         "sku": _build_invoice_number(invoice_or_data),
         "quantity": 1,
         "unit_price": _money(unit_price, currency),
@@ -614,7 +614,7 @@ class TamaraCheckoutService:
                 "notification": urls["notification_url"],
             },
             "platform": _clean_str(
-                _coalesce(_safe_get(invoice_or_data, "platform"), "Primey HR Cloud")
+                _coalesce(_safe_get(invoice_or_data, "platform"), "Mham Cloud")
             ),
         }
 

@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/whatsapp/logs.py
 # 🛡 System WhatsApp Logs API
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations

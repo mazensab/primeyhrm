@@ -1,7 +1,7 @@
 """
 ====================================================================
 🚨 Alerts & Thresholds — Constants (SINGLE SOURCE OF TRUTH)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Alert Types
 ✔ Severity Levels

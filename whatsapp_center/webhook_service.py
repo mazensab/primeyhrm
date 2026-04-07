@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/webhook_service.py
-# Primey HR Cloud - WhatsApp Webhook Service
+# Mham Cloud - WhatsApp Webhook Service
 # ============================================================
 # ✅ يدعم:
 # - Raw webhook audit storage

@@ -1,6 +1,6 @@
 # ============================================================
 # 💳 Pricing Engine — V1.0 Ultra Stable
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✔ Pure Business Logic (NO DB writes)
 # ✔ Applies Coupon Discount (Discount model)

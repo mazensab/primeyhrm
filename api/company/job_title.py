@@ -1,6 +1,6 @@
 # ======================================================
 # 🧩 Job Title API — Company Scope
-# Primey HR Cloud
+# Mham Cloud
 # Version: JT1.7 FINAL (SAFE BIO TIME)
 # ======================================================
 

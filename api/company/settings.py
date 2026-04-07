@@ -1,8 +1,8 @@
 # ============================================================
 # 📂 api/company/settings.py
 # 🏢 Company Settings API
-# Primey HR Cloud
-# Version: V2.1 Google Drive Logo via CompanyProfile.settings
+# Mham Cloud
+# Version: V2.2 Notification Center Cleanup ✅
 # ============================================================
 
 from __future__ import annotations
@@ -15,10 +15,8 @@ import uuid
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.http import JsonResponse
-from django.utils.html import escape
 from django.views.decorators.http import require_GET, require_POST
 
 from google.oauth2.service_account import Credentials
@@ -26,6 +24,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 from company_manager.models import CompanyUser, CompanyProfile
+from notification_center.services_company import notify_company_settings_updated
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +47,6 @@ ALLOWED_IMAGE_TYPES = [
 ]
 
 MAX_LOGO_FILE_SIZE = 5 * 1024 * 1024  # 5MB
-
-PRIMEY_EMAIL_LOGO_URL = getattr(
-    settings,
-    "PRIMEY_EMAIL_LOGO_URL",
-    "https://drive.google.com/uc?export=view&id=1a0Y1SK3n-Hn9QDZa7Ge24r3--B8zXbTd",
-)
-
-DEFAULT_FROM_EMAIL = getattr(
-    settings,
-    "DEFAULT_FROM_EMAIL",
-    getattr(settings, "EMAIL_HOST_USER", "no-reply@primeyhr.com"),
-)
 
 
 # ============================================================
@@ -90,10 +77,6 @@ def _normalize_text(value):
     if value is None:
         return ""
     return str(value).strip()
-
-
-def _safe_value(value):
-    return value if value not in (None, "") else "-"
 
 
 def _get_client_ip(request):
@@ -361,253 +344,6 @@ def _save_company_logo_url(*, company, logo_url: str, file_id: str | None = None
     profile.save(update_fields=["settings", "updated_at"])
 
 
-def _build_company_updated_email_html(
-    *,
-    owner_name: str,
-    company_name: str,
-    company_email: str,
-    company_phone: str,
-    commercial_number: str,
-    vat_number: str,
-    building_number: str,
-    street: str,
-    district: str,
-    city: str,
-    postal_code: str,
-    short_address: str,
-    changed_fields: list[dict],
-    logo_url: str | None,
-) -> str:
-    logo_header_url = escape(PRIMEY_EMAIL_LOGO_URL)
-    owner_name = escape(owner_name or "User")
-    company_name = escape(_safe_value(company_name))
-    company_email = escape(_safe_value(company_email))
-    company_phone = escape(_safe_value(company_phone))
-    commercial_number = escape(_safe_value(commercial_number))
-    vat_number = escape(_safe_value(vat_number))
-    building_number = escape(_safe_value(building_number))
-    street = escape(_safe_value(street))
-    district = escape(_safe_value(district))
-    city = escape(_safe_value(city))
-    postal_code = escape(_safe_value(postal_code))
-    short_address = escape(_safe_value(short_address))
-    safe_logo_url = escape(logo_url or "")
-
-    changes_rows = ""
-    for item in changed_fields:
-        field_name = escape(item.get("field", ""))
-        old_value = escape(_safe_value(item.get("old", "")))
-        new_value = escape(_safe_value(item.get("new", "")))
-        changes_rows += f"""
-        <tr>
-          <td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">{field_name}</td>
-          <td style="padding:10px 12px;border:1px solid #e5e7eb;">{old_value}</td>
-          <td style="padding:10px 12px;border:1px solid #e5e7eb;">{new_value}</td>
-        </tr>
-        """
-
-    logo_block = ""
-    if safe_logo_url:
-        logo_block = f"""
-        <div style="margin-top:20px;text-align:center;">
-          <div style="font-size:14px;color:#374151;margin-bottom:10px;">الشعار الحالي</div>
-          <img src="{safe_logo_url}" alt="Company Logo"
-               style="max-height:90px;max-width:220px;width:auto;border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#ffffff;" />
-        </div>
-        """
-
-    return f"""
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <title>تم تحديث بيانات الشركة</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Tahoma,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f7fb;margin:0;padding:24px 0;">
-    <tr>
-      <td align="center">
-        <table width="680" cellpadding="0" cellspacing="0"
-               style="max-width:680px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
-
-          <tr>
-            <td align="center" style="background:#000000;padding:28px 24px;">
-              <img src="{logo_header_url}" alt="Primey"
-                   style="max-height:56px;width:auto;display:block;margin:0 auto 12px auto;" />
-              <div style="color:#ffffff;font-size:22px;font-weight:700;line-height:1.6;">
-                Primey HR Cloud
-              </div>
-              <div style="color:#d1d5db;font-size:14px;line-height:1.8;">
-                تم تحديث بيانات الشركة بنجاح
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:32px 28px 20px 28px;">
-              <div style="font-size:16px;color:#111827;line-height:2;">
-                أهلاً <strong>{owner_name}</strong>،
-              </div>
-
-              <div style="margin-top:10px;font-size:15px;color:#374151;line-height:2;">
-                تم إجراء تعديل على بيانات الشركة داخل النظام، وهذه الرسالة للتأكيد فقط.
-              </div>
-
-              <div style="margin-top:22px;font-size:15px;font-weight:700;color:#111827;">
-                بيانات الشركة الحالية
-              </div>
-
-              <table width="100%" cellpadding="0" cellspacing="0"
-                     style="margin-top:12px;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">اسم الشركة</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{company_name}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">البريد الإلكتروني</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{company_email}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">الهاتف</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{company_phone}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">السجل التجاري</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{commercial_number}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">الرقم الضريبي</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{vat_number}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">رقم المبنى</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{building_number}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">الشارع</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{street}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">الحي</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{district}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">المدينة</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{city}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">الرمز البريدي</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{postal_code}</td></tr>
-                <tr><td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f8fafc;">العنوان المختصر</td><td style="padding:10px 12px;border:1px solid #e5e7eb;">{short_address}</td></tr>
-              </table>
-
-              <div style="margin-top:24px;font-size:15px;font-weight:700;color:#111827;">
-                الحقول التي تغيرت
-              </div>
-
-              <table width="100%" cellpadding="0" cellspacing="0"
-                     style="margin-top:12px;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
-                <tr>
-                  <td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f1f5f9;">الحقل</td>
-                  <td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f1f5f9;">القيمة السابقة</td>
-                  <td style="padding:10px 12px;border:1px solid #e5e7eb;font-weight:700;background:#f1f5f9;">القيمة الجديدة</td>
-                </tr>
-                {changes_rows or '<tr><td colspan="3" style="padding:12px;border:1px solid #e5e7eb;">لا توجد تغييرات معروضة</td></tr>'}
-              </table>
-
-              {logo_block}
-
-              <div style="margin-top:22px;font-size:13px;color:#b45309;line-height:2;">
-                إذا لم تكن أنت من قام بهذا التغيير، يرجى مراجعة مسؤول النظام فورًا.
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:20px 28px 30px 28px;">
-              <div style="border-top:1px solid #e5e7eb;padding-top:18px;font-size:12px;color:#9ca3af;line-height:1.9;text-align:center;">
-                هذه رسالة آلية من Primey HR Cloud — يرجى عدم الرد عليها مباشرة.
-              </div>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""".strip()
-
-
-def _send_company_updated_email(*, company, changed_fields: list[dict]) -> None:
-    """
-    إرسال إيميل عند تحديث بيانات الشركة.
-    الإرسال إلى:
-    - مالك الشركة إن وجد
-    - إيميل الشركة نفسه إن كان مختلفًا
-    """
-    recipients = []
-
-    owner = getattr(company, "owner", None)
-    owner_email = getattr(owner, "email", None) if owner else None
-    if owner_email:
-        recipients.append(owner_email)
-
-    company_email = getattr(company, "email", None)
-    if company_email and company_email not in recipients:
-        recipients.append(company_email)
-
-    if not recipients:
-        logger.warning(
-            "Company update email skipped: no recipients found. company_id=%s",
-            getattr(company, "id", None),
-        )
-        return
-
-    owner_name = (
-        owner.get_full_name().strip()
-        if owner and hasattr(owner, "get_full_name") and owner.get_full_name()
-        else getattr(owner, "username", "User") if owner else "User"
-    )
-
-    subject = f"Primey HR Cloud | تم تحديث بيانات الشركة - {company.name}"
-
-    text_changes = []
-    for item in changed_fields:
-        text_changes.append(
-            f"- {item.get('field', '')}: {_safe_value(item.get('old', ''))} → {_safe_value(item.get('new', ''))}"
-        )
-
-    text_body = (
-        f"مرحباً {owner_name},\n\n"
-        f"تم تحديث بيانات الشركة بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_value(company.name)}\n"
-        f"البريد الإلكتروني: {_safe_value(company.email)}\n"
-        f"رقم الجوال: {_safe_value(company.phone)}\n"
-        f"السجل التجاري: {_safe_value(company.commercial_number)}\n"
-        f"الرقم الضريبي: {_safe_value(company.vat_number)}\n"
-        f"رقم المبنى: {_safe_value(company.building_number)}\n"
-        f"الشارع: {_safe_value(company.street)}\n"
-        f"الحي: {_safe_value(company.district)}\n"
-        f"المدينة: {_safe_value(company.city)}\n"
-        f"الرمز البريدي: {_safe_value(company.postal_code)}\n"
-        f"العنوان المختصر: {_safe_value(company.short_address)}\n\n"
-        f"الحقول المتغيرة:\n"
-        f"{chr(10).join(text_changes) if text_changes else '- لا توجد تغييرات معروضة'}\n\n"
-        f"مع تحيات Primey HR Cloud"
-    )
-
-    html_body = _build_company_updated_email_html(
-        owner_name=owner_name,
-        company_name=company.name,
-        company_email=company.email,
-        company_phone=company.phone,
-        commercial_number=company.commercial_number,
-        vat_number=company.vat_number,
-        building_number=company.building_number,
-        street=company.street,
-        district=company.district,
-        city=company.city,
-        postal_code=company.postal_code,
-        short_address=company.short_address,
-        changed_fields=changed_fields,
-        logo_url=_get_company_logo_url(company),
-    )
-
-    try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_body,
-            from_email=DEFAULT_FROM_EMAIL,
-            to=recipients,
-        )
-        message.attach_alternative(html_body, "text/html")
-        message.send(fail_silently=False)
-
-        logger.info(
-            "Company update email sent successfully. company_id=%s recipients=%s",
-            getattr(company, "id", None),
-            recipients,
-        )
-    except Exception:
-        logger.exception(
-            "Failed to send company update email. company_id=%s",
-            getattr(company, "id", None),
-        )
-
-
 def _company_payload(company) -> dict:
     """
     Payload آمن ومتوافق مع حقول الشركة الحالية
@@ -685,7 +421,8 @@ def company_settings_update(request):
     تحديث بيانات الشركة الأساسية بشكل آمن
     + دعم رفع شعار الشركة إلى Google Drive
     + حفظ رابطه داخل CompanyProfile.settings
-    + إرسال إيميل عند أي تعديل
+    + تسجيل Audit
+    + إطلاق إشعار رسمي عبر Notification Center
     """
     try:
         company = _get_active_company(request)
@@ -797,9 +534,15 @@ def company_settings_update(request):
                     )
 
                 transaction.on_commit(
-                    lambda: _send_company_updated_email(
+                    lambda: notify_company_settings_updated(
                         company=company,
                         changed_fields=changed_fields,
+                        actor=request.user,
+                        send_email=True,
+                        send_in_app=True,
+                        extra_context={
+                            "ip_address": ip_address,
+                        },
                     )
                 )
 

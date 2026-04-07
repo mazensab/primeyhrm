@@ -157,9 +157,9 @@ const API = {
 const WEB_SESSION_PROVIDER = "whatsapp_web_session" as const
 const DEFAULT_COUNTRY_CODE = "966"
 const DEFAULT_TEST_MESSAGE_AR =
-  "رسالة اختبار من Primey HR Cloud - Company WhatsApp Center"
+  "رسالة اختبار من Mham Cloud - Company WhatsApp Center"
 const DEFAULT_TEST_MESSAGE_EN =
-  "Test message from Primey HR Cloud - Company WhatsApp Center"
+  "Test message from Mham Cloud - Company WhatsApp Center"
 
 const translations = {
   ar: {
@@ -1040,12 +1040,20 @@ export default function CompanyWhatsAppSettingsPage() {
             disabled={refreshing}
             className="gap-2"
           >
-            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
             {t.refresh}
           </Button>
 
           <Button onClick={handleSave} disabled={saving} className="gap-2">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
             {t.save}
           </Button>
         </div>
@@ -1058,7 +1066,11 @@ export default function CompanyWhatsAppSettingsPage() {
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={isConnected ? "default" : "destructive"} className="gap-1">
-                    {isConnected ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+                    {isConnected ? (
+                      <Wifi className="h-3.5 w-3.5" />
+                    ) : (
+                      <WifiOff className="h-3.5 w-3.5" />
+                    )}
                     {isConnected ? t.connected : t.disconnected}
                   </Badge>
 
@@ -1071,7 +1083,9 @@ export default function CompanyWhatsAppSettingsPage() {
 
                 <div>
                   <CardTitle className="text-xl">{companyName || t.notConfigured}</CardTitle>
-                  <CardDescription className="mt-1">{t.currentConnectionDesc}</CardDescription>
+                  <CardDescription className="mt-1">
+                    {t.currentConnectionDesc}
+                  </CardDescription>
                 </div>
               </div>
 
@@ -1098,7 +1112,9 @@ export default function CompanyWhatsAppSettingsPage() {
         <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border bg-background p-4 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t.connectionMethodFixed}</span>
+              <span className="text-sm text-muted-foreground">
+                {t.connectionMethodFixed}
+              </span>
               <QrCode className="h-4 w-4 text-primary" />
             </div>
             <p className="mt-3 text-sm font-semibold">{t.webSessionOnly}</p>
@@ -1149,7 +1165,9 @@ export default function CompanyWhatsAppSettingsPage() {
                 <div className="flex items-center justify-between rounded-2xl border p-4">
                   <div className="space-y-1">
                     <Label className="text-sm font-semibold">{t.enableCompany}</Label>
-                    <p className="text-xs text-muted-foreground">{t.enableCompanyDesc}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t.enableCompanyDesc}
+                    </p>
                   </div>
                   <Switch
                     checked={form.is_active}
@@ -1160,22 +1178,32 @@ export default function CompanyWhatsAppSettingsPage() {
                 <div className="flex items-center justify-between rounded-2xl border p-4">
                   <div className="space-y-1">
                     <Label className="text-sm font-semibold">{t.allowTemplates}</Label>
-                    <p className="text-xs text-muted-foreground">{t.allowTemplatesDesc}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t.allowTemplatesDesc}
+                    </p>
                   </div>
                   <Switch
                     checked={form.allow_templates}
-                    onCheckedChange={(checked) => handleChange("allow_templates", checked)}
+                    onCheckedChange={(checked) =>
+                      handleChange("allow_templates", checked)
+                    }
                   />
                 </div>
 
                 <div className="flex items-center justify-between rounded-2xl border p-4 md:col-span-2">
                   <div className="space-y-1">
-                    <Label className="text-sm font-semibold">{t.enableTestMessages}</Label>
-                    <p className="text-xs text-muted-foreground">{t.enableTestMessagesDesc}</p>
+                    <Label className="text-sm font-semibold">
+                      {t.enableTestMessages}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t.enableTestMessagesDesc}
+                    </p>
                   </div>
                   <Switch
                     checked={form.send_test_enabled}
-                    onCheckedChange={(checked) => handleChange("send_test_enabled", checked)}
+                    onCheckedChange={(checked) =>
+                      handleChange("send_test_enabled", checked)
+                    }
                   />
                 </div>
               </div>
@@ -1193,7 +1221,9 @@ export default function CompanyWhatsAppSettingsPage() {
                     <Input
                       id="default_country_code"
                       value={form.default_country_code}
-                      onChange={(e) => handleChange("default_country_code", e.target.value)}
+                      onChange={(e) =>
+                        handleChange("default_country_code", e.target.value)
+                      }
                       placeholder="966"
                       className="pe-10"
                     />
@@ -1205,7 +1235,9 @@ export default function CompanyWhatsAppSettingsPage() {
                   <Input
                     id="default_test_recipient"
                     value={form.default_test_recipient}
-                    onChange={(e) => handleChange("default_test_recipient", e.target.value)}
+                    onChange={(e) =>
+                      handleChange("default_test_recipient", e.target.value)
+                    }
                     placeholder="9665XXXXXXXX"
                   />
                 </div>
@@ -1285,7 +1317,11 @@ export default function CompanyWhatsAppSettingsPage() {
                       onClick={handleCreateQr}
                       disabled={creatingQr || !isQrMode}
                     >
-                      {creatingQr ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                      {creatingQr ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <QrCode className="h-4 w-4" />
+                      )}
                       {t.createQr}
                     </Button>
 
@@ -1296,7 +1332,11 @@ export default function CompanyWhatsAppSettingsPage() {
                       onClick={handleCreatePairingCode}
                       disabled={creatingPairing || !isPairMode}
                     >
-                      {creatingPairing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
+                      {creatingPairing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Smartphone className="h-4 w-4" />
+                      )}
                       {t.createPairingCode}
                     </Button>
 
@@ -1307,8 +1347,26 @@ export default function CompanyWhatsAppSettingsPage() {
                       onClick={handleDisconnectSession}
                       disabled={disconnecting}
                     >
-                      {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                      {disconnecting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <LogOut className="h-4 w-4" />
+                      )}
                       {t.disconnectSession}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      className="gap-2"
+                      onClick={handleSave}
+                      disabled={saving}
+                    >
+                      {saving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                      {t.save}
                     </Button>
                   </div>
 
@@ -1353,7 +1411,9 @@ export default function CompanyWhatsAppSettingsPage() {
                       <div className="space-y-3">
                         <div className="rounded-2xl border bg-muted/30 p-5">
                           <div className="mb-3 flex items-center justify-between gap-3">
-                            <p className="text-xs text-muted-foreground">{t.pairingReady}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {t.pairingReady}
+                            </p>
                             <Button
                               type="button"
                               variant="outline"
@@ -1456,7 +1516,11 @@ export default function CompanyWhatsAppSettingsPage() {
                   disabled={testing || !form.send_test_enabled}
                   className="gap-2"
                 >
-                  {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {testing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                   {t.sendTest}
                 </Button>
 
@@ -1519,7 +1583,9 @@ export default function CompanyWhatsAppSettingsPage() {
                 <div className="flex items-center gap-3">
                   <Globe className="h-5 w-5 text-primary" />
                   <div>
-                    <p className="text-sm text-muted-foreground">{t.defaultCountryCode}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t.defaultCountryCode}
+                    </p>
                     <p className="font-semibold">{form.default_country_code || "—"}</p>
                   </div>
                 </div>
@@ -1540,7 +1606,9 @@ export default function CompanyWhatsAppSettingsPage() {
                   <Smartphone className="h-5 w-5 text-primary" />
                   <div>
                     <p className="text-sm text-muted-foreground">{t.connectedPhone}</p>
-                    <p className="font-semibold">{status?.connected_phone || t.notSpecified}</p>
+                    <p className="font-semibold">
+                      {status?.connected_phone || t.notSpecified}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1549,7 +1617,9 @@ export default function CompanyWhatsAppSettingsPage() {
                 <div className="flex items-center gap-3">
                   <TestTube2 className="h-5 w-5 text-primary" />
                   <div>
-                    <p className="text-sm text-muted-foreground">{t.defaultTestRecipient}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t.defaultTestRecipient}
+                    </p>
                     <p className="font-semibold">
                       {form.default_test_recipient || t.notSpecified}
                     </p>
@@ -1562,7 +1632,9 @@ export default function CompanyWhatsAppSettingsPage() {
                   <CheckCircle2 className="h-5 w-5 text-primary" />
                   <div>
                     <p className="text-sm text-muted-foreground">{t.lastConnectedAt}</p>
-                    <p className="font-semibold">{formatDateTime(status?.last_connected_at)}</p>
+                    <p className="font-semibold">
+                      {formatDateTime(status?.last_connected_at)}
+                    </p>
                   </div>
                 </div>
               </div>

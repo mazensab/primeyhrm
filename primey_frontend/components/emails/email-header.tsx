@@ -16,7 +16,7 @@ const LOGO_URL =
   "https://drive.google.com/uc?export=view&id=1a0Y1SK3n-Hn9QDZa7Ge24r3--B8zXbTd";
 
 export default function EmailHeader({
-  companyName = "Primey HR Cloud",
+  companyName = "Mham Cloud",
 }: EmailHeaderProps) {
   return (
     <Section style={header}>

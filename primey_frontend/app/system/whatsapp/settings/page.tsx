@@ -136,9 +136,9 @@ const WEB_SESSION_PROVIDER = "whatsapp_web_session" as const
 const DEFAULT_SESSION_NAME = "primey-system-session"
 const DEFAULT_COUNTRY_CODE = "966"
 const DEFAULT_TEST_MESSAGE_AR =
-  "رسالة اختبار من Primey HR Cloud - System WhatsApp Center"
+  "رسالة اختبار من Mham Cloud - System WhatsApp Center"
 const DEFAULT_TEST_MESSAGE_EN =
-  "Test message from Primey HR Cloud - System WhatsApp Center"
+  "Test message from Mham Cloud - System WhatsApp Center"
 
 const translations = {
   ar: {
@@ -576,7 +576,7 @@ export default function SystemWhatsAppSettingsPage() {
   const [form, setForm] = useState<FormState>({
     is_active: false,
     provider: WEB_SESSION_PROVIDER,
-    app_name: "Primey HR Cloud",
+    app_name: "Mham Cloud",
     default_country_code: DEFAULT_COUNTRY_CODE,
     allow_broadcasts: true,
     send_test_enabled: true,
@@ -650,7 +650,7 @@ export default function SystemWhatsAppSettingsPage() {
           ...prev,
           is_active: !!config.is_active,
           provider: WEB_SESSION_PROVIDER,
-          app_name: config.app_name || "Primey HR Cloud",
+          app_name: config.app_name || "Mham Cloud",
           default_country_code: config.default_country_code || DEFAULT_COUNTRY_CODE,
           allow_broadcasts: config.allow_broadcasts ?? true,
           send_test_enabled: config.send_test_enabled ?? true,
@@ -1139,7 +1139,7 @@ export default function SystemWhatsAppSettingsPage() {
                       id="app_name"
                       value={form.app_name}
                       onChange={(e) => handleChange("app_name", e.target.value)}
-                      placeholder="Primey HR Cloud"
+                      placeholder="Mham Cloud"
                     />
                   </div>
 

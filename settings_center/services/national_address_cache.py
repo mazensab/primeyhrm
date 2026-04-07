@@ -1,6 +1,6 @@
 # ============================================================
 # 🇸🇦 National Address Cache Service
-# Primey HR Cloud | Settings Center
+# Mham Cloud | Settings Center
 # ============================================================
 
 from settings_center.models import (

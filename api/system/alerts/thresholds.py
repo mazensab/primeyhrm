@@ -1,7 +1,7 @@
 """
 ====================================================================
 🚨 Alerts & Thresholds — Definitions (RULES ONLY)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Threshold rules per alert type
 ✔ No execution logic

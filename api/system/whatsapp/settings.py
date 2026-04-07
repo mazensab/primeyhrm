@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/whatsapp/settings.py
 # 🛡 System WhatsApp Settings APIs
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ def _serialize_config(config: SystemWhatsAppConfig) -> dict:
         "provider": get_model_attr(config, "provider", "whatsapp_web_session") or "whatsapp_web_session",
         "is_enabled": bool(get_model_attr(config, "is_enabled", False)),
         "is_active": bool(get_model_attr(config, "is_active", False)),
-        "app_name": get_model_attr(config, "business_name", "") or "Primey HR Cloud",
-        "business_name": get_model_attr(config, "business_name", "") or "Primey HR Cloud",
+        "app_name": get_model_attr(config, "business_name", "") or "Mham Cloud",
+        "business_name": get_model_attr(config, "business_name", "") or "Mham Cloud",
         "phone_number": get_model_attr(config, "phone_number", "") or "",
         "phone_number_id": get_model_attr(config, "phone_number_id", "") or "",
         "business_account_id": get_model_attr(config, "business_account_id", "") or "",

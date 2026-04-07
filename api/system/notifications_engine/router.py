@@ -1,7 +1,7 @@
 """
 ====================================================================
 🔀 Notifications Engine — Router (DECISION LAYER)
-Primey HR Cloud | System
+Mham Cloud | System
 ====================================================================
 ✔ Alert → Notification routing
 ✔ Channel selection

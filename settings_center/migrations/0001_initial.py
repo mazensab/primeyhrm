@@ -88,7 +88,7 @@ class Migration(migrations.Migration):
             name='SettingsGeneral',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('system_name', models.CharField(default='Primey HR Cloud', max_length=150)),
+                ('system_name', models.CharField(default='Mham Cloud', max_length=150)),
                 ('support_email', models.EmailField(default='support@primeyhrm.com', max_length=254)),
                 ('support_phone', models.CharField(blank=True, max_length=20, null=True)),
                 ('theme_mode', models.CharField(choices=[('dark', 'الوضع الداكن'), ('light', 'الوضع الفاتح')], default='dark', max_length=10)),

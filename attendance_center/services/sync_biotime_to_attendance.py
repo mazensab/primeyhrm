@@ -10,7 +10,19 @@
 # ✔ Auto-Recalc Unknown Records (PATCH) 🔒
 # ✔ MT-3 Isolation Patch (BiotimeEmployee FK Resolution) 🔥
 # ✔ No Breaking Changes
-# ✔ WhatsApp Hook for Late / Absent (Non-Blocking)
+# ✔ WhatsApp Hook for:
+#    - Check In
+#    - Check Out
+#    - Present
+#    - Late
+#    - Absent
+# ✔ Notification Hook for:
+#    - In-App
+#    - Realtime
+#    - Email
+# ✔ Absence Escalation:
+#    - Employee Email + WhatsApp
+#    - Manager Email + WhatsApp
 # ============================================================
 
 from datetime import datetime, time, timedelta
@@ -25,6 +37,7 @@ from employee_center.models import Employee
 from attendance_center.services.workday_engine import WorkdayEngine
 from attendance_center.services.services import WorkScheduleResolver
 from whatsapp_center.services import send_attendance_status_whatsapp_notifications
+from notification_center.services_hr import notify_attendance_event
 
 
 logger = logging.getLogger(__name__)
@@ -33,48 +46,185 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # 📲 WhatsApp Attendance Hook Helper
 # يمنع تكرار الإرسال داخل نفس دورة المزامنة
+# ✅ تم تقييده هنا ليُرسل الغياب فقط من مسار المزامنة/الاعتماد النهائي
 # ============================================================
 
 def _send_attendance_whatsapp_once(
     *,
     record,
     company,
-    notified_records: set[int],
-) -> bool:
+    notified_records: set[tuple[int, str]],
+) -> int:
     """
-    إرسال واتساب مرة واحدة فقط لكل AttendanceRecord داخل نفس sync run
-    وفقط عند late / absent.
+    إرسال واتساب مرة واحدة فقط لكل AttendanceRecord + Event داخل نفس sync run.
+
+    ✅ في هذا المسار نعتمد فقط:
+    - absent
+
+    ❌ ولا نرسل من المزامنة:
+    - check_in
+    - check_out
+    - present
+    - late
+
+    السبب:
+    هذا المسار هو مسار المزامنة اليومية / الاعتماد النهائي،
+    والمطلوب أن يخرج تنبيه الغياب فقط عندما تصبح الحالة النهائية
+    الفعلية في AttendanceRecord = absent.
     """
     try:
         if not record or not getattr(record, "id", None):
-            return False
+            return 0
 
-        if record.id in notified_records:
-            return False
+        status_value = (getattr(record, "status", "") or "").strip().lower()
+
+        # ----------------------------------------------------
+        # ✅ نرسل فقط إذا أصبحت الحالة النهائية "absent"
+        # ----------------------------------------------------
+        if status_value != "absent":
+            return 0
+
+        event_key = (record.id, "wa:absent")
+
+        if event_key in notified_records:
+            return 0
 
         result = send_attendance_status_whatsapp_notifications(
             attendance_record=record,
             company=company,
             send_to_employee=True,
             send_to_user=True,
+            send_to_manager=True,
+            action=None,
+            extra_context={
+                "sync_source": "biotime",
+                "finalized_source": "daily_sync_final",
+            },
         )
 
-        if result and result.get("success") and result.get("sent_count", 0) > 0:
-            notified_records.add(record.id)
-            return True
+        # نمنع التكرار داخل نفس الدورة حتى لو لم يتم الإرسال
+        notified_records.add(event_key)
 
-        # حتى لو لم يتم الإرسال بسبب عدم وجود رقم
-        # أو لأن الحالة ليست late / absent
-        # نمنع إعادة المحاولة داخل نفس الدورة.
-        notified_records.add(record.id)
-        return False
+        if result and result.get("success") and result.get("sent_count", 0) > 0:
+            return 1
+
+        return 0
 
     except Exception:
         logger.exception(
             "⚠ Attendance WhatsApp hook failed during sync | record_id=%s",
             getattr(record, "id", None),
         )
-        return False
+        return 0
+
+
+# ============================================================
+# 🔔 Notification Attendance Hook Helper
+# يمنع تكرار الإشعارات الداخلية/اللحظية/الإيميل داخل نفس الدورة
+# ============================================================
+
+def _send_attendance_notifications_once(
+    *,
+    record,
+    notified_records: set[tuple[int, str]],
+) -> int:
+    """
+    إرسال إشعارات الحضور مرة واحدة فقط لكل AttendanceRecord + Event داخل نفس sync run.
+
+    القنوات المغطاة عبر notification_center.services_hr:
+    - In-app
+    - Realtime
+    - Email
+    - WhatsApp
+
+    ✅ في الغياب النهائي:
+    - Email للموظف
+    - WhatsApp للموظف
+    - Email للمدير
+    - WhatsApp للمدير
+
+    ✅ في بقية الحالات:
+    - نبقي السلوك محافظًا كما كان قدر الإمكان
+    """
+    try:
+        if not record or not getattr(record, "id", None):
+            return 0
+
+        sent_count = 0
+        status_value = (getattr(record, "status", "") or "").strip().lower()
+
+        def _dispatch(*, action=None, dedupe_key: str) -> int:
+            event_key = (record.id, f"notify:{dedupe_key}")
+
+            if event_key in notified_records:
+                return 0
+
+            is_absent_event = dedupe_key == "absent"
+
+            notify_attendance_event(
+                record,
+                action=action,
+                send_email_to_employee=True,
+                send_email_to_managers=is_absent_event,
+                send_whatsapp_to_employee=is_absent_event,
+                send_whatsapp_to_managers=is_absent_event,
+                extra_context={
+                    "sync_source": "biotime",
+                    "finalized_source": "daily_sync_final",
+                    "attendance_event_key": dedupe_key,
+                },
+            )
+
+            notified_records.add(event_key)
+            return 1
+
+        # ----------------------------------------------------
+        # 1) حركة الدخول
+        # ----------------------------------------------------
+        if getattr(record, "check_in", None):
+            sent_count += _dispatch(
+                action="check_in",
+                dedupe_key="check_in",
+            )
+
+        # ----------------------------------------------------
+        # 2) حركة الخروج
+        # ----------------------------------------------------
+        if getattr(record, "check_out", None):
+            sent_count += _dispatch(
+                action="check_out",
+                dedupe_key="check_out",
+            )
+
+        # ----------------------------------------------------
+        # 3) الحالة النهائية بعد WorkdayEngine
+        # ----------------------------------------------------
+        if status_value == "present":
+            sent_count += _dispatch(
+                action="present",
+                dedupe_key="present",
+            )
+
+        elif status_value == "late":
+            sent_count += _dispatch(
+                action=None,
+                dedupe_key="late",
+            )
+
+        elif status_value == "absent":
+            sent_count += _dispatch(
+                action=None,
+                dedupe_key="absent",
+            )
+
+        return sent_count
+
+    except Exception:
+        logger.exception(
+            "⚠ Attendance Notification hook failed during sync | record_id=%s",
+            getattr(record, "id", None),
+        )
+        return 0
 
 
 # ============================================================
@@ -209,7 +359,19 @@ def sync_biotime_logs_to_attendance(
     ✔ Incremental generation preserved
     ✔ WorkdayEngine untouched
     ✔ Production ready
-    ✔ WhatsApp notifications for late / absent
+    ✔ WhatsApp notifications for:
+      - check_in
+      - check_out
+      - present
+      - late
+      - absent
+    ✔ Notification hooks for:
+      - in-app
+      - realtime
+      - email
+      - whatsapp
+    ✔ Absence escalation:
+      - employee + manager
     """
 
     if not company:
@@ -249,7 +411,8 @@ def sync_biotime_logs_to_attendance(
         skipped_leave = 0
         recalculated_unknown = 0
         whatsapp_sent_count = 0
-        notified_records: set[int] = set()
+        notification_sent_count = 0
+        notified_records: set[tuple[int, str]] = set()
 
         # =====================================================
         # Phase A — Sync Logs
@@ -408,12 +571,16 @@ def sync_biotime_logs_to_attendance(
 
                 record.refresh_from_db()
 
-                if _send_attendance_whatsapp_once(
+                whatsapp_sent_count += _send_attendance_whatsapp_once(
                     record=record,
                     company=company,
                     notified_records=notified_records,
-                ):
-                    whatsapp_sent_count += 1
+                )
+
+                notification_sent_count += _send_attendance_notifications_once(
+                    record=record,
+                    notified_records=notified_records,
+                )
 
             except Exception:
                 logger.exception(
@@ -440,12 +607,16 @@ def sync_biotime_logs_to_attendance(
 
                 record.refresh_from_db()
 
-                if _send_attendance_whatsapp_once(
+                whatsapp_sent_count += _send_attendance_whatsapp_once(
                     record=record,
                     company=company,
                     notified_records=notified_records,
-                ):
-                    whatsapp_sent_count += 1
+                )
+
+                notification_sent_count += _send_attendance_notifications_once(
+                    record=record,
+                    notified_records=notified_records,
+                )
 
             except Exception:
                 logger.exception(
@@ -460,7 +631,8 @@ def sync_biotime_logs_to_attendance(
             f"unmapped={skipped_unmapped} | "
             f"leave_skipped={skipped_leave} | "
             f"unknown_recalculated={recalculated_unknown} | "
-            f"whatsapp_sent={whatsapp_sent_count}"
+            f"whatsapp_sent={whatsapp_sent_count} | "
+            f"notifications_sent={notification_sent_count}"
         )
 
         return {
@@ -470,6 +642,7 @@ def sync_biotime_logs_to_attendance(
             "skipped_leave": skipped_leave,
             "recalculated_unknown": recalculated_unknown,
             "whatsapp_sent": whatsapp_sent_count,
+            "notifications_sent": notification_sent_count,
         }
 
     except Exception as e:

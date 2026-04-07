@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/system/settings.py
-# ⚙️ Primey HR Cloud — System + Email Settings API
+# ⚙️ Mham Cloud — System + Email Settings API
 # Version: V3.0 Ultra Stable
 # ============================================================
 
@@ -355,9 +355,9 @@ def test_email_settings_api(request):
         )
 
         message = EmailMessage(
-            subject="Primey HR Cloud — Test Email",
+            subject="Mham Cloud — Test Email",
             body=(
-                "تم إرسال رسالة الاختبار بنجاح من إعدادات البريد داخل Primey HR Cloud.\n\n"
+                "تم إرسال رسالة الاختبار بنجاح من إعدادات البريد داخل Mham Cloud.\n\n"
                 f"SMTP Host: {email_cfg['smtp_server']}\n"
                 f"Port: {email_cfg['smtp_port']}\n"
                 f"TLS: {'Enabled' if email_cfg['use_tls'] else 'Disabled'}\n"

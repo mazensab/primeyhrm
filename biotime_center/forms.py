@@ -5,7 +5,7 @@
 # ✔ متوافق تمامًا مع نموذج BiotimeSetting (دون api_key)
 # ✔ يدعم تسجيل الدخول (company + email + password)
 # ✔ تصميم جاهز للقالب (Glass White 2026)
-# Developed by Mazen — Primey HR Cloud 2026
+# Developed by Mazen — Mham Cloud 2026
 # ============================================================
 
 from django import forms

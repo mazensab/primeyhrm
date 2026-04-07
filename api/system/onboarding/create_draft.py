@@ -1,6 +1,6 @@
 # ============================================================
 # 🚀 System/Public Onboarding — Create Draft Transaction
-# Primey HR Cloud | V2.4 PUBLIC SAFE + WHATSAPP + ADMIN PHONE
+# Mham Cloud | V2.5 NOTIFICATION-CENTER CLEAN
 # ============================================================
 # ✔ Public Draft Creation Supported
 # ✔ Internal Logged-In Flow Still Supported
@@ -11,68 +11,41 @@
 # ✔ Username Uniqueness Guard
 # ✔ Company Snapshot Extended
 # ✔ SAFE & ATOMIC
-# ✔ Draft Creation Email
-# ✔ Draft Creation WhatsApp
+# ✔ Notification Center Only (No direct email / no direct WhatsApp)
 # ✔ CASH Blocked For Public Flow
 # ✔ Clear Guard For Non-Nullable owner Field
-# ✔ SYSTEM Scope for Public Onboarding WhatsApp
 # ✔ Admin Phone Supported
 # ✔ Payment Methods Cleaned (BANK_TRANSFER / CREDIT_CARD / TAMARA)
 # ============================================================
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import re
 from datetime import timedelta
 from decimal import Decimal
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import transaction
 from django.http import JsonResponse
 from django.utils import timezone
-from django.utils.html import escape
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from billing_center.models import (
-    SubscriptionPlan,
-    Discount,
-    CompanyOnboardingTransaction,
     AccountSubscription,
+    CompanyOnboardingTransaction,
+    Discount,
+    SubscriptionPlan,
 )
-from whatsapp_center.models import ScopeType, TriggerSource
-from whatsapp_center.services import send_event_whatsapp_message
 from whatsapp_center.utils import normalize_phone_number
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
-
-
-# ============================================================
-# 🖼️ Primey Email Branding
-# ============================================================
-
-PRIMEY_EMAIL_LOGO_URL = getattr(
-    settings,
-    "PRIMEY_EMAIL_LOGO_URL",
-    getattr(
-        settings,
-        "EMAIL_LOGO_URL",
-        "https://drive.google.com/uc?export=view&id=1x2Q9wJm8QmQm7mYjQmW7aJmR8bPlogoblak",
-    ),
-)
-
-DEFAULT_FROM_EMAIL = getattr(
-    settings,
-    "DEFAULT_FROM_EMAIL",
-    getattr(settings, "EMAIL_HOST_USER", "no-reply@primeyhr.com"),
-)
 
 
 # ============================================================
@@ -376,373 +349,201 @@ def _get_draft_admin_phone(draft) -> str:
     )
 
 
-def _build_draft_created_whatsapp_message(*, user, draft) -> str:
-    owner_name = _safe_text(
-        getattr(draft, "admin_name", None) or (getattr(user, "username", None) if user else None),
-        "User",
-    )
-    admin_phone = _get_draft_admin_phone(draft)
+# ============================================================
+# Notification Helpers
+# ============================================================
 
-    return (
-        f"مرحباً {owner_name}،\n\n"
-        f"تم إنشاء الطلب المبدئي بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(draft.company_name)}\n"
-        f"السجل التجاري: {_safe_text(draft.commercial_number)}\n"
-        f"الرقم الضريبي: {_safe_text(draft.tax_number)}\n"
-        f"جوال الشركة: {_safe_text(draft.phone)}\n"
-        f"البريد الإلكتروني للشركة: {_safe_text(draft.email)}\n"
-        f"المدينة: {_safe_text(draft.city)}\n"
-        f"اسم المسؤول: {_safe_text(draft.admin_name)}\n"
-        f"اسم المستخدم: {_safe_text(draft.admin_username)}\n"
-        f"البريد الإلكتروني للمسؤول: {_safe_text(draft.admin_email)}\n"
-        f"جوال المسؤول: {_safe_text(admin_phone)}\n"
-        f"الباقة: {_safe_text(getattr(draft.plan, 'name', None))}\n"
-        f"المدة: {_safe_text(draft.duration)}\n"
-        f"طريقة الدفع: {_safe_text(draft.payment_method)}\n"
-        f"السعر الأساسي: {_money_str(draft.base_price)} SAR\n"
-        f"الخصم: {_money_str(draft.discount_amount)} SAR\n"
-        f"الضريبة: {_money_str(draft.vat_amount)} SAR\n"
-        f"الإجمالي: {_money_str(draft.total_amount)} SAR\n"
-        f"الحالة: {_safe_text(draft.status)}\n\n"
-        f"تم حفظ طلبكم المبدئي بنجاح، ويمكن متابعة الخطوات التالية حسب مسار التسجيل المعتمد."
-    )
-
-
-def _send_draft_created_whatsapp(*, user, draft) -> None:
+def _load_onboarding_notification_module():
     """
-    إرسال واتساب بعد إنشاء الطلب المبدئي.
-    هذا التدفق Public/System Onboarding لذلك نعتمد SYSTEM scope.
+    تحميل مرن لطبقة onboarding الرسمية إن كانت موجودة،
+    مع fallback إلى company services لو كان المشروع ما زال في مرحلة انتقالية.
     """
-    seen_phones: set[str] = set()
+    candidate_modules = [
+        "notification_center.services_onboarding",
+        "notification_center.services_company",
+    ]
+
+    for module_path in candidate_modules:
+        try:
+            return importlib.import_module(module_path)
+        except Exception:
+            continue
+
+    return None
+
+
+def _collect_notification_targets(*, user, draft) -> list[dict]:
+    """
+    تجميع المستهدفين بشكل آمن وبدون تكرار.
+    """
     targets: list[dict] = []
+    seen_phones: set[str] = set()
+    seen_emails: set[str] = set()
 
-    def _append_target(phone: str, name: str, role: str):
-        normalized_phone = normalize_phone_number(phone)
-        if not normalized_phone or normalized_phone in seen_phones:
+    def _append_target(*, phone="", email="", name="", role=""):
+        normalized_phone = normalize_phone_number(phone) if phone else ""
+        normalized_email = _normalize_email(email)
+        safe_name = _safe_text(name, "User")
+        safe_role = _safe_text(role, "")
+
+        key = normalized_phone or normalized_email
+        if not key:
             return
 
-        seen_phones.add(normalized_phone)
-        targets.append(
-            {
-                "phone": normalized_phone,
-                "name": _safe_text(name, "User"),
-                "role": _safe_text(role, ""),
-            }
-        )
+        if normalized_phone and normalized_phone in seen_phones:
+            return
+
+        if normalized_email and normalized_email in seen_emails:
+            return
+
+        if normalized_phone:
+            seen_phones.add(normalized_phone)
+
+        if normalized_email:
+            seen_emails.add(normalized_email)
+
+        targets.append({
+            "phone": normalized_phone,
+            "email": normalized_email,
+            "name": safe_name,
+            "role": safe_role,
+        })
 
     _append_target(
-        _get_draft_admin_phone(draft),
-        getattr(draft, "admin_name", None) or getattr(draft, "admin_username", None) or "Admin",
-        "admin",
+        phone=_get_draft_admin_phone(draft),
+        email=getattr(draft, "admin_email", None),
+        name=getattr(draft, "admin_name", None) or getattr(draft, "admin_username", None) or "Admin",
+        role="admin",
     )
 
     _append_target(
-        _safe_text(getattr(draft, "phone", None), ""),
-        getattr(draft, "company_name", None) or getattr(draft, "admin_name", None) or "Company",
-        "company",
+        phone=_safe_text(getattr(draft, "phone", None), ""),
+        email=getattr(draft, "email", None),
+        name=getattr(draft, "company_name", None) or getattr(draft, "admin_name", None) or "Company",
+        role="company",
     )
 
     if user:
-        owner_phone = _get_best_phone_for_entity(user)
         _append_target(
-            owner_phone,
-            getattr(user, "first_name", None) or getattr(user, "username", None) or "Owner",
-            "owner",
+            phone=_get_best_phone_for_entity(user),
+            email=getattr(user, "email", None),
+            name=getattr(user, "first_name", None) or getattr(user, "username", None) or "Owner",
+            role="owner",
         )
 
-    if not targets:
+    return targets
+
+
+def _build_draft_created_context(*, user, draft, plan) -> dict:
+    return {
+        "draft_id": getattr(draft, "id", None),
+        "company_name": _safe_text(draft.company_name),
+        "commercial_number": _safe_text(draft.commercial_number),
+        "tax_number": _safe_text(draft.tax_number),
+        "phone": _safe_text(draft.phone),
+        "email": _safe_text(draft.email),
+        "city": _safe_text(draft.city),
+        "national_address": draft.national_address or {},
+        "admin_username": _safe_text(draft.admin_username),
+        "admin_name": _safe_text(draft.admin_name),
+        "admin_email": _safe_text(draft.admin_email),
+        "admin_phone": _safe_text(_get_draft_admin_phone(draft)),
+        "plan_id": getattr(plan, "id", None),
+        "plan_name": _safe_text(getattr(plan, "name", None)),
+        "duration": _safe_text(draft.duration),
+        "payment_method": _safe_text(draft.payment_method),
+        "base_price": _money_str(draft.base_price),
+        "discount_amount": _money_str(draft.discount_amount),
+        "vat_amount": _money_str(draft.vat_amount),
+        "total_amount": _money_str(draft.total_amount),
+        "status": _safe_text(draft.status),
+        "start_date": str(draft.start_date) if draft.start_date else "-",
+        "end_date": str(draft.end_date) if draft.end_date else "-",
+        "recipients": _build_draft_recipients(user=user, draft=draft),
+        "targets": _collect_notification_targets(user=user, draft=draft),
+        "is_public_flow": user is None,
+        "owner_user_id": getattr(user, "id", None) if user else None,
+        "owner_username": _safe_text(getattr(user, "username", None), "") if user else "",
+        "owner_email": _safe_text(getattr(user, "email", None), "") if user else "",
+    }
+
+
+def _dispatch_draft_created_notification(*, actor, user, draft, plan) -> None:
+    """
+    تمرير إشعار إنشاء الطلب المبدئي إلى الطبقة الرسمية فقط.
+    لا يوجد بريد مباشر ولا واتساب مباشر داخل هذا الملف بعد الآن.
+    """
+    services_module = _load_onboarding_notification_module()
+
+    if not services_module:
         logger.warning(
-            "Draft creation WhatsApp skipped: no phone targets found. draft_id=%s user_id=%s",
-            getattr(draft, "id", None),
-            getattr(user, "id", None) if user else None,
-        )
-        return
-
-    message_text = _build_draft_created_whatsapp_message(user=user, draft=draft)
-
-    for target in targets:
-        try:
-            send_event_whatsapp_message(
-                scope_type=ScopeType.SYSTEM,
-                company=None,
-                event_code="onboarding_draft_created",
-                recipient_phone=target["phone"],
-                recipient_name=target["name"],
-                recipient_role=target["role"],
-                trigger_source=TriggerSource.SYSTEM,
-                language_code="ar",
-                related_model="CompanyOnboardingTransaction",
-                related_object_id=str(getattr(draft, "id", "")),
-                context={
-                    "message": message_text,
-                    "company_name": _safe_text(draft.company_name),
-                    "commercial_number": _safe_text(draft.commercial_number),
-                    "tax_number": _safe_text(draft.tax_number),
-                    "city": _safe_text(draft.city),
-                    "phone": _safe_text(draft.phone),
-                    "email": _safe_text(draft.email),
-                    "admin_name": _safe_text(draft.admin_name),
-                    "admin_username": _safe_text(draft.admin_username),
-                    "admin_email": _safe_text(draft.admin_email),
-                    "admin_phone": _safe_text(_get_draft_admin_phone(draft)),
-                    "plan_name": _safe_text(getattr(draft.plan, "name", None)),
-                    "duration": _safe_text(draft.duration),
-                    "payment_method": _safe_text(draft.payment_method),
-                    "base_price": f"{_money_str(draft.base_price)} SAR",
-                    "discount_amount": f"{_money_str(draft.discount_amount)} SAR",
-                    "vat_amount": f"{_money_str(draft.vat_amount)} SAR",
-                    "total_amount": f"{_money_str(draft.total_amount)} SAR",
-                    "status": _safe_text(draft.status),
-                    "recipient_name": target["name"],
-                },
-            )
-
-            logger.info(
-                "Draft creation WhatsApp dispatched successfully. draft_id=%s phone=%s role=%s",
-                getattr(draft, "id", None),
-                target.get("phone"),
-                target.get("role"),
-            )
-
-        except Exception:
-            logger.exception(
-                "Failed to send draft creation WhatsApp. draft_id=%s phone=%s role=%s",
-                getattr(draft, "id", None),
-                target.get("phone"),
-                target.get("role"),
-            )
-
-
-def _build_draft_created_email_html(*, user, draft) -> str:
-    logo_url = escape(PRIMEY_EMAIL_LOGO_URL)
-
-    fallback_owner_name = None
-    if user and getattr(user, "is_authenticated", False):
-        fallback_owner_name = getattr(user, "username", None)
-
-    owner_name = escape(
-        _safe_text(
-            getattr(draft, "admin_name", None) or fallback_owner_name,
-            "User",
-        )
-    )
-
-    company_name = escape(_safe_text(draft.company_name))
-    commercial_number = escape(_safe_text(draft.commercial_number))
-    tax_number = escape(_safe_text(draft.tax_number))
-    phone = escape(_safe_text(draft.phone))
-    email = escape(_safe_text(draft.email))
-    city = escape(_safe_text(draft.city))
-
-    national_address = draft.national_address or {}
-    building_no = escape(_safe_text(national_address.get("building_no")))
-    street = escape(_safe_text(national_address.get("street")))
-    district = escape(_safe_text(national_address.get("district")))
-    postal_code = escape(_safe_text(national_address.get("postal_code")))
-    short_address = escape(_safe_text(national_address.get("short_address")))
-
-    admin_username = escape(_safe_text(draft.admin_username))
-    admin_name = escape(_safe_text(draft.admin_name))
-    admin_email = escape(_safe_text(draft.admin_email))
-    admin_phone = escape(_safe_text(_get_draft_admin_phone(draft)))
-
-    plan_name = escape(_safe_text(getattr(draft.plan, "name", None)))
-    duration = escape(_safe_text(draft.duration))
-    payment_method = escape(_safe_text(draft.payment_method))
-    base_price = escape(_money_str(draft.base_price))
-    discount_amount = escape(_money_str(draft.discount_amount))
-    vat_amount = escape(_money_str(draft.vat_amount))
-    total_amount = escape(_money_str(draft.total_amount))
-    status = escape(_safe_text(draft.status))
-    start_date = escape(str(draft.start_date) if draft.start_date else "-")
-    end_date = escape(str(draft.end_date) if draft.end_date else "-")
-
-    return f"""
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <title>تم إنشاء الطلب المبدئي</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Tahoma,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f7fb;margin:0;padding:24px 0;">
-    <tr>
-      <td align="center">
-        <table width="680" cellpadding="0" cellspacing="0"
-               style="max-width:680px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
-
-          <tr>
-            <td align="center" style="background:#000000;padding:28px 24px;">
-              <img src="{logo_url}" alt="Primey"
-                   style="max-height:56px;width:auto;display:block;margin:0 auto 12px auto;" />
-              <div style="color:#ffffff;font-size:22px;font-weight:700;line-height:1.6;">
-                Primey HR Cloud
-              </div>
-              <div style="color:#d1d5db;font-size:14px;line-height:1.8;">
-                تم إنشاء الطلب المبدئي بنجاح
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:32px 28px 20px 28px;">
-              <div style="font-size:16px;color:#111827;line-height:2;">
-                أهلاً <strong>{owner_name}</strong>،
-              </div>
-
-              <div style="margin-top:10px;font-size:15px;color:#374151;line-height:2;">
-                تم إنشاء الطلب المبدئي للشركة بنجاح داخل <strong>Primey HR Cloud</strong>.
-                يمكنك الآن متابعة المراجعة ثم الانتقال إلى خطوة الدفع من التدفق المعتمد.
-              </div>
-
-              <div style="margin-top:22px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الشركة
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">اسم الشركة:</td><td style="padding:6px 0;">{company_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">السجل التجاري:</td><td style="padding:6px 0;">{commercial_number}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الرقم الضريبي:</td><td style="padding:6px 0;">{tax_number}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">جوال الشركة:</td><td style="padding:6px 0;">{phone}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">البريد الإلكتروني:</td><td style="padding:6px 0;">{email}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">المدينة:</td><td style="padding:6px 0;">{city}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  العنوان الوطني
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">رقم المبنى:</td><td style="padding:6px 0;">{building_no}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الشارع:</td><td style="padding:6px 0;">{street}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الحي:</td><td style="padding:6px 0;">{district}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الرمز البريدي:</td><td style="padding:6px 0;">{postal_code}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">العنوان المختصر:</td><td style="padding:6px 0;">{short_address}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الأدمن
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">اسم المسؤول:</td><td style="padding:6px 0;">{admin_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">اسم المستخدم:</td><td style="padding:6px 0;">{admin_username}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">البريد الإلكتروني:</td><td style="padding:6px 0;">{admin_email}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">جوال المسؤول:</td><td style="padding:6px 0;">{admin_phone}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الباقة والتسعير
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">الباقة:</td><td style="padding:6px 0;">{plan_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">المدة:</td><td style="padding:6px 0;">{duration}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">طريقة الدفع:</td><td style="padding:6px 0;">{payment_method}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ البداية:</td><td style="padding:6px 0;">{start_date}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ النهاية:</td><td style="padding:6px 0;">{end_date}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">السعر الأساسي:</td><td style="padding:6px 0;">{base_price} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الخصم:</td><td style="padding:6px 0;">{discount_amount} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الضريبة:</td><td style="padding:6px 0;">{vat_amount} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الإجمالي:</td><td style="padding:6px 0;">{total_amount} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الحالة:</td><td style="padding:6px 0;">{status}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:22px;font-size:14px;color:#6b7280;line-height:2;">
-                هذه الرسالة للتأكيد فقط بأنه تم حفظ الطلب المبدئي بنجاح داخل النظام.
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:20px 28px 30px 28px;">
-              <div style="border-top:1px solid #e5e7eb;padding-top:18px;font-size:12px;color:#9ca3af;line-height:1.9;text-align:center;">
-                هذه رسالة آلية من Primey HR Cloud — يرجى عدم الرد عليها مباشرة.
-              </div>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""".strip()
-
-
-def _send_draft_created_email(*, user, draft) -> None:
-    recipients = _build_draft_recipients(user=user, draft=draft)
-
-    if not recipients:
-        logger.warning(
-            "Draft creation email skipped: no recipients found. draft_id=%s",
+            "Onboarding notification service module not found. draft_id=%s",
             getattr(draft, "id", None),
         )
         return
 
-    owner_name = _safe_text(
-        draft.admin_name or (getattr(user, "username", None) if user else None),
-        "User",
+    candidate_function_names = [
+        "notify_onboarding_draft_created",
+        "notify_draft_created",
+        "send_onboarding_draft_created_notification",
+        "send_draft_created_notification",
+    ]
+
+    notify_func = None
+    for func_name in candidate_function_names:
+        notify_func = getattr(services_module, func_name, None)
+        if callable(notify_func):
+            break
+
+    if not callable(notify_func):
+        logger.warning(
+            "Onboarding draft created notification function not found. checked=%s",
+            ", ".join(candidate_function_names),
+        )
+        return
+
+    context = _build_draft_created_context(
+        user=user,
+        draft=draft,
+        plan=plan,
     )
-
-    subject = f"تم إنشاء الطلب المبدئي - {draft.company_name}"
-
-    text_body = (
-        f"مرحباً {owner_name},\n\n"
-        f"تم إنشاء الطلب المبدئي بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(draft.company_name)}\n"
-        f"السجل التجاري: {_safe_text(draft.commercial_number)}\n"
-        f"الرقم الضريبي: {_safe_text(draft.tax_number)}\n"
-        f"جوال الشركة: {_safe_text(draft.phone)}\n"
-        f"البريد الإلكتروني: {_safe_text(draft.email)}\n"
-        f"المدينة: {_safe_text(draft.city)}\n"
-        f"اسم المسؤول: {_safe_text(draft.admin_name)}\n"
-        f"اسم المستخدم: {_safe_text(draft.admin_username)}\n"
-        f"البريد الإلكتروني للمسؤول: {_safe_text(draft.admin_email)}\n"
-        f"جوال المسؤول: {_safe_text(_get_draft_admin_phone(draft))}\n"
-        f"الباقة: {_safe_text(getattr(draft.plan, 'name', None))}\n"
-        f"المدة: {_safe_text(draft.duration)}\n"
-        f"طريقة الدفع: {_safe_text(draft.payment_method)}\n"
-        f"السعر الأساسي: {_money_str(draft.base_price)} SAR\n"
-        f"الخصم: {_money_str(draft.discount_amount)} SAR\n"
-        f"الضريبة: {_money_str(draft.vat_amount)} SAR\n"
-        f"الإجمالي: {_money_str(draft.total_amount)} SAR\n"
-        f"الحالة: {_safe_text(draft.status)}\n\n"
-        f"مع تحيات Primey HR Cloud"
-    )
-
-    html_body = _build_draft_created_email_html(user=user, draft=draft)
 
     try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_body,
-            from_email=DEFAULT_FROM_EMAIL,
-            to=recipients,
+        notify_func(
+            actor=actor,
+            user=user,
+            draft=draft,
+            plan=plan,
+            extra_context=context,
         )
-        message.attach_alternative(html_body, "text/html")
-        message.send(fail_silently=False)
+        return
+    except TypeError:
+        pass
 
-        logger.info(
-            "Draft creation email sent successfully. draft_id=%s recipients=%s",
-            getattr(draft, "id", None),
-            recipients,
+    try:
+        notify_func(
+            actor=actor,
+            user=user,
+            draft=draft,
+            plan=plan,
+            context=context,
         )
+        return
+    except TypeError:
+        pass
 
+    try:
+        notify_func(
+            draft=draft,
+            plan=plan,
+        )
+        return
     except Exception:
         logger.exception(
-            "Failed to send draft creation email. draft_id=%s",
+            "Failed while dispatching onboarding draft created notification. draft_id=%s",
             getattr(draft, "id", None),
         )
+        return
 
 
 # ============================================================
@@ -967,16 +768,11 @@ def create_onboarding_draft(request):
             draft.save(update_fields=save_fields)
 
         transaction.on_commit(
-            lambda: _send_draft_created_email(
+            lambda: _dispatch_draft_created_notification(
+                actor=getattr(request, "user", None),
                 user=user,
                 draft=draft,
-            )
-        )
-
-        transaction.on_commit(
-            lambda: _send_draft_created_whatsapp(
-                user=user,
-                draft=draft,
+                plan=plan,
             )
         )
 

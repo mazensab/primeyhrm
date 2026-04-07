@@ -1,7 +1,7 @@
 # ===============================================================
 # 📂 employee_center/apps.py
 # 🧭 Employee Center AppConfig — Signals Loader (FINAL)
-# Primey HR Cloud
+# Mham Cloud
 # ===============================================================
 
 from django.apps import AppConfig

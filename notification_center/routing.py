@@ -1,5 +1,5 @@
 # 📂 الملف: notification_center/routing.py
-# 🧭 Primey HR Cloud — Notification Routing V4.0
+# 🧭 Mham Cloud — Notification Routing V4.0
 # 🔌 مسؤول عن توجيه قنوات WebSocket إلى مستهلك الإشعارات الذكي.
 # ✅ متوافق مع Redis أو InMemory (Auto Layer Detection)
 # ✅ يدعم تخصيص المستخدمين عبر الـ Scope (user_id)

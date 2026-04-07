@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/management/commands/seed_whatsapp_templates.py
-# 🛠 Primey HR Cloud - Seed WhatsApp Templates Command
+# 🛠 Mham Cloud - Seed WhatsApp Templates Command
 # ------------------------------------------------------------
 # ✅ Seed System WhatsApp Templates
 # ✅ Seed Company WhatsApp Templates
@@ -51,7 +51,7 @@ class Command(BaseCommand):
         all_companies = options.get("all_companies", False)
 
         self.stdout.write("")
-        self.stdout.write(self.style.NOTICE("🚀 Primey HR Cloud | Seed WhatsApp Templates"))
+        self.stdout.write(self.style.NOTICE("🚀 Mham Cloud | Seed WhatsApp Templates"))
         self.stdout.write("=" * 68)
 
         if scope in {"system", "all"}:

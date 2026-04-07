@@ -1,7 +1,7 @@
 """
 ====================================================================
 🌐 Webhook Notification Provider (CONTRACT)
-Primey HR Cloud | Notifications Engine
+Mham Cloud | Notifications Engine
 ====================================================================
 ✔ Interface only
 ✔ No HTTP calls

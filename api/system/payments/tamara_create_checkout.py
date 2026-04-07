@@ -1,16 +1,16 @@
 # ============================================================
 # Tamara Create Checkout API
-# Primey HR Cloud
+# Mham Cloud
 # Path: api/system/payments/tamara_create_checkout.py
 # ------------------------------------------------------------
-# System Payment API
+# System/Public Payment API
 # - Creates Tamara checkout session
 # - Supports onboarding draft flow directly
 # - Builds order_reference_id as DRAFT-<id>
 # - Returns checkout_url and tamara identifiers
 # - Does NOT mark invoice as paid
 # - Does NOT activate subscription directly
-# - Safe for current architecture
+# - Supports public onboarding draft flow safely
 # ============================================================
 
 from __future__ import annotations
@@ -18,10 +18,11 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 from django.conf import settings
-from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from billing_center.models import CompanyOnboardingTransaction
@@ -65,17 +66,16 @@ def _normalize_payment_method(value: Any) -> str:
     """
     method = _clean_str(value).upper()
     if not method:
-        return "CREDIT_CARD"
+        return "TAMARA"
     return method
 
 
 def _is_system_user(request) -> bool:
     """
     حارس بسيط لمستخدمي النظام.
-    يمكن توسيعه لاحقًا حسب RBAC الفعلي.
     """
     user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
+    if not user or not getattr(user, "is_authenticated", False):
         return False
 
     if getattr(user, "is_superuser", False):
@@ -101,21 +101,75 @@ def _extract_invoice_like_data(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _get_default_success_url() -> str:
+def _get_frontend_base_url() -> str:
+    return _clean_str(
+        getattr(settings, "FRONTEND_BASE_URL", None),
+        "http://localhost:3000",
+    ).rstrip("/")
+
+
+def _get_backend_base_url() -> str:
+    return _clean_str(
+        getattr(settings, "BACKEND_BASE_URL", None)
+        or getattr(settings, "APP_BASE_URL", None)
+        or getattr(settings, "SITE_BASE_URL", None),
+        "http://127.0.0.1:8000",
+    ).rstrip("/")
+
+
+def _build_register_return_url(
+    *,
+    draft_id: int,
+    payment: str,
+) -> str:
+    """
+    بناء رابط رجوع مناسب لصفحة /register
+    حتى يفهم الفرونت حالة العملية بعد العودة من تمارا.
+    """
+    base = f"{_get_frontend_base_url()}/register"
+    query = urlencode(
+        {
+            "draft_id": draft_id,
+            "payment_method": "TAMARA",
+            "payment": payment,
+        }
+    )
+    return f"{base}?{query}"
+
+
+def _get_default_success_url(*, draft_id: Optional[int] = None) -> str:
+    if draft_id:
+        return _build_register_return_url(
+            draft_id=draft_id,
+            payment="success",
+        )
+
     return _clean_str(
         getattr(settings, "TAMARA_SUCCESS_URL", None)
-        or f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:3000')}/billing/payment/success"
+        or f"{_get_frontend_base_url()}/billing/payment/success"
     )
 
 
-def _get_default_cancel_url() -> str:
+def _get_default_cancel_url(*, draft_id: Optional[int] = None) -> str:
+    if draft_id:
+        return _build_register_return_url(
+            draft_id=draft_id,
+            payment="cancelled",
+        )
+
     return _clean_str(
         getattr(settings, "TAMARA_CANCEL_URL", None)
-        or f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:3000')}/billing/payment/cancel"
+        or f"{_get_frontend_base_url()}/billing/payment/cancel"
     )
 
 
-def _get_default_failure_url() -> str:
+def _get_default_failure_url(*, draft_id: Optional[int] = None) -> str:
+    if draft_id:
+        return _build_register_return_url(
+            draft_id=draft_id,
+            payment="failed",
+        )
+
     return _clean_str(
         getattr(settings, "TAMARA_FAILURE_URL", None)
         or _get_default_cancel_url()
@@ -125,7 +179,7 @@ def _get_default_failure_url() -> str:
 def _get_default_notification_url() -> str:
     return _clean_str(
         getattr(settings, "TAMARA_WEBHOOK_URL", None)
-        or "http://127.0.0.1:8000/api/system/payments/tamara/webhook/"
+        or f"{_get_backend_base_url()}/api/system/payments/tamara/webhook/"
     )
 
 
@@ -144,7 +198,7 @@ def _build_draft_invoice_data(
     """
     تحويل draft onboarding الحالية إلى payload متوافق مع TamaraCheckoutService.
     """
-    company_name = _clean_str(getattr(draft, "company_name", None), "Primey HR Cloud")
+    company_name = _clean_str(getattr(draft, "company_name", None), "Mham Cloud")
     plan_name = _clean_str(getattr(getattr(draft, "plan", None), "name", None), "Primey Plan")
     admin_name = _clean_str(getattr(draft, "admin_name", None), "Customer")
     admin_email = _clean_str(getattr(draft, "admin_email", None))
@@ -157,7 +211,11 @@ def _build_draft_invoice_data(
     national_address = getattr(draft, "national_address", {}) or {}
 
     customer_first_name = admin_name.split(" ")[0] if admin_name else company_name
-    customer_last_name = " ".join(admin_name.split(" ")[1:]).strip() if admin_name and " " in admin_name else "Customer"
+    customer_last_name = (
+        " ".join(admin_name.split(" ")[1:]).strip()
+        if admin_name and " " in admin_name
+        else "Customer"
+    )
 
     order_reference_id = _build_draft_reference(draft.id)
 
@@ -187,11 +245,11 @@ def _build_draft_invoice_data(
         "company_email": _clean_str(getattr(draft, "email", None)),
         "company_phone": phone,
         "city": city,
-        "success_url": _get_default_success_url(),
-        "cancel_url": _get_default_cancel_url(),
-        "failure_url": _get_default_failure_url(),
+        "success_url": _get_default_success_url(draft_id=draft.id),
+        "cancel_url": _get_default_cancel_url(draft_id=draft.id),
+        "failure_url": _get_default_failure_url(draft_id=draft.id),
         "notification_url": _get_default_notification_url(),
-        "platform": "Primey HR Cloud",
+        "platform": "Mham Cloud",
         "items": [
             {
                 "reference_id": order_reference_id,
@@ -302,7 +360,7 @@ def _validate_draft_for_checkout(draft: CompanyOnboardingTransaction) -> tuple[b
 # API
 # ============================================================
 
-@login_required
+@csrf_exempt
 @require_POST
 def tamara_create_checkout(request):
     """
@@ -311,6 +369,10 @@ def tamara_create_checkout(request):
     يدعم حالتين:
     1) payload مباشر invoice-like
     2) تمرير draft_id لربط Tamara مع onboarding flow الحالي
+
+    ملاحظة:
+    - public onboarding draft flow مسموح بدون login
+    - direct/system mode يبقى متاحًا للمستخدمين الداخليين فقط
     """
 
     if not getattr(settings, "TAMARA_ENABLED", False):
@@ -320,15 +382,6 @@ def tamara_create_checkout(request):
                 "message": "Tamara payment gateway is disabled.",
             },
             status=503,
-        )
-
-    if not _is_system_user(request):
-        return JsonResponse(
-            {
-                "status": "error",
-                "message": "You do not have permission to create Tamara checkout from system scope.",
-            },
-            status=403,
         )
 
     payload = _json_body(request)
@@ -348,7 +401,7 @@ def tamara_create_checkout(request):
         service = TamaraCheckoutService()
 
         # ====================================================
-        # Draft Flow — Preferred for current onboarding system
+        # Draft Flow — Public + Internal
         # ====================================================
         if draft_id:
             draft = _get_draft_for_checkout(draft_id)
@@ -403,8 +456,17 @@ def tamara_create_checkout(request):
             )
 
         # ====================================================
-        # Direct invoice-like payload — Fallback / flexible mode
+        # Direct invoice-like payload — Internal only
         # ====================================================
+        if not _is_system_user(request):
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "message": "You do not have permission to create Tamara checkout from system scope.",
+                },
+                status=403,
+            )
+
         invoice_data = _extract_invoice_like_data(payload)
 
         is_valid, validation_message = _validate_direct_payload(invoice_data)
@@ -417,9 +479,13 @@ def tamara_create_checkout(request):
                 status=400,
             )
 
-        # إذا لم يأتِ order_reference_id صريحًا، ننشئ مرجعًا مرتبطًا بالـ draft عند توفره
-        if not _clean_str(invoice_data.get("order_reference_id")) and invoice_data.get("draft_id"):
-            invoice_data["order_reference_id"] = _build_draft_reference(int(invoice_data["draft_id"]))
+        if (
+            not _clean_str(invoice_data.get("order_reference_id"))
+            and invoice_data.get("draft_id")
+        ):
+            invoice_data["order_reference_id"] = _build_draft_reference(
+                int(invoice_data["draft_id"])
+            )
 
         result = service.create_checkout(invoice_data)
 

@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 الملف: api/company/performance.py
 # 🎯 Company Performance API
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations

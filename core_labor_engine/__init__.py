@@ -1,5 +1,5 @@
 # ============================================================
-# 📦 Primey HR Cloud — Core Labor Engine
+# 📦 Mham Cloud — Core Labor Engine
 # 🧭 Saudi Labor Engine V10.1 (2025 Official Compliance)
 # ------------------------------------------------------------
 # يحتوي على وحدة الالتزام بنظام العمل السعودي

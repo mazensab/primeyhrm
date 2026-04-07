@@ -1,5 +1,5 @@
 # ================================================================
-# 🚀 Leave Engines — Primey HR Cloud V3 Ultra Pro
+# 🚀 Leave Engines — Mham Cloud V3 Ultra Pro
 # ================================================================
 # يشمل:
 # 1) LeaveRulesEngine
@@ -252,7 +252,7 @@ class LeaveWorkflowEngine:
 
 # ===================================================================
 # ✔ 3) LeaveApprovalEngine — Enterprise Deduction Engine Patch V1
-# Primey HR Cloud — Production Safe / Multi-Tenant
+# Mham Cloud — Production Safe / Multi-Tenant
 # ===================================================================
 from django.db import transaction
 from django.core.exceptions import ValidationError

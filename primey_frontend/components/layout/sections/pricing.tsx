@@ -115,7 +115,7 @@ const content: Record<AppLang, PricingContent> = {
     employees: "الموظفون",
     includedFeatures: "الميزات المتضمنة",
     getStarted: "ابدأ الآن",
-    fallbackPlanDescription: "باقة اشتراك Primey HR Cloud",
+    fallbackPlanDescription: "باقة اشتراك Mham Cloud",
     features: {
       upToCompanies: (count: string, rawCount: number) =>
         rawCount === 1 ? `حتى شركة واحدة` : `حتى ${count} شركات`,
@@ -148,7 +148,7 @@ const content: Record<AppLang, PricingContent> = {
     employees: "Employees",
     includedFeatures: "Included Features",
     getStarted: "Get Started",
-    fallbackPlanDescription: "Primey HR Cloud subscription plan",
+    fallbackPlanDescription: "Mham Cloud subscription plan",
     features: {
       upToCompanies: (count: string, rawCount: number) =>
         `Up to ${count} compan${rawCount === 1 ? "y" : "ies"}`,

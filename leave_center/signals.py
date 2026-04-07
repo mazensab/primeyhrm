@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 leave_center/signals.py — Leave ↔ Attendance Auto Bridge
 # Version: V1.2 Ultra Stable (UNIQUE CONSTRAINT SAFE 🔒)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✔ Fully compatible with unique_attendance_per_employee_per_day
 # ✔ Atomic + race-condition safe
@@ -157,7 +157,7 @@ def sync_leave_to_attendance(sender, instance: LeaveRequest, created, **kwargs):
 # ============================================================
 # 🟢 Signal: Auto Create LeaveBalance on Employee Creation
 # Version: V1.0 — Ultra Safe (Patch Only)
-# Primey HR Cloud — Leave Initialization Layer
+# Mham Cloud — Leave Initialization Layer
 # ============================================================
 
 from employee_center.models import Employee

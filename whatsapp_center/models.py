@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/models.py
-# Primey HR Cloud - WhatsApp Center Models
+# Mham Cloud - WhatsApp Center Models
 # ============================================================
 # ✅ يدعم:
 # - System Scope
@@ -1092,3 +1092,5 @@ class WhatsAppReminderRule(models.Model):
 
     def __str__(self) -> str:
         return f"{self.event_code} - {self.days_before} days"
+    
+    

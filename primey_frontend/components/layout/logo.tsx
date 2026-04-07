@@ -8,7 +8,7 @@ export default function Logo() {
       <div className="flex items-center rounded-lg bg-transparent px-3 py-2">
         <Image
           src="/logo/primey.svg"
-          alt="Primey HR Cloud"
+          alt="Mham Cloud"
           width={120}
           height={32}
           priority

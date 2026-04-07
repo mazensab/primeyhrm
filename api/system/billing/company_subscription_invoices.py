@@ -1,6 +1,6 @@
 # ============================================================
 # 🧾 SYSTEM — Company Subscription Invoices API
-# Primey HR Cloud | V1.1 ULTRA STABLE (FINAL FIX)
+# Mham Cloud | V1.1 ULTRA STABLE (FINAL FIX)
 # ============================================================
 # ✔ Single Source of Truth
 # ✔ Subscription-scoped invoices

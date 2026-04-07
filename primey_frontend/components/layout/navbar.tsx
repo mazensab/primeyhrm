@@ -147,11 +147,11 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
           <Link
             href="/login"
             className="flex shrink-0 cursor-pointer items-center transition hover:opacity-85"
-            aria-label="Primey HR Cloud"
+            aria-label="Mham Cloud"
           >
             <Image
               src="/hero logo.png"
-              alt="Primey HR Cloud"
+              alt="Mham Cloud"
               width={1200}
               height={420}
               priority
@@ -220,11 +220,11 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                         href="/login"
                         onClick={() => setIsOpen(false)}
                         className="flex cursor-pointer items-center transition hover:opacity-85"
-                        aria-label="Primey HR Cloud"
+                        aria-label="Mham Cloud"
                       >
                         <Image
                           src="/hero logo.png"
-                          alt="Primey HR Cloud"
+                          alt="Mham Cloud"
                           width={1200}
                           height={420}
                           priority

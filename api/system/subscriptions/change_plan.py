@@ -1,55 +1,30 @@
 # ============================================================
 # 📂 api/system/subscriptions/change_plan.py
-# Primey HR Cloud
-# Change Subscription Plan API
+# Mham Cloud
+# Change Subscription Plan API — Notification Center Clean
 # ============================================================
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 from decimal import Decimal
 from uuid import uuid4
 
-from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.http import JsonResponse
 from django.utils import timezone
-from django.utils.html import escape
 from django.views.decorators.http import require_POST
 
 from billing_center.models import (
     CompanySubscription,
-    SubscriptionPlan,
     Invoice,
+    SubscriptionPlan,
 )
-from whatsapp_center.models import ScopeType, TriggerSource
-from whatsapp_center.services import send_event_whatsapp_message
 
 logger = logging.getLogger(__name__)
-
-
-# ============================================================
-# 🖼️ Primey Email Branding
-# ============================================================
-
-PRIMEY_EMAIL_LOGO_URL = getattr(
-    settings,
-    "PRIMEY_EMAIL_LOGO_URL",
-    getattr(
-        settings,
-        "EMAIL_LOGO_URL",
-        "https://drive.google.com/uc?export=view&id=1x2Q9wJm8QmQm7mYjQmW7aJmR8bPlogoblak",
-    ),
-)
-
-DEFAULT_FROM_EMAIL = getattr(
-    settings,
-    "DEFAULT_FROM_EMAIL",
-    getattr(settings, "EMAIL_HOST_USER", "no-reply@primeyhr.com"),
-)
 
 
 # ============================================================
@@ -68,6 +43,12 @@ def _safe_text(value, default="-"):
         return default
     value = str(value).strip()
     return value if value else default
+
+
+def _normalize_email(value: str) -> str:
+    if not value:
+        return ""
+    return str(value).strip().lower()
 
 
 def _money_str(value) -> str:
@@ -129,7 +110,7 @@ def _collect_subscription_recipients(subscription) -> list[str]:
         )
 
     for value in candidates:
-        email = _safe_text(value, "").lower()
+        email = _normalize_email(value)
         if email and email not in recipients:
             recipients.append(email)
 
@@ -157,58 +138,102 @@ def _get_first_existing_attr(instance, attr_names: list[str], default=""):
     return default
 
 
-def _collect_subscription_whatsapp_targets(subscription) -> list[dict]:
+def _get_user_related_profile_candidates(user) -> list:
     """
-    تجميع مستهدفي الواتساب بشكل آمن وبدون تكرار.
+    محاولة الوصول إلى بروفايل المستخدم الشائع بدون فرض اسم محدد.
+    """
+    if not user:
+        return []
 
-    الأولوية:
-    - جوال الشركة
-    - جوال المالك
-    - جوال أول admin/owner داخل الشركة
+    candidates = []
+
+    for attr_name in ["profile", "userprofile"]:
+        try:
+            related_obj = getattr(user, attr_name, None)
+        except Exception:
+            related_obj = None
+
+        if related_obj:
+            candidates.append(related_obj)
+
+    return candidates
+
+
+def _get_best_phone_for_entity(instance) -> str:
+    """
+    جلب أفضل رقم جوال من الكيان مباشرة أو من profile/userprofile إن وجد.
+    """
+    phone_attr_candidates = [
+        "phone",
+        "mobile",
+        "mobile_number",
+        "whatsapp_number",
+        "phone_number",
+    ]
+
+    direct_phone = _get_first_existing_attr(instance, phone_attr_candidates, "")
+    if direct_phone:
+        return direct_phone
+
+    for profile_obj in _get_user_related_profile_candidates(instance):
+        profile_phone = _get_first_existing_attr(profile_obj, phone_attr_candidates, "")
+        if profile_phone:
+            return profile_phone
+
+    return ""
+
+
+def _collect_subscription_notification_targets(subscription) -> list[dict]:
+    """
+    تجميع مستهدفي الإشعار بشكل آمن وبدون تكرار.
     """
     targets: list[dict] = []
     seen_phones: set[str] = set()
+    seen_emails: set[str] = set()
 
     company = getattr(subscription, "company", None)
     owner = getattr(company, "owner", None) if company else None
 
-    def _append_target(phone, name="", role=""):
-        phone = _safe_text(phone, "")
-        if not phone:
-            return
-        if phone in seen_phones:
+    def _append_target(*, phone="", email="", name="", role=""):
+        safe_phone = _safe_text(phone, "")
+        safe_email = _normalize_email(email)
+        safe_name = _safe_text(name, "User")
+        safe_role = _safe_text(role, "")
+
+        key = safe_phone or safe_email
+        if not key:
             return
 
-        seen_phones.add(phone)
+        if safe_phone and safe_phone in seen_phones:
+            return
+
+        if safe_email and safe_email in seen_emails:
+            return
+
+        if safe_phone:
+            seen_phones.add(safe_phone)
+
+        if safe_email:
+            seen_emails.add(safe_email)
+
         targets.append({
-            "phone": phone,
-            "name": _safe_text(name, "User"),
-            "role": _safe_text(role, ""),
+            "phone": safe_phone,
+            "email": safe_email,
+            "name": safe_name,
+            "role": safe_role,
         })
 
-    company_phone = _get_first_existing_attr(
-        company,
-        ["phone", "mobile", "mobile_number", "whatsapp_number"],
-        "",
-    )
     _append_target(
-        company_phone,
+        phone=_get_best_phone_for_entity(company),
+        email=getattr(company, "email", None),
         name=getattr(company, "name", None),
         role="company",
     )
 
-    owner_phone = _get_first_existing_attr(
-        owner,
-        ["phone", "mobile", "mobile_number", "whatsapp_number"],
-        "",
-    )
-    owner_name = _safe_text(
-        getattr(owner, "first_name", None) or getattr(owner, "username", None),
-        "Owner",
-    )
     _append_target(
-        owner_phone,
-        name=owner_name,
+        phone=_get_best_phone_for_entity(owner),
+        email=getattr(owner, "email", None),
+        name=getattr(owner, "first_name", None) or getattr(owner, "username", None),
         role="owner",
     )
 
@@ -222,452 +247,261 @@ def _collect_subscription_whatsapp_targets(subscription) -> list[dict]:
         ) if company else None
 
         admin_user = getattr(admin_link, "user", None) if admin_link else None
-        admin_phone = _get_first_existing_attr(
-            admin_user,
-            ["phone", "mobile", "mobile_number", "whatsapp_number"],
-            "",
-        )
-        admin_name = _safe_text(
-            getattr(admin_user, "first_name", None) or getattr(admin_user, "username", None),
-            "Admin",
-        )
         _append_target(
-            admin_phone,
-            name=admin_name,
+            phone=_get_best_phone_for_entity(admin_user),
+            email=getattr(admin_user, "email", None),
+            name=getattr(admin_user, "first_name", None) or getattr(admin_user, "username", None),
             role=getattr(admin_link, "role", "admin") if admin_link else "admin",
         )
     except Exception:
         logger.exception(
-            "Failed while collecting subscription WhatsApp targets. subscription_id=%s",
+            "Failed while collecting subscription notification targets. subscription_id=%s",
             getattr(subscription, "id", None),
         )
 
     return targets
 
 
-def _build_upgrade_whatsapp_message(*, subscription, current_plan, new_plan, invoice, difference) -> str:
-    company = getattr(subscription, "company", None)
+# ============================================================
+# Notification Helpers
+# ============================================================
 
-    return (
-        f"تم إنشاء طلب ترقية الباقة بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"الباقة الحالية: {_safe_text(getattr(current_plan, 'name', None))}\n"
-        f"الباقة الجديدة: {_safe_text(getattr(new_plan, 'name', None))}\n"
-        f"المبلغ المستحق: {_money_str(difference)} SAR\n"
-        f"رقم الفاتورة: {_safe_text(getattr(invoice, 'invoice_number', None))}\n"
-        f"الحالة: PENDING\n"
-        f"تاريخ البداية: {_date_str(getattr(subscription, 'start_date', None))}\n"
-        f"تاريخ النهاية: {_date_str(getattr(subscription, 'end_date', None))}\n\n"
-        f"سيتم استكمال الترقية بعد سداد فاتورة فرق السعر."
-    )
-
-
-def _build_downgrade_whatsapp_message(*, subscription, current_plan, new_plan) -> str:
-    company = getattr(subscription, "company", None)
-
-    return (
-        f"تم استلام طلب تخفيض الباقة داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"الباقة الحالية: {_safe_text(getattr(current_plan, 'name', None))}\n"
-        f"الباقة المطلوبة: {_safe_text(getattr(new_plan, 'name', None))}\n"
-        f"تاريخ البداية الحالي: {_date_str(getattr(subscription, 'start_date', None))}\n"
-        f"تاريخ انتهاء الاشتراك الحالي: {_date_str(getattr(subscription, 'end_date', None))}\n\n"
-        f"هذا المسار يحتاج طبقة حفظ رسمية قبل تطبيقه عند موعد التجديد القادم."
-    )
-
-
-def _send_upgrade_whatsapp(*, subscription, current_plan, new_plan, invoice, difference) -> None:
+def _load_subscription_notification_module():
     """
-    إرسال إشعار واتساب عند إنشاء فاتورة ترقية الباقة.
-    لا يؤثر فشل الواتساب على التدفق الأساسي.
+    تحميل مرن لطبقة الاشتراكات/الفوترة الرسمية.
     """
-    company = getattr(subscription, "company", None)
-    targets = _collect_subscription_whatsapp_targets(subscription)
+    candidate_modules = [
+        "notification_center.services_billing",
+        "notification_center.services_company",
+    ]
 
-    if not targets:
+    for module_path in candidate_modules:
+        try:
+            return importlib.import_module(module_path)
+        except Exception:
+            continue
+
+    return None
+
+
+def _build_upgrade_context(*, subscription, current_plan, new_plan, invoice, difference, actor) -> dict:
+    company = getattr(subscription, "company", None)
+    owner = getattr(company, "owner", None) if company else None
+
+    return {
+        "subscription_id": getattr(subscription, "id", None),
+        "company_id": getattr(company, "id", None) if company else None,
+        "company_name": _safe_text(getattr(company, "name", None)),
+        "company_email": _safe_text(getattr(company, "email", None)),
+        "owner_user_id": getattr(owner, "id", None) if owner else None,
+        "owner_email": _safe_text(getattr(owner, "email", None)) if owner else "",
+        "current_plan_id": getattr(current_plan, "id", None),
+        "current_plan_name": _safe_text(getattr(current_plan, "name", None)),
+        "current_plan_price_yearly": _money_str(getattr(current_plan, "price_yearly", None)),
+        "new_plan_id": getattr(new_plan, "id", None),
+        "new_plan_name": _safe_text(getattr(new_plan, "name", None)),
+        "new_plan_price_yearly": _money_str(getattr(new_plan, "price_yearly", None)),
+        "difference_amount": _money_str(difference),
+        "invoice_id": getattr(invoice, "id", None),
+        "invoice_number": _safe_text(getattr(invoice, "invoice_number", None)),
+        "invoice_status": _safe_text(getattr(invoice, "status", None)),
+        "billing_reason": _safe_text(getattr(invoice, "billing_reason", None)),
+        "subscription_start_date": _date_str(getattr(subscription, "start_date", None)),
+        "subscription_end_date": _date_str(getattr(subscription, "end_date", None)),
+        "recipients": _collect_subscription_recipients(subscription),
+        "targets": _collect_subscription_notification_targets(subscription),
+        "actor_user_id": getattr(actor, "id", None) if actor else None,
+        "actor_username": _safe_text(getattr(actor, "username", None), "") if actor else "",
+    }
+
+
+def _build_downgrade_context(*, subscription, current_plan, new_plan, actor) -> dict:
+    company = getattr(subscription, "company", None)
+    owner = getattr(company, "owner", None) if company else None
+
+    return {
+        "subscription_id": getattr(subscription, "id", None),
+        "company_id": getattr(company, "id", None) if company else None,
+        "company_name": _safe_text(getattr(company, "name", None)),
+        "company_email": _safe_text(getattr(company, "email", None)),
+        "owner_user_id": getattr(owner, "id", None) if owner else None,
+        "owner_email": _safe_text(getattr(owner, "email", None)) if owner else "",
+        "current_plan_id": getattr(current_plan, "id", None),
+        "current_plan_name": _safe_text(getattr(current_plan, "name", None)),
+        "current_plan_price_yearly": _money_str(getattr(current_plan, "price_yearly", None)),
+        "new_plan_id": getattr(new_plan, "id", None),
+        "new_plan_name": _safe_text(getattr(new_plan, "name", None)),
+        "new_plan_price_yearly": _money_str(getattr(new_plan, "price_yearly", None)),
+        "subscription_start_date": _date_str(getattr(subscription, "start_date", None)),
+        "subscription_end_date": _date_str(getattr(subscription, "end_date", None)),
+        "recipients": _collect_subscription_recipients(subscription),
+        "targets": _collect_subscription_notification_targets(subscription),
+        "actor_user_id": getattr(actor, "id", None) if actor else None,
+        "actor_username": _safe_text(getattr(actor, "username", None), "") if actor else "",
+    }
+
+
+def _dispatch_upgrade_notification(*, subscription, current_plan, new_plan, invoice, difference, actor) -> None:
+    services_module = _load_subscription_notification_module()
+
+    if not services_module:
         logger.warning(
-            "Upgrade WhatsApp skipped: no phone targets found. subscription_id=%s",
+            "Subscription notification service module not found for upgrade. subscription_id=%s invoice_id=%s",
             getattr(subscription, "id", None),
+            getattr(invoice, "id", None),
         )
         return
 
-    message_text = _build_upgrade_whatsapp_message(
+    candidate_function_names = [
+        "notify_subscription_plan_upgrade_created",
+        "notify_plan_upgrade_created",
+        "send_subscription_upgrade_notification",
+        "send_plan_upgrade_notification",
+    ]
+
+    notify_func = None
+    for func_name in candidate_function_names:
+        notify_func = getattr(services_module, func_name, None)
+        if callable(notify_func):
+            break
+
+    if not callable(notify_func):
+        logger.warning(
+            "Upgrade notification function not found. checked=%s",
+            ", ".join(candidate_function_names),
+        )
+        return
+
+    context = _build_upgrade_context(
         subscription=subscription,
         current_plan=current_plan,
         new_plan=new_plan,
         invoice=invoice,
         difference=difference,
-    )
-
-    for target in targets:
-        try:
-            send_event_whatsapp_message(
-                scope_type=ScopeType.COMPANY,
-                company=company,
-                event_code="subscription_plan_upgrade_created",
-                recipient_phone=target["phone"],
-                recipient_name=target["name"],
-                recipient_role=target["role"],
-                trigger_source=TriggerSource.SYSTEM,
-                language_code="ar",
-                related_model="Invoice",
-                related_object_id=str(getattr(invoice, "id", "")),
-                context={
-                    "message": message_text,
-                    "company_name": _safe_text(getattr(company, "name", None)),
-                    "recipient_name": target["name"],
-                    "current_plan_name": _safe_text(getattr(current_plan, "name", None)),
-                    "new_plan_name": _safe_text(getattr(new_plan, "name", None)),
-                    "invoice_number": _safe_text(getattr(invoice, "invoice_number", None)),
-                    "amount": f"{_money_str(difference)} SAR",
-                    "status": "PENDING",
-                },
-            )
-        except Exception:
-            logger.exception(
-                "Failed to send upgrade WhatsApp. subscription_id=%s invoice_id=%s phone=%s",
-                getattr(subscription, "id", None),
-                getattr(invoice, "id", None),
-                target.get("phone"),
-            )
-
-
-def _send_downgrade_whatsapp(*, subscription, current_plan, new_plan) -> None:
-    """
-    إرسال إشعار واتساب عند طلب تخفيض الباقة.
-    """
-    company = getattr(subscription, "company", None)
-    targets = _collect_subscription_whatsapp_targets(subscription)
-
-    if not targets:
-        logger.warning(
-            "Downgrade WhatsApp skipped: no phone targets found. subscription_id=%s",
-            getattr(subscription, "id", None),
-        )
-        return
-
-    message_text = _build_downgrade_whatsapp_message(
-        subscription=subscription,
-        current_plan=current_plan,
-        new_plan=new_plan,
-    )
-
-    for target in targets:
-        try:
-            send_event_whatsapp_message(
-                scope_type=ScopeType.COMPANY,
-                company=company,
-                event_code="subscription_plan_downgrade_requested",
-                recipient_phone=target["phone"],
-                recipient_name=target["name"],
-                recipient_role=target["role"],
-                trigger_source=TriggerSource.SYSTEM,
-                language_code="ar",
-                related_model="CompanySubscription",
-                related_object_id=str(getattr(subscription, "id", "")),
-                context={
-                    "message": message_text,
-                    "company_name": _safe_text(getattr(company, "name", None)),
-                    "recipient_name": target["name"],
-                    "current_plan_name": _safe_text(getattr(current_plan, "name", None)),
-                    "new_plan_name": _safe_text(getattr(new_plan, "name", None)),
-                },
-            )
-        except Exception:
-            logger.exception(
-                "Failed to send downgrade WhatsApp. subscription_id=%s phone=%s",
-                getattr(subscription, "id", None),
-                target.get("phone"),
-            )
-
-
-def _build_upgrade_email_html(*, subscription, current_plan, new_plan, invoice, difference) -> str:
-    company = getattr(subscription, "company", None)
-
-    logo_url = escape(PRIMEY_EMAIL_LOGO_URL)
-    company_name = escape(_safe_text(getattr(company, "name", None)))
-    company_email = escape(_safe_text(getattr(company, "email", None)))
-    current_plan_name = escape(_safe_text(getattr(current_plan, "name", None)))
-    new_plan_name = escape(_safe_text(getattr(new_plan, "name", None)))
-    invoice_id = escape(_safe_text(getattr(invoice, "id", None)))
-    invoice_number = escape(_safe_text(getattr(invoice, "invoice_number", None)))
-    invoice_total = escape(_money_str(difference))
-    start_date = escape(_date_str(getattr(subscription, "start_date", None)))
-    end_date = escape(_date_str(getattr(subscription, "end_date", None)))
-
-    return f"""
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <title>طلب ترقية الباقة</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Tahoma,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f7fb;margin:0;padding:24px 0;">
-    <tr>
-      <td align="center">
-        <table width="680" cellpadding="0" cellspacing="0"
-               style="max-width:680px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
-
-          <tr>
-            <td align="center" style="background:#000000;padding:28px 24px;">
-              <img src="{logo_url}" alt="Primey"
-                   style="max-height:56px;width:auto;display:block;margin:0 auto 12px auto;" />
-              <div style="color:#ffffff;font-size:22px;font-weight:700;line-height:1.6;">
-                Primey HR Cloud
-              </div>
-              <div style="color:#d1d5db;font-size:14px;line-height:1.8;">
-                تم إنشاء طلب ترقية الباقة
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:32px 28px 20px 28px;">
-              <div style="font-size:15px;color:#374151;line-height:2;">
-                تم إنشاء طلب ترقية باقة الشركة بنجاح، وتم إصدار فاتورة بالمبلغ المستحق للترقية.
-              </div>
-
-              <div style="margin-top:22px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الشركة والاشتراك
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">اسم الشركة:</td><td style="padding:6px 0;">{company_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">البريد الإلكتروني:</td><td style="padding:6px 0;">{company_email}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الباقة الحالية:</td><td style="padding:6px 0;">{current_plan_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الباقة الجديدة:</td><td style="padding:6px 0;">{new_plan_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ البداية:</td><td style="padding:6px 0;">{start_date}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ النهاية:</td><td style="padding:6px 0;">{end_date}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الفاتورة
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">رقم الفاتورة الداخلي:</td><td style="padding:6px 0;">{invoice_id}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">رقم الفاتورة:</td><td style="padding:6px 0;">{invoice_number}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">المبلغ المستحق:</td><td style="padding:6px 0;">{invoice_total} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الحالة:</td><td style="padding:6px 0;">PENDING</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:22px;font-size:14px;color:#6b7280;line-height:2;">
-                سيتم استكمال الترقية بعد سداد الفاتورة الناتجة عن فرق السعر.
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:20px 28px 30px 28px;">
-              <div style="border-top:1px solid #e5e7eb;padding-top:18px;font-size:12px;color:#9ca3af;line-height:1.9;text-align:center;">
-                هذه رسالة آلية من Primey HR Cloud — يرجى عدم الرد عليها مباشرة.
-              </div>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""".strip()
-
-
-def _build_downgrade_email_html(*, subscription, current_plan, new_plan) -> str:
-    company = getattr(subscription, "company", None)
-
-    logo_url = escape(PRIMEY_EMAIL_LOGO_URL)
-    company_name = escape(_safe_text(getattr(company, "name", None)))
-    company_email = escape(_safe_text(getattr(company, "email", None)))
-    current_plan_name = escape(_safe_text(getattr(current_plan, "name", None)))
-    new_plan_name = escape(_safe_text(getattr(new_plan, "name", None)))
-    start_date = escape(_date_str(getattr(subscription, "start_date", None)))
-    end_date = escape(_date_str(getattr(subscription, "end_date", None)))
-
-    return f"""
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <title>جدولة تخفيض الباقة</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Tahoma,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f7fb;margin:0;padding:24px 0;">
-    <tr>
-      <td align="center">
-        <table width="680" cellpadding="0" cellspacing="0"
-               style="max-width:680px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
-
-          <tr>
-            <td align="center" style="background:#000000;padding:28px 24px;">
-              <img src="{logo_url}" alt="Primey"
-                   style="max-height:56px;width:auto;display:block;margin:0 auto 12px auto;" />
-              <div style="color:#ffffff;font-size:22px;font-weight:700;line-height:1.6;">
-                Primey HR Cloud
-              </div>
-              <div style="color:#d1d5db;font-size:14px;line-height:1.8;">
-                تم جدولة تغيير الباقة
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:32px 28px 20px 28px;">
-              <div style="font-size:15px;color:#374151;line-height:2;">
-                تم استلام طلب تخفيض الباقة، لكن هذا المسار يحتاج طبقة تخزين رسمية قبل التفعيل عند موعد التجديد القادم.
-              </div>
-
-              <div style="margin-top:22px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الشركة والاشتراك
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">اسم الشركة:</td><td style="padding:6px 0;">{company_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">البريد الإلكتروني:</td><td style="padding:6px 0;">{company_email}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الباقة الحالية:</td><td style="padding:6px 0;">{current_plan_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الباقة المطلوبة:</td><td style="padding:6px 0;">{new_plan_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ البداية الحالي:</td><td style="padding:6px 0;">{start_date}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ انتهاء الاشتراك الحالي:</td><td style="padding:6px 0;">{end_date}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:22px;font-size:14px;color:#6b7280;line-height:2;">
-                يلزم لاحقًا ربط هذا التدفق بطبقة حفظ رسمية لجدولة التخفيض.
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:20px 28px 30px 28px;">
-              <div style="border-top:1px solid #e5e7eb;padding-top:18px;font-size:12px;color:#9ca3af;line-height:1.9;text-align:center;">
-                هذه رسالة آلية من Primey HR Cloud — يرجى عدم الرد عليها مباشرة.
-              </div>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""".strip()
-
-
-def _send_upgrade_email(*, subscription, current_plan, new_plan, invoice, difference) -> None:
-    recipients = _collect_subscription_recipients(subscription)
-
-    if not recipients:
-        logger.warning(
-            "Upgrade email skipped: no recipients found. subscription_id=%s",
-            getattr(subscription, "id", None),
-        )
-        return
-
-    company = getattr(subscription, "company", None)
-
-    subject = f"طلب ترقية الباقة - {_safe_text(getattr(company, 'name', None), 'Company')}"
-
-    text_body = (
-        f"تم إنشاء طلب ترقية الباقة بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"الباقة الحالية: {_safe_text(getattr(current_plan, 'name', None))}\n"
-        f"الباقة الجديدة: {_safe_text(getattr(new_plan, 'name', None))}\n"
-        f"المبلغ المستحق: {_money_str(difference)} SAR\n"
-        f"رقم الفاتورة الداخلي: {_safe_text(getattr(invoice, 'id', None))}\n"
-        f"رقم الفاتورة: {_safe_text(getattr(invoice, 'invoice_number', None))}\n"
-        f"الحالة: PENDING\n\n"
-        f"مع تحيات Primey HR Cloud"
-    )
-
-    html_body = _build_upgrade_email_html(
-        subscription=subscription,
-        current_plan=current_plan,
-        new_plan=new_plan,
-        invoice=invoice,
-        difference=difference,
+        actor=actor,
     )
 
     try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_body,
-            from_email=DEFAULT_FROM_EMAIL,
-            to=recipients,
+        notify_func(
+            actor=actor,
+            subscription=subscription,
+            company=getattr(subscription, "company", None),
+            current_plan=current_plan,
+            new_plan=new_plan,
+            invoice=invoice,
+            extra_context=context,
         )
-        message.attach_alternative(html_body, "text/html")
-        message.send(fail_silently=False)
+        return
+    except TypeError:
+        pass
 
-        logger.info(
-            "Upgrade email sent successfully. subscription_id=%s recipients=%s",
-            getattr(subscription, "id", None),
-            recipients,
+    try:
+        notify_func(
+            actor=actor,
+            subscription=subscription,
+            company=getattr(subscription, "company", None),
+            current_plan=current_plan,
+            new_plan=new_plan,
+            invoice=invoice,
+            context=context,
         )
+        return
+    except TypeError:
+        pass
 
+    try:
+        notify_func(
+            subscription=subscription,
+            current_plan=current_plan,
+            new_plan=new_plan,
+            invoice=invoice,
+        )
+        return
     except Exception:
         logger.exception(
-            "Failed to send upgrade email. subscription_id=%s",
+            "Failed while dispatching upgrade notification. subscription_id=%s invoice_id=%s",
             getattr(subscription, "id", None),
+            getattr(invoice, "id", None),
         )
+        return
 
 
-def _send_downgrade_email(*, subscription, current_plan, new_plan) -> None:
-    recipients = _collect_subscription_recipients(subscription)
+def _dispatch_downgrade_notification(*, subscription, current_plan, new_plan, actor) -> None:
+    services_module = _load_subscription_notification_module()
 
-    if not recipients:
+    if not services_module:
         logger.warning(
-            "Downgrade email skipped: no recipients found. subscription_id=%s",
+            "Subscription notification service module not found for downgrade. subscription_id=%s",
             getattr(subscription, "id", None),
         )
         return
 
-    company = getattr(subscription, "company", None)
+    candidate_function_names = [
+        "notify_subscription_plan_downgrade_requested",
+        "notify_plan_downgrade_requested",
+        "send_subscription_downgrade_notification",
+        "send_plan_downgrade_notification",
+    ]
 
-    subject = f"طلب تخفيض الباقة - {_safe_text(getattr(company, 'name', None), 'Company')}"
+    notify_func = None
+    for func_name in candidate_function_names:
+        notify_func = getattr(services_module, func_name, None)
+        if callable(notify_func):
+            break
 
-    text_body = (
-        f"تم استلام طلب تخفيض الباقة داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"الباقة الحالية: {_safe_text(getattr(current_plan, 'name', None))}\n"
-        f"الباقة المطلوبة: {_safe_text(getattr(new_plan, 'name', None))}\n\n"
-        f"هذا التدفق يحتاج طبقة حفظ رسمية قبل تطبيقه عند موعد التجديد.\n\n"
-        f"مع تحيات Primey HR Cloud"
-    )
+    if not callable(notify_func):
+        logger.warning(
+            "Downgrade notification function not found. checked=%s",
+            ", ".join(candidate_function_names),
+        )
+        return
 
-    html_body = _build_downgrade_email_html(
+    context = _build_downgrade_context(
         subscription=subscription,
         current_plan=current_plan,
         new_plan=new_plan,
+        actor=actor,
     )
 
     try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_body,
-            from_email=DEFAULT_FROM_EMAIL,
-            to=recipients,
+        notify_func(
+            actor=actor,
+            subscription=subscription,
+            company=getattr(subscription, "company", None),
+            current_plan=current_plan,
+            new_plan=new_plan,
+            extra_context=context,
         )
-        message.attach_alternative(html_body, "text/html")
-        message.send(fail_silently=False)
+        return
+    except TypeError:
+        pass
 
-        logger.info(
-            "Downgrade email sent successfully. subscription_id=%s recipients=%s",
-            getattr(subscription, "id", None),
-            recipients,
+    try:
+        notify_func(
+            actor=actor,
+            subscription=subscription,
+            company=getattr(subscription, "company", None),
+            current_plan=current_plan,
+            new_plan=new_plan,
+            context=context,
         )
+        return
+    except TypeError:
+        pass
 
+    try:
+        notify_func(
+            subscription=subscription,
+            current_plan=current_plan,
+            new_plan=new_plan,
+        )
+        return
     except Exception:
         logger.exception(
-            "Failed to send downgrade email. subscription_id=%s",
+            "Failed while dispatching downgrade notification. subscription_id=%s",
             getattr(subscription, "id", None),
         )
+        return
 
 
 # ============================================================
@@ -762,22 +596,13 @@ def change_subscription_plan(request, subscription_id):
         )
 
         transaction.on_commit(
-            lambda: _send_upgrade_email(
+            lambda: _dispatch_upgrade_notification(
                 subscription=subscription,
                 current_plan=current_plan,
                 new_plan=new_plan,
                 invoice=invoice,
                 difference=difference,
-            )
-        )
-
-        transaction.on_commit(
-            lambda: _send_upgrade_whatsapp(
-                subscription=subscription,
-                current_plan=current_plan,
-                new_plan=new_plan,
-                invoice=invoice,
-                difference=difference,
+                actor=request.user,
             )
         )
 
@@ -793,18 +618,11 @@ def change_subscription_plan(request, subscription_id):
     # --------------------------------------------------------
 
     transaction.on_commit(
-        lambda: _send_downgrade_email(
+        lambda: _dispatch_downgrade_notification(
             subscription=subscription,
             current_plan=current_plan,
             new_plan=new_plan,
-        )
-    )
-
-    transaction.on_commit(
-        lambda: _send_downgrade_whatsapp(
-            subscription=subscription,
-            current_plan=current_plan,
-            new_plan=new_plan,
+            actor=request.user,
         )
     )
 

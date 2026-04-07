@@ -1,6 +1,6 @@
 # ===============================================================
 # 💸 Discount Service — Invoice Level (Immutable)
-# Primey HR Cloud | Billing Center
+# Mham Cloud | Billing Center
 # ===============================================================
 
 from decimal import Decimal

@@ -12,7 +12,7 @@
 # ✔ Auto Patch Department After Create (Biotime SaaS Fix)
 # ✔ Import Safe (Signals Stable)
 # ✔ No Breaking Changes (Additive Only) 🔒
-# ✔ Developed by Mazen — Primey HR Cloud 2026
+# ✔ Developed by Mazen — Mham Cloud 2026
 # ============================================================
 
 import logging

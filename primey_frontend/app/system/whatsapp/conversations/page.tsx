@@ -2,7 +2,7 @@
 
 // ============================================================
 // 📂 الملف: app/system/whatsapp/conversations/page.tsx
-// 🟢 Primey HR Cloud - System WhatsApp Conversations Page
+// 🟢 Mham Cloud - System WhatsApp Conversations Page
 // ------------------------------------------------------------
 // ✅ تقليل عرض قائمة الدردشات لتقترب من المرجع
 // ✅ الحفاظ على المساحة الكافية للعناصر داخل الصف

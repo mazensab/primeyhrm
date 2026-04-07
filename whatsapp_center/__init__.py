@@ -1,4 +1,4 @@
 # ============================================================
 # 📂 whatsapp_center/__init__.py
-# Primey HR Cloud - WhatsApp Center
+# Mham Cloud - WhatsApp Center
 # ============================================================

@@ -1,7 +1,7 @@
 """
 ====================================================================
 📊 Company Activity Snapshot API (READ ONLY)
-Primey HR Cloud
+Mham Cloud
 Version: V1.1 Ultra Stable
 ====================================================================
 ✔ Single Source of Truth

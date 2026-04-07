@@ -1,6 +1,6 @@
 # ===============================================================
 # 🔁 Migration Tool — Apps Snapshot for Legacy Subscriptions
-# Primey HR Cloud | Billing Center
+# Mham Cloud | Billing Center
 # ===============================================================
 # ✔ One-off manual command
 # ✔ Idempotent & Safe

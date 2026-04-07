@@ -1,6 +1,6 @@
 # ===============================================================
 # 🔁 Renew Subscriptions Scheduler Command
-# Primey HR Cloud | Billing Center
+# Mham Cloud | Billing Center
 # ===============================================================
 # ✔ Renew ACTIVE subscriptions
 # ✔ Auto suspend companies with EXPIRED subscriptions

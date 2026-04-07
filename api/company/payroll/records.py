@@ -1,10 +1,13 @@
 # ============================================================
 # 📂 api/company/payroll/records.py
-# 🧾 Payroll Record APIs — Phase 5.3
+# 🧾 Payroll Record APIs — Phase 5.5
 # 🔒 Snapshot Aware + Company Scoped + Audit Log
+# ✅ Pro-Rata Aware + Safer Remaining Amount Logic
+# ✅ Notification Center First
 # ============================================================
 
 from decimal import Decimal
+import logging
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -25,6 +28,62 @@ from payroll_center.services.reporting import get_employee_payroll_ledger
 from payroll_center.services.payroll_engine import mark_payroll_record_paid
 
 from company_manager.models import CompanyUser
+from notification_center.services_hr import notify_payroll_record_paid
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 🔧 Helpers
+# ============================================================
+
+def _to_decimal(value, default: str = "0.00") -> Decimal:
+    try:
+        if value is None or value == "":
+            return Decimal(default)
+        return Decimal(str(value))
+    except Exception:
+        return Decimal(default)
+
+
+def _safe_remaining_amount(record, source=None) -> Decimal:
+    """
+    نحسب المتبقي بشكل آمن حتى لو لم يكن الحقل property أو لم يكن متزامنًا.
+    """
+    source_obj = source or record
+
+    net_salary = _to_decimal(getattr(source_obj, "net_salary", None), "0.00")
+    paid_amount = _to_decimal(getattr(record, "paid_amount", None), "0.00")
+
+    remaining = net_salary - paid_amount
+    if remaining < Decimal("0.00"):
+        return Decimal("0.00")
+    return remaining.quantize(Decimal("0.01"))
+
+
+def _can_pay_record(run, record, source=None) -> bool:
+    if str(getattr(run, "status", "")).upper() != "APPROVED":
+        return False
+
+    if str(getattr(record, "status", "")).upper() == "PAID":
+        return False
+
+    return _safe_remaining_amount(record, source) > Decimal("0.00")
+
+
+def _has_salary_content(source) -> bool:
+    if not source:
+        return False
+
+    values = [
+        getattr(source, "base_salary", 0),
+        getattr(source, "allowance", 0),
+        getattr(source, "bonus", 0),
+        getattr(source, "overtime", 0),
+        getattr(source, "deductions", 0),
+        getattr(source, "net_salary", 0),
+    ]
+    return any(_to_decimal(v, "0.00") != Decimal("0.00") for v in values)
 
 
 # ============================================================
@@ -44,7 +103,7 @@ def _resolve_company(user):
 
 # ============================================================
 # 🔐 RBAC Check — PAYROLL_CENTER.generate OR PAYROLL_CENTER.approve
-# الهدف: الدفع مسموح لمن لديه generate أو approve (حسب قرارك)
+# الهدف: الدفع مسموح لمن لديه generate أو approve
 # ============================================================
 
 def _has_payroll_generate_or_approve(user, company) -> bool:
@@ -58,7 +117,6 @@ def _has_payroll_generate_or_approve(user, company) -> bool:
     if not company_user:
         return False
 
-    # ✅ إذا لا توجد أدوار نهائياً — اسمح مؤقتاً (وضع البناء)
     if company_user.roles.count() == 0:
         return True
 
@@ -70,6 +128,8 @@ def _has_payroll_generate_or_approve(user, company) -> bool:
             return True
 
     return False
+
+
 # ============================================================
 # 📋 Records List API
 # GET /api/company/payroll/runs/<id>/records/
@@ -101,16 +161,27 @@ class PayrollRunRecordsListAPIView(APIView):
                 "status",
                 "paid_amount",
                 "net_salary",
+                "base_salary",
+                "allowance",
+                "bonus",
+                "overtime",
+                "deductions",
+                "breakdown",
                 "employee__id",
                 "employee__full_name",
                 "run__status",
                 "snapshot__net_salary",
+                "snapshot__base_salary",
+                "snapshot__allowance",
+                "snapshot__bonus",
+                "snapshot__overtime",
+                "snapshot__deductions",
+                "snapshot__breakdown",
             )
             .filter(run=run)
             .order_by("employee__full_name")
         )
 
-        # 🔎 Filtering
         status_filter = request.GET.get("status")
         search = request.GET.get("search")
 
@@ -122,7 +193,6 @@ class PayrollRunRecordsListAPIView(APIView):
                 Q(employee__full_name__icontains=search)
             )
 
-        # 📄 Pagination
         try:
             page = max(int(request.GET.get("page", 1)), 1)
         except ValueError:
@@ -146,21 +216,23 @@ class PayrollRunRecordsListAPIView(APIView):
         results = []
 
         for record in records:
-            if use_snapshot and getattr(record, "snapshot", None):
-                net_salary = record.snapshot.net_salary
-            else:
-                net_salary = record.net_salary
+            source = record.snapshot if (use_snapshot and getattr(record, "snapshot", None)) else record
+            remaining_amount = _safe_remaining_amount(record, source)
+            can_pay = _can_pay_record(run, record, source)
 
             results.append({
                 "record_id": record.id,
                 "employee_id": record.employee.id,
                 "employee_name": record.employee.full_name,
-                "net_salary": net_salary,
+                "net_salary": source.net_salary,
                 "paid_amount": record.paid_amount,
-                "remaining_amount": record.remaining_amount,
+                "remaining_amount": remaining_amount,
                 "status": record.status,
                 "run_status": run.status,
                 "is_snapshot": use_snapshot,
+                "can_pay": can_pay,
+                "can_print": _has_salary_content(source),
+                "can_view_slip": _has_salary_content(source),
             })
 
         return Response({
@@ -240,25 +312,24 @@ class PayrollRecordDetailAPIView(APIView):
         )
 
         run = record.run
-
-        # 🧊 Snapshot Aware
         use_snapshot = run.status in ["APPROVED", "PAID"]
         source = record.snapshot if (use_snapshot and getattr(record, "snapshot", None)) else record
 
+        remaining_amount = _safe_remaining_amount(record, source)
+        can_pay = _can_pay_record(run, record, source)
+        can_print = _has_salary_content(source)
+
         response_data = {
             "record_id": record.id,
-
             "employee": {
                 "id": record.employee.id,
                 "full_name": record.employee.full_name,
             },
-
             "run": {
                 "id": run.id,
                 "month": run.month.strftime("%Y-%m"),
                 "status": run.status,
             },
-
             "salary": {
                 "base_salary": source.base_salary,
                 "allowance": source.allowance,
@@ -267,24 +338,22 @@ class PayrollRecordDetailAPIView(APIView):
                 "deductions": source.deductions,
                 "net_salary": source.net_salary,
             },
-
             "payment": {
                 "status": record.status,
                 "paid_amount": record.paid_amount,
-                "remaining_amount": record.remaining_amount,
+                "remaining_amount": remaining_amount,
                 "payment_method": record.payment_method,
                 "paid_at": record.paid_at,
             },
-
             "breakdown": source.breakdown or {},
-
             "meta": {
                 "is_snapshot": use_snapshot,
                 "is_fully_paid": record.is_fully_paid,
-                "can_pay": run.status == "APPROVED" and record.status != "PAID",
+                "can_pay": can_pay,
+                "can_print": can_print,
+                "can_view_slip": can_print,
+                "has_remaining_amount": remaining_amount > Decimal("0.00"),
             },
-
-            # 🆕 Audit Log
             "history": [
                 {
                     "id": log.id,
@@ -349,19 +418,19 @@ class PayrollRecordPayAPIView(APIView):
         if not company:
             return Response({"error": "NO_COMPANY"}, status=status.HTTP_403_FORBIDDEN)
 
-        # ✅ RBAC: generate OR approve (حسب قرارك)
         if not _has_payroll_generate_or_approve(request.user, company):
             return Response({"error": "PERMISSION_DENIED"}, status=status.HTTP_403_FORBIDDEN)
 
         record = get_object_or_404(
-            PayrollRecord.objects.select_related("run", "employee").select_for_update(),
+            PayrollRecord.objects.select_related("run", "employee", "snapshot").select_for_update(),
             id=record_id,
             run__company=company,
         )
 
         run = record.run
+        use_snapshot = run.status in ["APPROVED", "PAID"]
+        source = record.snapshot if (use_snapshot and getattr(record, "snapshot", None)) else record
 
-        # 🔒 Run must be APPROVED
         approved_value = getattr(PayrollRun.Status, "APPROVED", "APPROVED")
         if run.status != approved_value and run.status != "APPROVED":
             return Response(
@@ -369,9 +438,10 @@ class PayrollRecordPayAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 📥 Read payload (Frontend يرسل method + amount)
         amount_raw = request.data.get("amount")
         method = request.data.get("method") or request.data.get("payment_method")
+        reference = (request.data.get("reference") or "").strip()
+        notes = (request.data.get("notes") or "").strip()
 
         if amount_raw is None:
             return Response(
@@ -393,7 +463,7 @@ class PayrollRecordPayAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        remaining = record.remaining_amount
+        remaining = _safe_remaining_amount(record, source)
         if remaining <= 0:
             return Response(
                 {"detail": "No remaining amount to pay."},
@@ -412,7 +482,12 @@ class PayrollRecordPayAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 💰 Apply payment (Partial supported)
+        if method == "BANK" and not reference:
+            return Response(
+                {"detail": "Transfer reference is required for bank payment."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         mark_payroll_record_paid(
             record=record,
             payment_method=method,
@@ -420,14 +495,46 @@ class PayrollRecordPayAPIView(APIView):
             user=request.user,
         )
 
+        extra_notes = []
+        if reference:
+            extra_notes.append(f"reference={reference}")
+        if notes:
+            extra_notes.append(f"notes={notes}")
+
+        if extra_notes:
+            PayrollRecordHistory.objects.create(
+                payroll_record=record,
+                user=request.user,
+                action="payment_note",
+                notes=" | ".join(extra_notes),
+            )
+
         record.refresh_from_db()
+        refreshed_source = record.snapshot if (use_snapshot and getattr(record, "snapshot", None)) else record
+        refreshed_remaining = _safe_remaining_amount(record, refreshed_source)
+
+        try:
+            notify_payroll_record_paid(
+                record,
+                send_email_to_employee=True,
+                send_email_to_managers=False,
+            )
+        except Exception:
+            logger.exception(
+                "⚠ Payroll paid notification hook failed (non-blocking) | record=%s",
+                record.id,
+            )
 
         return Response(
             {
                 "detail": "Payment applied successfully.",
                 "record_status": record.status,
                 "paid_amount": record.paid_amount,
-                "remaining_amount": record.remaining_amount,
+                "remaining_amount": refreshed_remaining,
+                "payment_method": method,
+                "reference": reference or None,
+                "notes": notes or None,
+                "can_pay": _can_pay_record(run, record, refreshed_source),
             },
             status=status.HTTP_200_OK,
         )

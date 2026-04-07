@@ -2,7 +2,7 @@
 # 📂 الملف: biotime_center/apps.py
 # 🚀 تهيئة وحدة Biotime Center — الإصدار النهائي V7.1 (Migration Safe)
 # ------------------------------------------------------------
-# ✔ متوافق مع نظام Primey HR Cloud V2026
+# ✔ متوافق مع نظام Mham Cloud V2026
 # ✔ يمنع circular imports أثناء migrations
 # ✔ يدعم Signals + Services عند التشغيل الطبيعي
 # ============================================================

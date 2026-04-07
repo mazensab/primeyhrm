@@ -1,5 +1,5 @@
 # 📂 الملف: billing_center/forms.py
-# 🧭 نماذج الإدخال الخاصة بنظام التسجيل في Primey HR Cloud
+# 🧭 نماذج الإدخال الخاصة بنظام التسجيل في Mham Cloud
 
 from django import forms
 from .models import Company, AccountProfile, SubscriptionPlan

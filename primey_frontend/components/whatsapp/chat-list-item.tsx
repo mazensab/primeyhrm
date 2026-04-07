@@ -2,7 +2,7 @@
 
 // ============================================================
 // 📂 الملف: components/whatsapp/chat-list-item.tsx
-// 🟢 Primey HR Cloud - WhatsApp Chat List Item
+// 🟢 Mham Cloud - WhatsApp Chat List Item
 // ------------------------------------------------------------
 // ✅ ضبط نهائي لصف الدردشة ليقترب من المرجع المدفوع
 // ✅ تحسين توزيع avatar / title / time / preview / unread / menu

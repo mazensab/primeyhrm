@@ -6,7 +6,7 @@ from company_manager.models import Company
 from .models import SystemLog
 
 # ================================================================
-# 📘 System Log Views — V1 (Primey HR Cloud)
+# 📘 System Log Views — V1 (Mham Cloud)
 # (تم الاحتفاظ بها كما هي)
 # ================================================================
 

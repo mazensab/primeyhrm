@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/whatsapp/inbox.py
 # 💬 System WhatsApp Inbox APIs
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✅ يدعم:
 # - Inbox conversations list

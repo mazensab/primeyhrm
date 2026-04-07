@@ -66,7 +66,7 @@ def test_smtp():
     cfg = get_email_settings()
 
     email = EmailMessage(
-        subject="Test SMTP — Primey HR Cloud",
+        subject="Test SMTP — Mham Cloud",
         body="✔ تم إرسال رسالة الاختبار بنجاح",
         to=[cfg.username],
     )

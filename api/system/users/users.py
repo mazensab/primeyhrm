@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/system/users.py
-# Primey HR Cloud
+# Mham Cloud
 # System Internal Users API
 # ============================================================
 # المستخدمون الداخليون:
@@ -14,6 +14,8 @@
 # ✅ القرار المعتمد:
 # مستخدمو النظام الداخلي يجب أن يرتبطوا بنفس الشركة الداخلية الموجودة
 # أصلًا في النظام (مثل superadmin) — بدون إنشاء شركة جديدة.
+# ✅ تم تنظيف الإرسال المباشر للبريد والواتساب من هذا الملف
+# ✅ تم الاعتماد على notification_center/services_system_users.py
 # ============================================================
 
 from __future__ import annotations
@@ -23,25 +25,25 @@ import logging
 import secrets
 from typing import Optional
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import Group
-from django.core.mail import EmailMultiAlternatives
-from django.db import transaction, IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse
-from django.utils import timezone
-from django.utils.html import escape
 from django.views.decorators.http import require_GET, require_POST
 
-from company_manager.models import CompanyUser
 from auth_center.models import UserProfile
-from whatsapp_center.models import ScopeType, TriggerSource
-from whatsapp_center.services import send_event_whatsapp_message
+from company_manager.models import CompanyUser
+from notification_center.services_system_users import (
+    notify_system_user_created,
+    notify_system_user_deleted,
+    notify_system_user_password_changed,
+    notify_system_user_role_changed,
+    notify_system_user_status_changed,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
-LOGO_URL = "https://drive.google.com/uc?export=view&id=1a0Y1SK3n-Hn9QDZa7Ge24r3--B8zXbTd"
 
 # ============================================================
 # Constants
@@ -225,7 +227,6 @@ def _get_internal_role(user) -> Optional[str]:
     2) Group SYSTEM_ADMIN
     3) Group SUPPORT
     """
-
     if user.is_superuser:
         return ROLE_SUPER_ADMIN
 
@@ -246,7 +247,9 @@ def _ensure_group(name: str) -> Group:
 
 
 def _clear_internal_groups(user):
-    user.groups.remove(*Group.objects.filter(name__in=[ROLE_SYSTEM_ADMIN, ROLE_SUPPORT]))
+    user.groups.remove(
+        *Group.objects.filter(name__in=[ROLE_SYSTEM_ADMIN, ROLE_SUPPORT])
+    )
 
 
 def _apply_internal_role(user, role: str):
@@ -256,7 +259,6 @@ def _apply_internal_role(user, role: str):
     - SYSTEM_ADMIN: is_superuser=False, is_staff=True, Group SYSTEM_ADMIN
     - SUPPORT: is_superuser=False, is_staff=True, Group SUPPORT
     """
-
     if role not in ALLOWED_ROLES:
         raise ValueError("Invalid role")
 
@@ -313,385 +315,6 @@ def _model_field_names() -> set[str]:
     return {field.name for field in User._meta.get_fields()}
 
 
-def _get_frontend_base_url() -> str:
-    """
-    جلب رابط الفرونت بشكل آمن.
-    """
-    return (
-        getattr(settings, "FRONTEND_BASE_URL", None)
-        or getattr(settings, "FRONTEND_URL", None)
-        or getattr(settings, "NEXT_PUBLIC_APP_URL", None)
-        or "https://primeyride.com"
-    ).rstrip("/")
-
-
-def _get_login_url() -> str:
-    return f"{_get_frontend_base_url()}/login"
-
-
-def _get_system_users_url() -> str:
-    return f"{_get_frontend_base_url()}/system/users"
-
-
-def _send_html_email(
-    *,
-    subject: str,
-    to_email: str,
-    text_content: str,
-    html_content: str,
-) -> tuple[bool, Optional[str]]:
-    """
-    إرسال إيميل HTML/TEXT بشكل آمن.
-    لا نرمي الاستثناء للأعلى حتى لا نكسر العملية الأساسية.
-    """
-    if not to_email:
-        return False, "Recipient email is empty"
-
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or getattr(
-        settings,
-        "EMAIL_HOST_USER",
-        None,
-    )
-
-    if not from_email:
-        return False, "DEFAULT_FROM_EMAIL / EMAIL_HOST_USER not configured"
-
-    try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_content,
-            from_email=from_email,
-            to=[to_email],
-        )
-        message.attach_alternative(html_content, "text/html")
-        message.send(fail_silently=False)
-        return True, None
-
-    except Exception as exc:
-        logger.exception("Email send failed: %s", exc)
-        return False, str(exc)
-
-
-def _build_email_shell(
-    *,
-    title: str,
-    intro: str,
-    rows: list[tuple[str, str]],
-    primary_button_label: str,
-    primary_button_url: str,
-    note: str = "",
-) -> tuple[str, str]:
-    """
-    بناء HTML بسيط وآمن كمرحلة تشغيلية مستقرة.
-    لاحقًا يمكن استبداله بـ React Email render بدون تغيير الـ API.
-    """
-    safe_title = escape(title)
-    safe_intro = escape(intro)
-    safe_note = escape(note)
-    safe_button_label = escape(primary_button_label)
-    safe_button_url = escape(primary_button_url)
-
-    rows_html = ""
-    text_rows = []
-
-    for label, value in rows:
-        safe_label = escape(label)
-        safe_value = escape(value or "")
-        rows_html += f"""
-            <tr>
-                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;color:#0f172a;width:160px;">{safe_label}</td>
-                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#475569;">{safe_value}</td>
-            </tr>
-        """
-        text_rows.append(f"{label}: {value}")
-
-    html = f"""
-    <div dir="rtl" style="margin:0;padding:24px 12px;background:#f6f8fb;font-family:Tahoma,Arial,'Segoe UI',sans-serif;">
-      <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #e8eef7;border-radius:20px;overflow:hidden;">
-        <div style="background:#000000;padding:28px 24px;text-align:center;">
-          <img
-            src="{escape(LOGO_URL)}"
-            alt="Primey HR Cloud"
-            width="148"
-            height="48"
-            style="display:block;margin:0 auto 14px;object-fit:contain;"
-          />
-          <div style="font-size:14px;color:#cbd5e1;line-height:24px;">نظام احترافي لإدارة الشركات والموظفين والفوترة والاشتراكات</div>
-        </div>
-        <div style="padding:28px 24px 12px;">
-          <div style="margin:0 0 16px;font-size:24px;font-weight:700;color:#0f172a;line-height:1.5;">{safe_title}</div>
-
-          <div style="border:1px solid #e5e7eb;border-radius:16px;padding:24px;">
-            <p style="margin:0 0 18px;font-size:15px;line-height:28px;color:#334155;">{safe_intro}</p>
-
-            <table width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:0;border-collapse:collapse;overflow:hidden;">
-              {rows_html}
-            </table>
-
-            <div style="text-align:center;padding:24px 0 16px;">
-              <a href="{safe_button_url}" style="background:#0f172a;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;border-radius:12px;padding:14px 24px;display:inline-block;">
-                {safe_button_label}
-              </a>
-            </div>
-
-            {f'<p style="margin:0 0 10px;font-size:13px;line-height:24px;color:#b45309;">{safe_note}</p>' if safe_note else ''}
-            <p style="margin:0;font-size:13px;color:#64748b;">إذا لم يعمل الزر، استخدم الرابط التالي:</p>
-            <p style="margin:8px 0 0;">
-              <a href="{safe_button_url}" style="color:#2563eb;font-size:13px;text-decoration:none;">{safe_button_url}</a>
-            </p>
-          </div>
-        </div>
-
-        <div style="padding:8px 24px 26px;text-align:center;">
-          <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0 20px;" />
-          <p style="margin:0 0 8px;color:#475569;font-size:13px;line-height:22px;">تم إرسال هذه الرسالة من خلال نظام Primey HR Cloud.</p>
-          <p style="margin:0 0 8px;color:#475569;font-size:13px;line-height:22px;">الدعم الفني: info@primeyride.com</p>
-          <p style="margin:8px 0 0;color:#94a3b8;font-size:12px;line-height:20px;">© 2026 Primey HR Cloud. جميع الحقوق محفوظة.</p>
-        </div>
-      </div>
-    </div>
-    """
-
-    text = "\n".join(
-        [
-            title,
-            "",
-            intro,
-            "",
-            *text_rows,
-            "",
-            f"{primary_button_label}: {primary_button_url}",
-            "",
-            note or "",
-        ]
-    )
-
-    return text, html
-
-
-def _send_system_whatsapp_notification(
-    *,
-    user,
-    event_code: str,
-    context: dict,
-    recipient_role: str = "",
-    language_code: str = "ar",
-) -> tuple[bool, Optional[str]]:
-    """
-    إرسال واتساب داخلي بشكل Fail-Safe.
-    لا يكسر العملية الأساسية عند عدم وجود رقم أو إعداد نشط.
-    """
-    recipient_phone = _get_user_whatsapp_phone(user)
-
-    if not recipient_phone:
-        return False, "User has no WhatsApp phone number"
-
-    try:
-        log = send_event_whatsapp_message(
-            scope_type=ScopeType.SYSTEM,
-            event_code=event_code,
-            recipient_phone=recipient_phone,
-            recipient_name=_get_full_name(user),
-            recipient_role=recipient_role or (_get_internal_role(user) or ROLE_SUPPORT),
-            trigger_source=TriggerSource.SYSTEM,
-            language_code=language_code or "ar",
-            context=context,
-            related_model="User",
-            related_object_id=str(user.id),
-        )
-
-        delivery_status = getattr(log, "delivery_status", "")
-        failure_reason = getattr(log, "failure_reason", "")
-
-        if str(delivery_status).upper() == "FAILED":
-            return False, failure_reason or "WhatsApp delivery failed"
-
-        return True, None
-
-    except Exception as exc:
-        logger.exception("WhatsApp send failed for event %s: %s", event_code, exc)
-        return False, str(exc)
-
-
-# ============================================================
-# Email Event Helpers
-# ============================================================
-
-def _send_system_user_created_email(user, password: str, role: str) -> tuple[bool, Optional[str]]:
-    """
-    إيميل إنشاء مستخدم نظام داخلي.
-    """
-    if not user.email:
-        return False, "User has no email"
-
-    full_name = _get_full_name(user)
-    login_url = _get_login_url()
-
-    text_content, html_content = _build_email_shell(
-        title="تم إنشاء حسابك في Primey HR Cloud",
-        intro="تم إنشاء حسابك بنجاح كمستخدم داخلي في النظام. يمكنك تسجيل الدخول باستخدام البيانات التالية، ونوصي بتغيير كلمة المرور فور أول دخول.",
-        rows=[
-            ("الاسم", full_name),
-            ("اسم المستخدم", user.username),
-            ("البريد الإلكتروني", user.email or ""),
-            ("الدور", role),
-            ("كلمة المرور المؤقتة", password),
-        ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="تنبيه أمني: لا تشارك كلمة المرور مع أي شخص غير مخوّل.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم إنشاء حسابك",
-        to_email=user.email,
-        text_content=text_content,
-        html_content=html_content,
-    )
-
-
-def _send_system_user_password_reset_email(user, new_password: str) -> tuple[bool, Optional[str]]:
-    """
-    إيميل إعادة تعيين كلمة المرور.
-    """
-    if not user.email:
-        return False, "User has no email"
-
-    full_name = _get_full_name(user)
-    login_url = _get_login_url()
-
-    text_content, html_content = _build_email_shell(
-        title="تم تغيير كلمة المرور بنجاح",
-        intro="تمت إعادة تعيين كلمة مرور حسابك بنجاح من خلال إدارة النظام. يمكنك الآن تسجيل الدخول باستخدام كلمة المرور الجديدة الموضحة أدناه.",
-        rows=[
-            ("الاسم", full_name),
-            ("اسم المستخدم", user.username),
-            ("البريد الإلكتروني", user.email or ""),
-            ("كلمة المرور الجديدة", new_password),
-        ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا لم تكن تتوقع هذا التغيير، يرجى التواصل مع مسؤول النظام فورًا.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم تحديث كلمة المرور",
-        to_email=user.email,
-        text_content=text_content,
-        html_content=html_content,
-    )
-
-
-def _send_system_user_role_changed_email(
-    user,
-    old_role: str,
-    new_role: str,
-) -> tuple[bool, Optional[str]]:
-    """
-    إشعار تغيير الدور.
-    """
-    if not user.email:
-        return False, "User has no email"
-
-    full_name = _get_full_name(user)
-    login_url = _get_login_url()
-
-    text_content, html_content = _build_email_shell(
-        title="تم تحديث صلاحية حسابك",
-        intro="تم تغيير الدور أو الصلاحية المرتبطة بحسابك من خلال إدارة النظام. نرجو مراجعة التفاصيل التالية.",
-        rows=[
-            ("الاسم", full_name),
-            ("اسم المستخدم", user.username),
-            ("البريد الإلكتروني", user.email or ""),
-            ("الدور السابق", old_role or ""),
-            ("الدور الجديد", new_role or ""),
-        ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا لم تكن تتوقع هذا التغيير، يرجى التواصل مع مسؤول النظام فورًا.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم تحديث صلاحية الحساب",
-        to_email=user.email,
-        text_content=text_content,
-        html_content=html_content,
-    )
-
-
-def _send_system_user_status_changed_email(
-    user,
-    new_status: bool,
-) -> tuple[bool, Optional[str]]:
-    """
-    إشعار تفعيل/تعطيل الحساب.
-    """
-    if not user.email:
-        return False, "User has no email"
-
-    full_name = _get_full_name(user)
-    login_url = _get_login_url()
-    current_role = _get_internal_role(user) or ROLE_SUPPORT
-    status_label = "ACTIVE" if new_status else "INACTIVE"
-
-    text_content, html_content = _build_email_shell(
-        title="تم تحديث حالة حسابك",
-        intro="تم تغيير حالة حسابك من خلال إدارة النظام. نرجو مراجعة الحالة الحالية أدناه.",
-        rows=[
-            ("الاسم", full_name),
-            ("اسم المستخدم", user.username),
-            ("البريد الإلكتروني", user.email or ""),
-            ("الدور الحالي", current_role),
-            ("الحالة الحالية", status_label),
-        ],
-        primary_button_label="تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا تم تعطيل الحساب ولم تكن تتوقع ذلك، يرجى التواصل مع مسؤول النظام.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم تحديث حالة الحساب",
-        to_email=user.email,
-        text_content=text_content,
-        html_content=html_content,
-    )
-
-
-def _send_system_user_deleted_email(
-    *,
-    username: str,
-    email: str,
-    full_name: str,
-) -> tuple[bool, Optional[str]]:
-    """
-    إشعار حذف الحساب الداخلي.
-    """
-    if not email:
-        return False, "User has no email"
-
-    login_url = _get_login_url()
-
-    text_content, html_content = _build_email_shell(
-        title="تم حذف حسابك من النظام",
-        intro="تم حذف حسابك الداخلي من نظام Primey HR Cloud من خلال إدارة النظام.",
-        rows=[
-            ("الاسم", full_name or username),
-            ("اسم المستخدم", username),
-            ("البريد الإلكتروني", email or ""),
-        ],
-        primary_button_label="صفحة تسجيل الدخول",
-        primary_button_url=login_url,
-        note="إذا لم تكن تتوقع هذا الإجراء، يرجى التواصل مع مسؤول النظام فورًا.",
-    )
-
-    return _send_html_email(
-        subject="Primey HR Cloud | تم حذف الحساب",
-        to_email=email,
-        text_content=text_content,
-        html_content=html_content,
-    )
-
-
 def _get_internal_company_for_system_users(actor=None):
     """
     جلب الشركة الداخلية الموجودة أصلًا دون إنشاء شركة جديدة.
@@ -701,7 +324,6 @@ def _get_internal_company_for_system_users(actor=None):
     2) أول شركة فعّالة مرتبطة بالسوبر أدمن الحالي (actor)
     3) أول شركة فعّالة مرتبطة بأي سوبر أدمن في النظام
     """
-
     default_link = (
         CompanyUser.objects
         .select_related("company", "user")
@@ -751,7 +373,6 @@ def _ensure_internal_company_membership(user, actor=None):
     ربط مستخدم النظام الداخلي بنفس الشركة الداخلية الموجودة أصلًا.
     لا يتم إنشاء شركة جديدة نهائيًا.
     """
-
     company = _get_internal_company_for_system_users(actor=actor)
 
     if not company:
@@ -785,7 +406,6 @@ def system_users_list(request):
     q = (request.GET.get("q") or "").strip()
 
     users = User.objects.all().order_by("-date_joined")
-
     users = [user for user in users if _is_internal_user(user)]
 
     if q:
@@ -923,7 +543,6 @@ def system_user_create(request):
             user.save()
 
             _apply_internal_role(user, role)
-
             _ensure_internal_company_membership(
                 user=user,
                 actor=request.user,
@@ -934,41 +553,23 @@ def system_user_create(request):
 
             created_user = user
 
-        email_sent = False
-        email_error = None
-        whatsapp_sent = False
-        whatsapp_error = None
-
-        if created_user and created_user.email:
-            email_sent, email_error = _send_system_user_created_email(
-                user=created_user,
-                password=password,
-                role=role,
-            )
-
-        if created_user:
-            whatsapp_sent, whatsapp_error = _send_system_whatsapp_notification(
-                user=created_user,
-                event_code="system_user_created",
-                recipient_role=role,
-                language_code="ar",
-                context={
-                    "full_name": _get_full_name(created_user),
-                    "username": created_user.username or "",
-                    "email": created_user.email or "",
-                    "temporary_password": password,
-                    "login_url": _get_login_url(),
-                },
-            )
+        notify_result = notify_system_user_created(
+            user=created_user,
+            password=password,
+            role=role,
+            actor=request.user,
+            company=_get_internal_company_for_system_users(actor=request.user),
+        )
 
         return _ok({
             "message": "System user created successfully",
             "user": _serialize_user(created_user),
             "temporary_password": password,
-            "email_sent": email_sent,
-            "email_error": email_error,
-            "whatsapp_sent": whatsapp_sent,
-            "whatsapp_error": whatsapp_error,
+            "notification_created": notify_result.get("notification_created", False),
+            "email_sent": notify_result.get("email_sent", False),
+            "email_error": notify_result.get("email_error"),
+            "whatsapp_sent": notify_result.get("whatsapp_sent", False),
+            "whatsapp_error": notify_result.get("whatsapp_error"),
         }, status=201)
 
     except IntegrityError as exc:
@@ -1023,19 +624,20 @@ def system_user_toggle_status(request):
     user.is_active = not user.is_active
     user.save(update_fields=["is_active"])
 
-    email_sent = False
-    email_error = None
-
-    if user.email:
-        email_sent, email_error = _send_system_user_status_changed_email(
-            user=user,
-            new_status=user.is_active,
-        )
+    notify_result = notify_system_user_status_changed(
+        user=user,
+        is_active=user.is_active,
+        actor=request.user,
+        company=_get_internal_company_for_system_users(actor=request.user),
+    )
 
     return _ok({
         "message": "User status updated successfully",
-        "email_sent": email_sent,
-        "email_error": email_error,
+        "notification_created": notify_result.get("notification_created", False),
+        "email_sent": notify_result.get("email_sent", False),
+        "email_error": notify_result.get("email_error"),
+        "whatsapp_sent": notify_result.get("whatsapp_sent", False),
+        "whatsapp_error": notify_result.get("whatsapp_error"),
         "user": _serialize_user(user),
     })
 
@@ -1073,26 +675,26 @@ def system_user_change_role(request):
     try:
         with transaction.atomic():
             _apply_internal_role(user, role)
-
             _ensure_internal_company_membership(
                 user=user,
                 actor=request.user,
             )
 
-        email_sent = False
-        email_error = None
-
-        if user.email:
-            email_sent, email_error = _send_system_user_role_changed_email(
-                user=user,
-                old_role=old_role,
-                new_role=role,
-            )
+        notify_result = notify_system_user_role_changed(
+            user=user,
+            old_role=old_role,
+            new_role=role,
+            actor=request.user,
+            company=_get_internal_company_for_system_users(actor=request.user),
+        )
 
         return _ok({
             "message": "User role updated successfully",
-            "email_sent": email_sent,
-            "email_error": email_error,
+            "notification_created": notify_result.get("notification_created", False),
+            "email_sent": notify_result.get("email_sent", False),
+            "email_error": notify_result.get("email_error"),
+            "whatsapp_sent": notify_result.get("whatsapp_sent", False),
+            "whatsapp_error": notify_result.get("whatsapp_error"),
             "user": _serialize_user(user),
         })
 
@@ -1140,39 +742,22 @@ def system_user_reset_password(request):
         user.set_password(new_password)
         user.save(update_fields=["password"])
 
-        email_sent = False
-        email_error = None
-        whatsapp_sent = False
-        whatsapp_error = None
-
-        if user.email:
-            email_sent, email_error = _send_system_user_password_reset_email(
-                user=user,
-                new_password=new_password,
-            )
-
-        whatsapp_sent, whatsapp_error = _send_system_whatsapp_notification(
+        notify_result = notify_system_user_password_changed(
             user=user,
-            event_code="system_user_password_changed",
-            recipient_role=_get_internal_role(user) or ROLE_SUPPORT,
-            language_code="ar",
-            context={
-                "full_name": _get_full_name(user),
-                "username": user.username or "",
-                "email": user.email or "",
-                "changed_at": timezone.now().strftime("%Y-%m-%d %H:%M"),
-                "login_url": _get_login_url(),
-            },
+            actor=request.user,
+            company=_get_internal_company_for_system_users(actor=request.user),
+            temporary_password=new_password,
         )
 
         return _ok({
             "message": "Password reset successfully",
             "user_id": user.id,
             "temporary_password": new_password,
-            "email_sent": email_sent,
-            "email_error": email_error,
-            "whatsapp_sent": whatsapp_sent,
-            "whatsapp_error": whatsapp_error,
+            "notification_created": notify_result.get("notification_created", False),
+            "email_sent": notify_result.get("email_sent", False),
+            "email_error": notify_result.get("email_error"),
+            "whatsapp_sent": notify_result.get("whatsapp_sent", False),
+            "whatsapp_error": notify_result.get("whatsapp_error"),
         })
 
     except Exception as exc:
@@ -1215,24 +800,21 @@ def system_user_delete(request):
         return _bad_request("You cannot delete your own current account")
 
     username = user.username or ""
-    email = user.email or ""
-    full_name = _get_full_name(user)
 
-    email_sent = False
-    email_error = None
-
-    if email:
-        email_sent, email_error = _send_system_user_deleted_email(
-            username=username,
-            email=email,
-            full_name=full_name,
-        )
+    notify_result = notify_system_user_deleted(
+        user=user,
+        actor=request.user,
+        company=_get_internal_company_for_system_users(actor=request.user),
+    )
 
     user.delete()
 
     return _ok({
         "message": "System user deleted successfully",
         "username": username,
-        "email_sent": email_sent,
-        "email_error": email_error,
+        "notification_created": notify_result.get("notification_created", False),
+        "email_sent": notify_result.get("email_sent", False),
+        "email_error": notify_result.get("email_error"),
+        "whatsapp_sent": notify_result.get("whatsapp_sent", False),
+        "whatsapp_error": notify_result.get("whatsapp_error"),
     })

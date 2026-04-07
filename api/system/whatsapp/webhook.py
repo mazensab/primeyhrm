@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/whatsapp/webhook.py
 # 🛡 System WhatsApp Webhook API
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✅ يدعم:
 # - Meta-style verify endpoint

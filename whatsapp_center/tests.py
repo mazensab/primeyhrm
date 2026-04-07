@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/tests.py
-# Primey HR Cloud - WhatsApp Center Tests
+# Mham Cloud - WhatsApp Center Tests
 # ============================================================
 
 from django.test import TestCase

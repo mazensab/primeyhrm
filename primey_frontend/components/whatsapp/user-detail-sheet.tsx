@@ -2,7 +2,7 @@
 
 // ============================================================
 // 📂 الملف: components/whatsapp/user-detail-sheet.tsx
-// 🟢 Primey HR Cloud - WhatsApp User Detail Sheet
+// 🟢 Mham Cloud - WhatsApp User Detail Sheet
 // ------------------------------------------------------------
 // ✅ إزالة الاعتماد على context الأصلي
 // ✅ إزالة generate-avatar-fallback غير الموجود

@@ -1,5 +1,5 @@
 # 📂 الملف: notification_center/consumers.py
-# 🧠 Primey HR Cloud — Notification Consumer V5.0 (Unified Channel Naming)
+# 🧠 Mham Cloud — Notification Consumer V5.0 (Unified Channel Naming)
 # 🚀 متوافق 100% مع services.py + signals.py + Frontend
 
 import json

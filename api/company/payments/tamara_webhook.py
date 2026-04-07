@@ -1,6 +1,6 @@
 # ============================================================
 # Tamara Webhook API — Company Scope
-# Primey HR Cloud
+# Mham Cloud
 # Path: api/company/payments/tamara_webhook.py
 # ------------------------------------------------------------
 # Company Webhook Endpoint
@@ -11,6 +11,7 @@
 # - Marks invoice as PAID
 # - Applies subscription logic (RENEWAL / UPGRADE / NORMAL)
 # - Auto activates company
+# - Sends Notification Center success event
 # - Idempotent and transaction safe
 # ============================================================
 
@@ -36,6 +37,7 @@ from billing_center.models import (
     Payment,
     SubscriptionPlan,
 )
+from notification_center.services import create_notification
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +228,6 @@ def _extract_payment_method(payload: Dict[str, Any]) -> str:
     if raw_method == "STC_PAY":
         return "STC_PAY"
 
-    # Tamara غالبًا تمثل BNPL / Card rails، فنخزنها كـ CREDIT_CARD
     return "CREDIT_CARD"
 
 
@@ -266,7 +267,6 @@ def _extract_invoice_id(order_reference_id: str) -> Optional[int]:
     patterns = [
         r"^INVOICE[-_:](\d+)(?:[-_:].*)?$",
         r".*?INVOICE[-_:](\d+)(?:[-_:].*)?$",
-        r".*?(\d+).*",
     ]
 
     for pattern in patterns:
@@ -316,6 +316,78 @@ def _ensure_company_active(invoice: Invoice) -> None:
     if company and not company.is_active:
         company.is_active = True
         company.save(update_fields=["is_active"])
+
+
+def _safe_notify_company_payment_success(
+    *,
+    invoice: Invoice,
+    payment: Payment,
+    subscription: Optional[CompanySubscription],
+    action: str,
+) -> None:
+    """
+    إرسال إشعار نجاح الدفع عبر Notification Center بشكل fail-safe.
+    """
+    try:
+        company = getattr(invoice, "company", None)
+        recipient = getattr(company, "owner", None) if company else None
+
+        if not recipient:
+            logger.info(
+                "Skipping Tamara success notification because company owner is missing. invoice_id=%s",
+                getattr(invoice, "id", None),
+            )
+            return
+
+        plan_name = ""
+        if subscription and getattr(subscription, "plan", None):
+            plan_name = _clean_str(getattr(subscription.plan, "name", ""))
+
+        title = f"تم تأكيد دفع الفاتورة {invoice.invoice_number}"
+        message = (
+            f"تم تأكيد سداد الفاتورة {invoice.invoice_number} بنجاح"
+            f" بمبلغ {invoice.total_amount} ريال، وتم تحديث حالة الاشتراك."
+        )
+
+        create_notification(
+            recipient=recipient,
+            title=title,
+            message=message,
+            notification_type="billing",
+            severity="success",
+            send_email=True,
+            send_whatsapp=True,
+            link=f"/company/invoices/{invoice.invoice_number}",
+            company=company,
+            event_code="payment_confirmed_company_activated",
+            event_group="billing",
+            actor=None,
+            target_user=recipient,
+            language_code="ar",
+            source="api.company.payments.tamara_webhook.success",
+            context={
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "payment_id": getattr(payment, "id", None),
+                "payment_method": _clean_str(getattr(payment, "method", "")),
+                "amount": str(getattr(invoice, "total_amount", "")),
+                "billing_reason": _clean_str(getattr(invoice, "billing_reason", "")),
+                "action": _clean_str(action),
+                "company_name": _clean_str(getattr(company, "name", "")) if company else "",
+                "company_active": bool(getattr(company, "is_active", False)) if company else False,
+                "subscription_status": _clean_str(getattr(subscription, "status", "")) if subscription else "",
+                "active_plan": plan_name,
+            },
+            target_object=invoice,
+            template_key="payment_confirmed_company_activated",
+        )
+
+    except Exception:
+        logger.warning(
+            "Failed to dispatch Tamara success notification for invoice_id=%s",
+            getattr(invoice, "id", None),
+            exc_info=True,
+        )
 
 
 def _apply_subscription_logic(invoice: Invoice) -> Optional[CompanySubscription]:
@@ -429,6 +501,15 @@ def _confirm_company_invoice_payment(normalized: Dict[str, Any]) -> Dict[str, An
 
     subscription = _apply_subscription_logic(invoice)
     _ensure_company_active(invoice)
+
+    transaction.on_commit(
+        lambda: _safe_notify_company_payment_success(
+            invoice=invoice,
+            payment=payment,
+            subscription=subscription,
+            action="payment_confirmed_and_activated",
+        )
+    )
 
     return {
         "handled": True,

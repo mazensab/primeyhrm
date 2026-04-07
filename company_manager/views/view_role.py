@@ -1,6 +1,6 @@
 # ==================================================================
 # 🎛️ Company Roles — Ultra Fix V4
-# Primey HR Cloud — Company Manager
+# Mham Cloud — Company Manager
 # ==================================================================
 
 from django.shortcuts import render, redirect, get_object_or_404

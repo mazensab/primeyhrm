@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 primey_hrm/urls.py
-# 🧭 Primey HR Cloud — Unified Smart Routing (FINAL ✅)
+# 🧭 Mham Cloud — Unified Smart Routing (FINAL ✅)
 # ============================================================
 
 from django.contrib import admin

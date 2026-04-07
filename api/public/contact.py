@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/public/contact.py
-# Primey HR Cloud
+# Mham Cloud
 # Public Contact API
 # ============================================================
 # API عام لاستقبال رسائل صفحة التواصل من اللاندنق بيج
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # 🔒 Contact Destination
 # ============================================================
 
-CONTACT_RECEIVER_EMAIL = "info@primeyride.com"
+CONTACT_RECEIVER_EMAIL = "info@mhamcloud.sa"
 
 # ============================================================
 # 🖼️ Primey Logo

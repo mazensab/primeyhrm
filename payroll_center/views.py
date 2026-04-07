@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 payroll_center/views.py — V12.7 ULTRA STABLE (FINAL)
-# Primey HR Cloud | Payroll Module
+# Mham Cloud | Payroll Module
 # ============================================================
 
 from django.shortcuts import render, get_object_or_404

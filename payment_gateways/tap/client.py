@@ -1,6 +1,6 @@
 # ============================================================
 # Tap API Client
-# Primey HR Cloud
+# Mham Cloud
 # Path: payment_gateways/tap/client.py
 # ------------------------------------------------------------
 # HTTP Client Layer only

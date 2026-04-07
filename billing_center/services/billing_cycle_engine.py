@@ -1,16 +1,19 @@
 # ============================================================
 # 🔁 Billing Cycle Engine — S3-A
-# Primey HR Cloud | Ultra Stable V1
+# Mham Cloud | Ultra Stable V2
 # ============================================================
 # ✔ Decision Engine Only
 # ✔ No DB Writes
 # ✔ No Invoice Creation
 # ✔ No State Changes
 # ✔ Safe & Idempotent
+# ✔ Richer normalized output
 # ============================================================
 
+from __future__ import annotations
+
 from datetime import date
-from typing import List, Dict
+from typing import Dict, List
 
 from django.conf import settings
 from django.utils.timezone import now
@@ -46,10 +49,13 @@ class BillingCycleEngine:
 
     def __init__(self, reference_date: date | None = None):
         self.today = reference_date or now().date()
-        self.renew_window_days = getattr(
-            settings,
-            "BILLING_RENEW_WINDOW_DAYS",
-            5,
+        self.renew_window_days = int(
+            getattr(
+                settings,
+                "BILLING_RENEW_WINDOW_DAYS",
+                5,
+            )
+            or 5
         )
 
     # --------------------------------------------------------
@@ -62,13 +68,14 @@ class BillingCycleEngine:
         results: List[Dict] = []
 
         subscriptions = CompanySubscription.objects.select_related(
-            "company", "plan"
+            "company",
+            "plan",
         ).filter(
             status="ACTIVE"
         )
 
-        for sub in subscriptions:
-            decision_data = self._evaluate_subscription(sub)
+        for subscription in subscriptions:
+            decision_data = self._evaluate_subscription(subscription)
             if decision_data:
                 results.append(decision_data)
 
@@ -78,7 +85,8 @@ class BillingCycleEngine:
     # Core Logic
     # --------------------------------------------------------
     def _evaluate_subscription(
-        self, subscription: CompanySubscription
+        self,
+        subscription: CompanySubscription,
     ) -> Dict | None:
         """
         Evaluate a single subscription and return decision dict.
@@ -97,15 +105,11 @@ class BillingCycleEngine:
             return self._build_result(
                 subscription,
                 decision=DECISION_NO_ACTION,
-                days_remaining=self._days_remaining(
-                    subscription.end_date
-                ),
+                days_remaining=self._days_remaining(subscription.end_date),
             )
 
         # 3️⃣ Auto-renew enabled
-        days_remaining = self._days_remaining(
-            subscription.end_date
-        )
+        days_remaining = self._days_remaining(subscription.end_date)
 
         # Expired
         if days_remaining < 0:
@@ -145,13 +149,21 @@ class BillingCycleEngine:
         """
         Build normalized decision output.
         """
+        company = subscription.company
+        plan = getattr(subscription, "plan", None)
+
         return {
             "subscription_id": subscription.id,
             "company_id": subscription.company_id,
-            "company_name": subscription.company.name,
+            "company_name": getattr(company, "name", ""),
+            "plan_id": getattr(plan, "id", None) if plan else None,
+            "plan_name": getattr(plan, "name", "") if plan else "",
             "status": subscription.status,
             "auto_renew": subscription.auto_renew,
+            "start_date": subscription.start_date,
             "end_date": subscription.end_date,
             "days_remaining": days_remaining,
+            "renew_window_days": self.renew_window_days,
+            "reference_date": self.today,
             "decision": decision,
         }

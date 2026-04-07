@@ -1,6 +1,6 @@
 # ============================================================
 # 📄 Contracts API — Minimal Stub (SAFE MODE)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.http import JsonResponse

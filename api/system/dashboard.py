@@ -1,6 +1,6 @@
 # ====================================================================
 # 🟦 System Dashboard API — V15.7 FINAL STABLE (BACKEND FIX ONLY)
-# Primey HR Cloud
+# Mham Cloud
 # ====================================================================
 
 from django.http import JsonResponse

@@ -1,7 +1,7 @@
 "use client";
 
 // ======================================================
-// 🔐 PRIMEY HR CLOUD — AUTH Ω PROVIDER
+// 🔐 Mham Cloud — AUTH Ω PROVIDER
 // Reactive Enterprise Session Core
 // ======================================================
 

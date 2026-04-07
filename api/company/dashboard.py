@@ -1,6 +1,6 @@
 # ============================================================
 # 🏢 Company Dashboard Snapshot API
-# Primey HR Cloud — Enterprise Safe
+# Mham Cloud — Enterprise Safe
 # ============================================================
 
 from django.http import JsonResponse

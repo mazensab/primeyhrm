@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/system/payments/tap_checkout_status.py
 # 🔎 Resolve Tap checkout result to invoice redirect
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from __future__ import annotations

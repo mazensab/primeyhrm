@@ -1,5 +1,5 @@
 # 📦 control_center/context_processors.py
-# 🧭 Primey HR Cloud 2026 — Global Context Provider (V2)
+# 🧭 Mham Cloud 2026 — Global Context Provider (V2)
 # 💡 يمرّر معلومات المستخدم والشركة والإشعارات لجميع القوالب ديناميكيًا
 
 from company_manager.models import Company

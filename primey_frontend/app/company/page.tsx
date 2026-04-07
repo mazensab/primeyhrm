@@ -55,7 +55,8 @@ const translations = {
     failedReturnToSystem: "فشل في الرجوع إلى النظام",
     returnedToSystem: "تم الرجوع إلى النظام بنجاح",
     serverErrorReturn: "خطأ في الخادم أثناء الرجوع إلى النظام",
-    statusCopied: "تم تجهيز عرض الحالة الجديد بنجاح",
+    failedLoadDashboard: "فشل في تحميل بيانات لوحة الشركة",
+    statusCopied: "تم تحديث الجلسة بنجاح",
 
     company: "الشركة",
     companyDashboard: "لوحة الشركة",
@@ -92,6 +93,9 @@ const translations = {
     monthlyCostSubtitle: "لقطة تقديرية للرواتب",
 
     draft: "مسودة",
+    approved: "معتمد",
+    paid: "مدفوع",
+    calculated: "محسوب",
 
     attendanceSnapshot: "ملخص الحضور",
     attendanceSnapshotSubtitle:
@@ -138,6 +142,7 @@ const translations = {
     status: "الحالة",
 
     recentActivity: "آخر الأنشطة",
+    noRecentActivity: "لا توجد أنشطة حديثة بعد",
 
     owner: "المالك",
     admin: "مدير",
@@ -153,34 +158,20 @@ const translations = {
     statusOnLeave: "في إجازة",
     statusAbsent: "غائب",
 
-    deptHr: "الموارد البشرية",
-    deptPayroll: "الرواتب",
-    deptOperations: "العمليات",
-    deptAdministration: "الإدارة",
-    deptFinance: "المالية",
+    activityLeaveRequest: "يوجد طلبات إجازة بانتظار المراجعة",
+    activityLeaveRequestMeta: "طلبات الإجازة المعلقة حالياً",
 
-    titleHrSpecialist: "أخصائي موارد بشرية",
-    titlePayrollOfficer: "مسؤول رواتب",
-    titleOperationsSupervisor: "مشرف عمليات",
-    titleAdminCoordinator: "منسق إداري",
-    titleAccountant: "محاسب",
+    activityPayrollPending: "آخر دورة رواتب متاحة للمتابعة",
+    activityPayrollPendingMeta: "تم جلب آخر حالة تشغيل للرواتب",
 
-    activityLeaveRequest: "تم تقديم طلب إجازة جديد",
-    activityLeaveRequestMeta: "إجازة سنوية • الموظف: أحمد الحربي",
+    activityAttendanceSync: "بيانات الحضور مرتبطة بالواجهة",
+    activityAttendanceSyncMeta: "يتم الآن قراءة ملخص الحضور مباشرة من الـ API",
 
-    activityPayrollPending: "دورة الرواتب بانتظار المراجعة",
-    activityPayrollPendingMeta: "March 2026 • تم إنشاء المسودة",
+    activityEmployeeAdded: "تم تحميل دليل الموظفين للشركة",
+    activityEmployeeAddedMeta: "يعرض الجدول أول الموظفين من البيانات الفعلية",
 
-    activityAttendanceSync: "اكتملت مزامنة الحضور",
-    activityAttendanceSyncMeta: "انتهت مزامنة BioTime بنجاح",
-
-    activityEmployeeAdded: "تمت إضافة موظف جديد",
-    activityEmployeeAddedMeta: "القسم: العمليات",
-
-    time10MinAgo: "10 min ago",
-    time35MinAgo: "35 min ago",
-    time1HourAgo: "1 hour ago",
-    time2HoursAgo: "2 hours ago",
+    timeNow: "الآن",
+    notAvailable: "غير متاح",
   },
   en: {
     loading: "Loading company dashboard...",
@@ -188,7 +179,8 @@ const translations = {
     failedReturnToSystem: "Failed to return to system",
     returnedToSystem: "Returned to system successfully",
     serverErrorReturn: "Server error while returning to system",
-    statusCopied: "The new status badge style is ready",
+    failedLoadDashboard: "Failed to load company dashboard data",
+    statusCopied: "Session refreshed successfully",
 
     company: "Company",
     companyDashboard: "Company Dashboard",
@@ -225,6 +217,9 @@ const translations = {
     monthlyCostSubtitle: "Estimated payroll snapshot",
 
     draft: "Draft",
+    approved: "Approved",
+    paid: "Paid",
+    calculated: "Calculated",
 
     attendanceSnapshot: "Attendance Snapshot",
     attendanceSnapshotSubtitle:
@@ -272,6 +267,7 @@ const translations = {
     status: "Status",
 
     recentActivity: "Recent Activity",
+    noRecentActivity: "No recent activity yet",
 
     owner: "Owner",
     admin: "Admin",
@@ -287,34 +283,20 @@ const translations = {
     statusOnLeave: "On Leave",
     statusAbsent: "Absent",
 
-    deptHr: "HR",
-    deptPayroll: "Payroll",
-    deptOperations: "Operations",
-    deptAdministration: "Administration",
-    deptFinance: "Finance",
+    activityLeaveRequest: "There are leave requests pending review",
+    activityLeaveRequestMeta: "Current pending leave requests",
 
-    titleHrSpecialist: "HR Specialist",
-    titlePayrollOfficer: "Payroll Officer",
-    titleOperationsSupervisor: "Operations Supervisor",
-    titleAdminCoordinator: "Admin Coordinator",
-    titleAccountant: "Accountant",
+    activityPayrollPending: "Latest payroll run is available for follow-up",
+    activityPayrollPendingMeta: "Latest payroll run status fetched",
 
-    activityLeaveRequest: "New leave request submitted",
-    activityLeaveRequestMeta: "Annual Leave • Employee: Ahmed Al-Harbi",
+    activityAttendanceSync: "Attendance data is connected to the UI",
+    activityAttendanceSyncMeta: "Attendance snapshot is now loaded from the API",
 
-    activityPayrollPending: "Payroll run pending review",
-    activityPayrollPendingMeta: "March 2026 • Draft generated",
+    activityEmployeeAdded: "Employee directory loaded for this company",
+    activityEmployeeAddedMeta: "The table shows the first real employees",
 
-    activityAttendanceSync: "Attendance sync completed",
-    activityAttendanceSyncMeta: "Biotime synchronization finished successfully",
-
-    activityEmployeeAdded: "New employee added",
-    activityEmployeeAddedMeta: "Department: Operations",
-
-    time10MinAgo: "10 min ago",
-    time35MinAgo: "35 min ago",
-    time1HourAgo: "1 hour ago",
-    time2HoursAgo: "2 hours ago",
+    timeNow: "Now",
+    notAvailable: "Not available",
   },
 } as const
 
@@ -355,6 +337,11 @@ function formatNumber(value: number | string) {
 }
 
 function formatTimeLabel(value: string) {
+  return value
+}
+
+function formatMonthLabel(value?: string | null) {
+  if (!value) return "--"
   return value
 }
 
@@ -403,23 +390,12 @@ type StatCard = {
 }
 
 type EmployeeStatusKey = "PRESENT" | "LATE" | "ON_LEAVE" | "ABSENT"
-type DepartmentKey =
-  | "HR"
-  | "PAYROLL"
-  | "OPERATIONS"
-  | "ADMINISTRATION"
-  | "FINANCE"
 
-type EmployeePreview = {
+type EmployeePreviewRow = {
   id: number
   name: string
-  departmentKey: DepartmentKey
-  titleKey:
-    | "HR_SPECIALIST"
-    | "PAYROLL_OFFICER"
-    | "OPERATIONS_SUPERVISOR"
-    | "ADMIN_COORDINATOR"
-    | "ACCOUNTANT"
+  departmentLabel: string
+  jobTitleLabel: string
   statusKey: EmployeeStatusKey
   avatar?: string | null
 }
@@ -438,51 +414,76 @@ type StatusMeta = {
   className: string
 }
 
-/* =========================================
-   MOCK DATA
-========================================= */
-const employeePreviewRows: EmployeePreview[] = [
-  {
-    id: 1,
-    name: "Ahmed Al-Harbi",
-    departmentKey: "HR",
-    titleKey: "HR_SPECIALIST",
-    statusKey: "PRESENT",
-    avatar: null,
-  },
-  {
-    id: 2,
-    name: "Noura Salem",
-    departmentKey: "PAYROLL",
-    titleKey: "PAYROLL_OFFICER",
-    statusKey: "LATE",
-    avatar: null,
-  },
-  {
-    id: 3,
-    name: "Faisal Khan",
-    departmentKey: "OPERATIONS",
-    titleKey: "OPERATIONS_SUPERVISOR",
-    statusKey: "ON_LEAVE",
-    avatar: null,
-  },
-  {
-    id: 4,
-    name: "Maha Ali",
-    departmentKey: "ADMINISTRATION",
-    titleKey: "ADMIN_COORDINATOR",
-    statusKey: "PRESENT",
-    avatar: null,
-  },
-  {
-    id: 5,
-    name: "Yousef Adel",
-    departmentKey: "FINANCE",
-    titleKey: "ACCOUNTANT",
-    statusKey: "ABSENT",
-    avatar: null,
-  },
-]
+type CompanyEmployee = {
+  id: number
+  name?: string
+  full_name?: string
+  email?: string | null
+  phone?: string | null
+  avatar?: string | null
+  photo_url?: string | null
+  role?: string | null
+  department?: string | null
+  job_title?: string | null
+  join_date?: string | null
+  employee_number?: string | null
+  status?: string | null
+  is_active?: boolean
+}
+
+type CompanyEmployeesResponse = {
+  status?: string
+  employees?: CompanyEmployee[]
+}
+
+type AttendanceDashboardResponse = {
+  status?: string
+  data?: {
+    today?: {
+      present?: number
+      absent?: number
+      late?: number
+      leave?: number
+    }
+    total_records?: number
+  }
+}
+
+type LeaveRequestItem = {
+  id: number
+  employee_name?: string
+  employee_id?: number
+  type?: string
+  from_date?: string
+  to_date?: string
+  status?: string
+}
+
+type LeaveRequestsResponse = {
+  requests?: LeaveRequestItem[]
+}
+
+type DepartmentItem = {
+  id: number
+  name?: string
+}
+
+type DepartmentsResponse = {
+  status?: string
+  departments?: DepartmentItem[]
+}
+
+type PayrollRunItem = {
+  id: number
+  month?: string
+  status?: string
+  total_net?: number
+  progress_percent?: number
+  accounting_consistency?: boolean
+  total_employees?: number
+}
+
+type PayrollRunsResponse = PayrollRunItem[] | { results?: PayrollRunItem[] }
 
 /* =========================================
    HELPERS
@@ -567,19 +568,24 @@ function getStatusMeta(status: EmployeeStatusKey, lang: Lang): StatusMeta {
   }
 }
 
-function getDepartmentClasses(department?: DepartmentKey | null) {
+function getDepartmentClasses(department?: string | null) {
   const safe = String(department || "").trim().toUpperCase()
 
   switch (safe) {
     case "HR":
+    case "الموارد البشرية":
       return "border-violet-500/20 bg-violet-500/10 text-violet-700 dark:text-violet-300"
     case "PAYROLL":
+    case "الرواتب":
       return "border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-300"
     case "OPERATIONS":
+    case "العمليات":
       return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
     case "ADMINISTRATION":
+    case "الإدارة":
       return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300"
     case "FINANCE":
+    case "المالية":
       return "border-cyan-500/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
     default:
       return "border-border bg-muted text-foreground"
@@ -643,59 +649,54 @@ function getRoleBadgeClass(role?: string | null) {
   }
 }
 
-function getDepartmentLabel(key: DepartmentKey, lang: Lang) {
-  const t = translations[lang]
+function normalizeEmployeeStatus(
+  status?: string | null,
+  isActive?: boolean
+): EmployeeStatusKey {
+  const safe = String(status || "").trim().toUpperCase()
 
-  switch (key) {
-    case "HR":
-      return t.deptHr
-    case "PAYROLL":
-      return t.deptPayroll
-    case "OPERATIONS":
-      return t.deptOperations
-    case "ADMINISTRATION":
-      return t.deptAdministration
-    case "FINANCE":
-      return t.deptFinance
+  if (safe === "LATE") return "LATE"
+  if (safe === "LEAVE" || safe === "ON_LEAVE") return "ON_LEAVE"
+  if (safe === "ABSENT" || safe === "INACTIVE") return "ABSENT"
+  if (safe === "ACTIVE" || safe === "PRESENT") return "PRESENT"
+
+  return isActive === false ? "ABSENT" : "PRESENT"
+}
+
+function getPayrollStatusLabel(
+  status: string | null | undefined,
+  lang: Lang
+): string {
+  const t = translations[lang]
+  const safe = String(status || "").trim().toUpperCase()
+
+  switch (safe) {
+    case "DRAFT":
+      return t.draft
+    case "APPROVED":
+      return t.approved
+    case "PAID":
+      return t.paid
+    case "CALCULATED":
+      return t.calculated
     default:
-      return key
+      return safe || t.draft
   }
 }
 
-function getEmployeeStatusLabel(key: EmployeeStatusKey, lang: Lang) {
-  const t = translations[lang]
+async function fetchJson<T>(url: string): Promise<T | null> {
+  const res = await fetch(url, {
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+  })
 
-  switch (key) {
-    case "PRESENT":
-      return t.statusPresent
-    case "LATE":
-      return t.statusLate
-    case "ON_LEAVE":
-      return t.statusOnLeave
-    case "ABSENT":
-      return t.statusAbsent
-    default:
-      return key
+  if (!res.ok) {
+    throw new Error(`Request failed: ${url} (${res.status})`)
   }
-}
 
-function getJobTitleLabel(key: EmployeePreview["titleKey"], lang: Lang) {
-  const t = translations[lang]
-
-  switch (key) {
-    case "HR_SPECIALIST":
-      return t.titleHrSpecialist
-    case "PAYROLL_OFFICER":
-      return t.titlePayrollOfficer
-    case "OPERATIONS_SUPERVISOR":
-      return t.titleOperationsSupervisor
-    case "ADMIN_COORDINATOR":
-      return t.titleAdminCoordinator
-    case "ACCOUNTANT":
-      return t.titleAccountant
-    default:
-      return key
-  }
+  return (await res.json()) as T
 }
 
 /* =========================================
@@ -737,6 +738,13 @@ export default function CompanyPage() {
   const [returning, setReturning] = useState(false)
   const [lang, setLang] = useState<Lang>("ar")
 
+  const [employeesData, setEmployeesData] = useState<CompanyEmployee[]>([])
+  const [attendanceData, setAttendanceData] =
+    useState<AttendanceDashboardResponse["data"] | null>(null)
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequestItem[]>([])
+  const [departmentsData, setDepartmentsData] = useState<DepartmentItem[]>([])
+  const [payrollRuns, setPayrollRuns] = useState<PayrollRunItem[]>([])
+
   useEffect(() => {
     setLang(getDocumentLang())
 
@@ -758,66 +766,242 @@ export default function CompanyPage() {
   }, [])
 
   useEffect(() => {
-    const loadSession = async () => {
+    const loadPageData = async () => {
       setLoading(true)
 
       try {
-        const res = await fetch(`${API_BASE}/api/auth/whoami/`, {
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        })
+        const results = await Promise.allSettled([
+          fetchJson<WhoAmIResponse>(`${API_BASE}/api/auth/whoami/`),
+          fetchJson<CompanyEmployeesResponse>(`${API_BASE}/api/company/employees/`),
+          fetchJson<AttendanceDashboardResponse>(
+            `${API_BASE}/api/company/attendance/dashboard/`
+          ),
+          fetchJson<LeaveRequestsResponse>(`${API_BASE}/api/company/leaves/requests/`),
+          fetchJson<DepartmentsResponse>(`${API_BASE}/api/company/departments/list/`),
+          fetchJson<PayrollRunsResponse>(`${API_BASE}/api/company/payroll/runs/`),
+        ])
 
-        const data = await res.json()
-        setSessionData(data || null)
+        const whoamiResult = results[0]
+        const employeesResult = results[1]
+        const attendanceResult = results[2]
+        const leavesResult = results[3]
+        const departmentsResult = results[4]
+        const payrollRunsResult = results[5]
+
+        if (whoamiResult.status === "fulfilled") {
+          setSessionData(whoamiResult.value || null)
+        }
+
+        if (employeesResult.status === "fulfilled") {
+          setEmployeesData(employeesResult.value?.employees || [])
+        } else {
+          setEmployeesData([])
+        }
+
+        if (attendanceResult.status === "fulfilled") {
+          setAttendanceData(attendanceResult.value?.data || null)
+        } else {
+          setAttendanceData(null)
+        }
+
+        if (leavesResult.status === "fulfilled") {
+          setLeaveRequests(leavesResult.value?.requests || [])
+        } else {
+          setLeaveRequests([])
+        }
+
+        if (departmentsResult.status === "fulfilled") {
+          setDepartmentsData(departmentsResult.value?.departments || [])
+        } else {
+          setDepartmentsData([])
+        }
+
+        if (payrollRunsResult.status === "fulfilled") {
+          const payload = payrollRunsResult.value
+          if (Array.isArray(payload)) {
+            setPayrollRuns(payload)
+          } else {
+            setPayrollRuns(payload?.results || [])
+          }
+        } else {
+          setPayrollRuns([])
+        }
       } catch (error) {
-        console.error("Failed loading session", error)
-        toast.error(translations[getDocumentLang()].failedLoadSession)
+        console.error("Failed loading company dashboard data", error)
+        toast.error(translations[getDocumentLang()].failedLoadDashboard)
       } finally {
         setLoading(false)
       }
     }
 
-    loadSession()
+    loadPageData()
   }, [API_BASE])
 
   const t = useMemo(() => translations[lang], [lang])
   const isArabic = lang === "ar"
 
-  const recentActivities: ActivityItem[] = useMemo(
-    () => [
-      {
+  const isImpersonationActive = Boolean(sessionData?.impersonation?.active)
+
+  const companyName =
+    sessionData?.company?.name ||
+    sessionData?.impersonation?.company_name ||
+    t.company
+
+  const sessionRole =
+    sessionData?.role ||
+    sessionData?.impersonation?.target_role ||
+    "ADMIN"
+
+  const latestPayrollRun = payrollRuns[0] || null
+
+  const approvedLeaveCount = useMemo(() => {
+    return leaveRequests.filter(
+      (item) => String(item.status || "").trim().toLowerCase() === "approved"
+    ).length
+  }, [leaveRequests])
+
+  const pendingLeaveCount = useMemo(() => {
+    return leaveRequests.filter(
+      (item) => String(item.status || "").trim().toLowerCase() === "pending"
+    ).length
+  }, [leaveRequests])
+
+  const newEmployeesThisMonth = useMemo(() => {
+    const now = new Date()
+    const currentMonth = now.getMonth()
+    const currentYear = now.getFullYear()
+
+    return employeesData.filter((employee) => {
+      if (!employee.join_date) return false
+      const joinedAt = new Date(employee.join_date)
+      return (
+        !Number.isNaN(joinedAt.getTime()) &&
+        joinedAt.getMonth() === currentMonth &&
+        joinedAt.getFullYear() === currentYear
+      )
+    }).length
+  }, [employeesData])
+
+  const mappedEmployeePreviewRows = useMemo<EmployeePreviewRow[]>(() => {
+    return employeesData.slice(0, 5).map((employee) => ({
+      id: employee.id,
+      name: employee.full_name || employee.name || `EMP-${employee.id}`,
+      departmentLabel: employee.department || "-",
+      jobTitleLabel: employee.job_title || "-",
+      statusKey: normalizeEmployeeStatus(employee.status, employee.is_active),
+      avatar: employee.avatar || employee.photo_url || null,
+    }))
+  }, [employeesData])
+
+  const recentActivities: ActivityItem[] = useMemo(() => {
+    const items: ActivityItem[] = []
+
+    if (pendingLeaveCount > 0) {
+      items.push({
         id: 1,
         title: t.activityLeaveRequest,
-        meta: t.activityLeaveRequestMeta,
-        time: t.time10MinAgo,
+        meta: `${t.activityLeaveRequestMeta} • ${formatNumber(pendingLeaveCount)}`,
+        time: t.timeNow,
         icon: CalendarDays,
-      },
-      {
+      })
+    }
+
+    if (latestPayrollRun) {
+      items.push({
         id: 2,
         title: t.activityPayrollPending,
-        meta: t.activityPayrollPendingMeta,
-        time: t.time35MinAgo,
+        meta: `${t.activityPayrollPendingMeta} • ${formatMonthLabel(
+          latestPayrollRun.month
+        )}`,
+        time: t.timeNow,
         icon: Receipt,
-      },
-      {
+      })
+    }
+
+    if (attendanceData) {
+      items.push({
         id: 3,
         title: t.activityAttendanceSync,
         meta: t.activityAttendanceSyncMeta,
-        time: t.time1HourAgo,
+        time: t.timeNow,
         icon: Fingerprint,
-      },
-      {
+      })
+    }
+
+    if (employeesData.length > 0) {
+      items.push({
         id: 4,
         title: t.activityEmployeeAdded,
-        meta: t.activityEmployeeAddedMeta,
-        time: t.time2HoursAgo,
+        meta: `${t.activityEmployeeAddedMeta} • ${formatNumber(employeesData.length)}`,
+        time: t.timeNow,
         icon: Users,
-      },
-    ],
-    [t]
-  )
+      })
+    }
+
+    return items
+  }, [attendanceData, employeesData.length, latestPayrollRun, pendingLeaveCount, t])
+
+  const overviewStats: StatCard[] = [
+    {
+      title: t.totalEmployees,
+      value: formatNumber(employeesData.length),
+      subtitle: t.totalEmployeesSubtitle,
+      icon: Users,
+    },
+    {
+      title: t.presentToday,
+      value: formatNumber(attendanceData?.today?.present || 0),
+      subtitle: t.presentTodaySubtitle,
+      icon: UserCheck,
+    },
+    {
+      title: t.absentToday,
+      value: formatNumber(attendanceData?.today?.absent || 0),
+      subtitle: t.absentTodaySubtitle,
+      icon: UserX,
+    },
+    {
+      title: t.onLeave,
+      value: formatNumber(attendanceData?.today?.leave || approvedLeaveCount),
+      subtitle: t.onLeaveSubtitle,
+      icon: CalendarDays,
+    },
+  ]
+
+  const managementStats: StatCard[] = [
+    {
+      title: t.departments,
+      value: formatNumber(departmentsData.length),
+      subtitle: t.departmentsSubtitle,
+      icon: Briefcase,
+    },
+    {
+      title: t.pendingRequests,
+      value: formatNumber(pendingLeaveCount),
+      subtitle: t.pendingRequestsSubtitle,
+      icon: ClipboardCheck,
+    },
+    {
+      title: t.payrollStatus,
+      value: getPayrollStatusLabel(latestPayrollRun?.status, lang),
+      subtitle: t.payrollStatusSubtitle,
+      icon: Receipt,
+    },
+    {
+      title: t.monthlyCost,
+      value: formatNumber(latestPayrollRun?.total_net || 0),
+      subtitle: t.monthlyCostSubtitle,
+      icon: CircleDollarSign,
+      isCurrency: true,
+    },
+  ]
+
+  const attendanceRate = useMemo(() => {
+    if (!employeesData.length) return 0
+    return Math.round(
+      ((attendanceData?.today?.present || 0) / employeesData.length) * 100
+    )
+  }, [attendanceData?.today?.present, employeesData.length])
 
   const handleReturnToSystem = async () => {
     setReturning(true)
@@ -853,73 +1037,6 @@ export default function CompanyPage() {
       setReturning(false)
     }
   }
-
-  const isImpersonationActive = Boolean(sessionData?.impersonation?.active)
-
-  const companyName =
-    sessionData?.company?.name ||
-    sessionData?.impersonation?.company_name ||
-    t.company
-
-  const sessionRole =
-    sessionData?.role ||
-    sessionData?.impersonation?.target_role ||
-    "ADMIN"
-
-  const overviewStats: StatCard[] = [
-    {
-      title: t.totalEmployees,
-      value: formatNumber(148),
-      subtitle: t.totalEmployeesSubtitle,
-      icon: Users,
-    },
-    {
-      title: t.presentToday,
-      value: formatNumber(132),
-      subtitle: t.presentTodaySubtitle,
-      icon: UserCheck,
-    },
-    {
-      title: t.absentToday,
-      value: formatNumber(9),
-      subtitle: t.absentTodaySubtitle,
-      icon: UserX,
-    },
-    {
-      title: t.onLeave,
-      value: formatNumber(7),
-      subtitle: t.onLeaveSubtitle,
-      icon: CalendarDays,
-    },
-  ]
-
-  const managementStats: StatCard[] = [
-    {
-      title: t.departments,
-      value: formatNumber(12),
-      subtitle: t.departmentsSubtitle,
-      icon: Briefcase,
-    },
-    {
-      title: t.pendingRequests,
-      value: formatNumber(6),
-      subtitle: t.pendingRequestsSubtitle,
-      icon: ClipboardCheck,
-    },
-    {
-      title: t.payrollStatus,
-      value: t.draft,
-      subtitle: t.payrollStatusSubtitle,
-      icon: Receipt,
-    },
-    {
-      title: t.monthlyCost,
-      value: formatNumber(24500),
-      subtitle: t.monthlyCostSubtitle,
-      icon: CircleDollarSign,
-      isCurrency: true,
-    },
-  ]
 
   if (loading) {
     return (
@@ -965,7 +1082,9 @@ export default function CompanyPage() {
 
         <div className="flex flex-wrap items-center gap-3">
           <Badge
-            className={`gap-2 px-4 py-2 text-sm font-medium shadow-sm ${getRoleBadgeClass(sessionRole)}`}
+            className={`gap-2 px-4 py-2 text-sm font-medium shadow-sm ${getRoleBadgeClass(
+              sessionRole
+            )}`}
           >
             <Shield className="h-4 w-4" />
             {getRoleLabel(sessionRole, lang)}
@@ -1113,7 +1232,7 @@ export default function CompanyPage() {
                   {t.checkedIn}
                 </div>
                 <div className="mt-2.5 text-2xl font-semibold">
-                  {formatNumber(132)}
+                  {formatNumber(attendanceData?.today?.present || 0)}
                 </div>
                 <p className="mt-1.5 text-[11px] text-muted-foreground">
                   {t.checkedInSubtitle}
@@ -1126,7 +1245,7 @@ export default function CompanyPage() {
                   {t.lateArrivals}
                 </div>
                 <div className="mt-2.5 text-2xl font-semibold">
-                  {formatNumber(11)}
+                  {formatNumber(attendanceData?.today?.late || 0)}
                 </div>
                 <p className="mt-1.5 text-[11px] text-muted-foreground">
                   {t.lateArrivalsSubtitle}
@@ -1139,7 +1258,7 @@ export default function CompanyPage() {
                   {t.missingCheckIn}
                 </div>
                 <div className="mt-2.5 text-2xl font-semibold">
-                  {formatNumber(4)}
+                  {formatNumber(attendanceData?.today?.absent || 0)}
                 </div>
                 <p className="mt-1.5 text-[11px] text-muted-foreground">
                   {t.missingCheckInSubtitle}
@@ -1164,7 +1283,9 @@ export default function CompanyPage() {
                   <Sparkles className="h-4 w-4 text-primary" />
                   {t.attendanceRate}
                 </div>
-                <div className="mt-2.5 text-xl font-semibold">89%</div>
+                <div className="mt-2.5 text-xl font-semibold">
+                  {formatNumber(attendanceRate)}%
+                </div>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {t.attendanceRateSubtitle}
                 </p>
@@ -1176,7 +1297,7 @@ export default function CompanyPage() {
                   {t.lastSync}
                 </div>
                 <div dir="ltr" className="mt-2.5 text-xl font-semibold">
-                  09:15 AM
+                  --
                 </div>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {t.lastSyncSubtitle}
@@ -1189,7 +1310,7 @@ export default function CompanyPage() {
                   {t.workforceCoverage}
                 </div>
                 <div className="mt-2.5 text-xl font-semibold">
-                  {formatNumber(148)}
+                  {formatNumber(employeesData.length)}
                 </div>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {t.workforceCoverageSubtitle}
@@ -1211,7 +1332,9 @@ export default function CompanyPage() {
                   {t.leaveRequestsPending}
                 </p>
                 <div className="mt-2 flex items-end justify-between gap-3">
-                  <p className="text-2xl font-semibold">{formatNumber(6)}</p>
+                  <p className="text-2xl font-semibold">
+                    {formatNumber(pendingLeaveCount)}
+                  </p>
                   <CalendarDays className="h-4 w-4 text-muted-foreground" />
                 </div>
               </div>
@@ -1221,7 +1344,7 @@ export default function CompanyPage() {
                   {t.contractsExpiringSoon}
                 </p>
                 <div className="mt-2 flex items-end justify-between gap-3">
-                  <p className="text-2xl font-semibold">{formatNumber(3)}</p>
+                  <p className="text-2xl font-semibold">{formatNumber(0)}</p>
                   <Receipt className="h-4 w-4 text-muted-foreground" />
                 </div>
               </div>
@@ -1231,7 +1354,9 @@ export default function CompanyPage() {
                   {t.newEmployeesThisMonth}
                 </p>
                 <div className="mt-2 flex items-end justify-between gap-3">
-                  <p className="text-2xl font-semibold">{formatNumber(8)}</p>
+                  <p className="text-2xl font-semibold">
+                    {formatNumber(newEmployeesThisMonth)}
+                  </p>
                   <Users className="h-4 w-4 text-muted-foreground" />
                 </div>
               </div>
@@ -1241,7 +1366,7 @@ export default function CompanyPage() {
                   {t.unreadAlerts}
                 </p>
                 <div className="mt-2 flex items-end justify-between gap-3">
-                  <p className="text-2xl font-semibold">{formatNumber(5)}</p>
+                  <p className="text-2xl font-semibold">{formatNumber(0)}</p>
                   <Bell className="h-4 w-4 text-muted-foreground" />
                 </div>
               </div>
@@ -1294,7 +1419,7 @@ export default function CompanyPage() {
                   </TableHeader>
 
                   <TableBody>
-                    {employeePreviewRows.map((employee) => (
+                    {mappedEmployeePreviewRows.map((employee) => (
                       <TableRow
                         key={employee.id}
                         className="group border-b last:border-b-0 hover:bg-muted/20"
@@ -1328,15 +1453,15 @@ export default function CompanyPage() {
                         <TableCell className="px-5 py-4">
                           <span
                             className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getDepartmentClasses(
-                              employee.departmentKey
+                              employee.departmentLabel
                             )}`}
                           >
-                            {getDepartmentLabel(employee.departmentKey, lang)}
+                            {employee.departmentLabel}
                           </span>
                         </TableCell>
 
                         <TableCell className="px-5 py-4 text-sm text-muted-foreground">
-                          {getJobTitleLabel(employee.titleKey, lang)}
+                          {employee.jobTitleLabel}
                         </TableCell>
 
                         <TableCell className="px-5 py-4">
@@ -1347,6 +1472,17 @@ export default function CompanyPage() {
                         </TableCell>
                       </TableRow>
                     ))}
+
+                    {mappedEmployeePreviewRows.length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="px-5 py-10 text-center text-sm text-muted-foreground"
+                        >
+                          {t.notAvailable}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -1360,48 +1496,54 @@ export default function CompanyPage() {
           </CardHeader>
 
           <CardContent className="pt-5">
-            <div className="relative space-y-0">
-              <div
-                className={`absolute top-1 bottom-1 w-px bg-border ${
-                  isArabic ? "right-[17px]" : "left-[17px]"
-                }`}
-              />
+            {recentActivities.length === 0 ? (
+              <div className="rounded-2xl border bg-background p-6 text-sm text-muted-foreground">
+                {t.noRecentActivity}
+              </div>
+            ) : (
+              <div className="relative space-y-0">
+                <div
+                  className={`absolute top-1 bottom-1 w-px bg-border ${
+                    isArabic ? "right-[17px]" : "left-[17px]"
+                  }`}
+                />
 
-              {recentActivities.map((item, index) => {
-                const Icon = item.icon
+                {recentActivities.map((item, index) => {
+                  const Icon = item.icon
 
-                return (
-                  <div
-                    key={item.id}
-                    className={`relative flex gap-4 ${
-                      index !== recentActivities.length - 1 ? "pb-5" : ""
-                    }`}
-                  >
-                    <div className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm">
-                      <Icon className="h-4 w-4" />
-                    </div>
-
-                    <div className="min-w-0 flex-1 rounded-2xl border bg-background p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-semibold leading-6">
-                          {item.title}
-                        </p>
-                        <span
-                          dir="ltr"
-                          className="shrink-0 text-[11px] text-muted-foreground"
-                        >
-                          {formatTimeLabel(item.time)}
-                        </span>
+                  return (
+                    <div
+                      key={item.id}
+                      className={`relative flex gap-4 ${
+                        index !== recentActivities.length - 1 ? "pb-5" : ""
+                      }`}
+                    >
+                      <div className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm">
+                        <Icon className="h-4 w-4" />
                       </div>
 
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        {item.meta}
-                      </p>
+                      <div className="min-w-0 flex-1 rounded-2xl border bg-background p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold leading-6">
+                            {item.title}
+                          </p>
+                          <span
+                            dir="ltr"
+                            className="shrink-0 text-[11px] text-muted-foreground"
+                          >
+                            {formatTimeLabel(item.time)}
+                          </span>
+                        </div>
+
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {item.meta}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

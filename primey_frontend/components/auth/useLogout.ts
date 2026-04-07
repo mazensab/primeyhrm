@@ -1,7 +1,7 @@
 "use client";
 
 // ======================================================
-// 🔐 PRIMEY HR CLOUD — AUTH Ω SMART LOGOUT
+// 🔐 Mham Cloud — AUTH Ω SMART LOGOUT
 // Enterprise Logout Hook
 // ======================================================
 

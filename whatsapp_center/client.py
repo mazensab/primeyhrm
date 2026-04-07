@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/client.py
-# Primey HR Cloud - WhatsApp Provider Client
+# Mham Cloud - WhatsApp Provider Client
 # ============================================================
 # ✅ يدعم:
 # - مزودات Stub الحالية

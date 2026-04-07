@@ -1,5 +1,5 @@
 // ======================================================
-// 🏛 PRIMEY HR CLOUD — DASHBOARD FRAME
+// 🏛 Mham Cloud — DASHBOARD FRAME
 // Reusable Visual Frame with Sidebar Variant
 // RTL Ready Layout Frame
 // ======================================================

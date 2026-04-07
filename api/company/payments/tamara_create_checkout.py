@@ -1,6 +1,6 @@
 # ============================================================
 # Tamara Create Checkout API — Company Scope
-# Primey HR Cloud
+# Mham Cloud
 # Path: api/company/payments/tamara_create_checkout.py
 # ------------------------------------------------------------
 # Company Payment API
@@ -264,14 +264,29 @@ def _get_invoice_money(invoice: Invoice) -> dict[str, Decimal]:
     }
 
 
-def _build_invoice_urls(invoice: Invoice) -> dict[str, str]:
+def _build_backend_base_url(request) -> str:
+    configured = _clean_str(
+        getattr(settings, "BACKEND_BASE_URL", None)
+        or getattr(settings, "APP_BASE_URL", None)
+        or getattr(settings, "SITE_BASE_URL", None)
+    )
+    if configured:
+        return configured.rstrip("/")
+
+    scheme = "https" if request.is_secure() else "http"
+    host = request.get_host()
+    return f"{scheme}://{host}".rstrip("/")
+
+
+def _build_invoice_urls(request, invoice: Invoice) -> dict[str, str]:
     """
     بناء روابط الرجوع الخاصة بصفحة فاتورة الشركة.
     """
     frontend_base = _clean_str(
         getattr(settings, "FRONTEND_BASE_URL", None),
-        "http://localhost:3000",
+        "https://mhamcloud.com",
     ).rstrip("/")
+    backend_base = _build_backend_base_url(request)
 
     invoice_path = f"/company/invoices/{invoice.invoice_number}"
 
@@ -291,7 +306,7 @@ def _build_invoice_urls(invoice: Invoice) -> dict[str, str]:
         getattr(settings, "COMPANY_TAMARA_WEBHOOK_URL", None)
         or getattr(settings, "TAMARA_COMPANY_WEBHOOK_URL", None)
         or getattr(settings, "TAMARA_WEBHOOK_URL", None),
-        "http://127.0.0.1:8000/api/company/payments/tamara/webhook/",
+        f"{backend_base}/api/company/payments/tamara/webhook/",
     )
 
     return {
@@ -326,9 +341,14 @@ def _build_invoice_checkout_payload(
             "Customer phone number is required for Tamara checkout."
         )
 
-    first_name, last_name = _get_customer_names(request, invoice)
     money = _get_invoice_money(invoice)
-    urls = _build_invoice_urls(invoice)
+    if money["total"] <= Decimal("0.00"):
+        raise TamaraCheckoutValidationError(
+            "Invoice total amount must be greater than zero."
+        )
+
+    first_name, last_name = _get_customer_names(request, invoice)
+    urls = _build_invoice_urls(request, invoice)
 
     company_name = _get_company_name(invoice)
     plan_name = _get_plan_name(invoice)
@@ -344,7 +364,7 @@ def _build_invoice_checkout_payload(
     )
     line2 = _clean_str(payload.get("address_line2"))
 
-    order_reference_id = _get_invoiceReference(invoice) if False else _get_invoice_reference(invoice)
+    order_reference_id = _get_invoice_reference(invoice)
 
     return {
         "invoice_id": invoice.id,
@@ -377,7 +397,7 @@ def _build_invoice_checkout_payload(
         "cancel_url": urls["cancel_url"],
         "failure_url": urls["failure_url"],
         "notification_url": urls["notification_url"],
-        "platform": "Primey HR Cloud",
+        "platform": "Mham Cloud",
         "items": [
             {
                 "reference_id": order_reference_id,

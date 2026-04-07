@@ -1,5 +1,5 @@
 # ======================================================================
-# 📌 Primey HR Cloud — Company Manager — CompanyProfile Views
+# 📌 Mham Cloud — Company Manager — CompanyProfile Views
 # 📌 File: view_profile.py (V28 Ultra Stable)
 # ======================================================================
 

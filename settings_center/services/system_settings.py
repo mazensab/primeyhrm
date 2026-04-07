@@ -1,6 +1,6 @@
 # ============================================================
 # ⚙️ System Settings Service
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 
 from django.utils import timezone

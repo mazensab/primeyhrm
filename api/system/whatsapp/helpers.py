@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/system/whatsapp/helpers.py
-# Primey HR Cloud - System WhatsApp API Helpers
+# Mham Cloud - System WhatsApp API Helpers
 # ============================================================
 
 from __future__ import annotations

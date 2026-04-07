@@ -1,6 +1,6 @@
 # ====================================================================
 # 💳 Confirm Cash Payment — FINAL ULTRA STABLE
-# Primey HR Cloud | Super Admin Only
+# Mham Cloud | Super Admin Only
 # ====================================================================
 # ✔ Confirm manual CASH payment
 # ✔ Invoice -> PAID
@@ -8,59 +8,32 @@
 # ✔ Company -> ACTIVE (AUTO RULE after first successful payment)
 # ✔ Upgrade Flow Supported
 # ✔ Idempotent & Transaction-safe
-# ✔ Payment Confirmation Email
-# ✔ Invoice PDF Attachment
-# ✔ WhatsApp Confirmation After Successful Commit
+# ✔ Notification Center Only (No direct email / no direct WhatsApp)
+# ✔ Invoice PDF Context Supported
 # ====================================================================
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 from decimal import Decimal
 from io import BytesIO
 
-from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.http import JsonResponse
-from django.utils.html import escape
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from billing_center.models import (
+    CompanySubscription,
     Invoice,
     Payment,
-    CompanySubscription,
     SubscriptionPlan,
 )
-from whatsapp_center.models import ScopeType, TriggerSource
-from whatsapp_center.services import send_event_whatsapp_message
 
 logger = logging.getLogger(__name__)
-
-
-# ============================================================
-# 🖼️ Primey Email Branding
-# نفس أسلوب reset password / system users
-# ============================================================
-
-PRIMEY_EMAIL_LOGO_URL = getattr(
-    settings,
-    "PRIMEY_EMAIL_LOGO_URL",
-    getattr(
-        settings,
-        "EMAIL_LOGO_URL",
-        "https://drive.google.com/uc?export=view&id=1x2Q9wJm8QmQm7mYjQmW7aJmR8bPlogoblak",
-    ),
-)
-
-DEFAULT_FROM_EMAIL = getattr(
-    settings,
-    "DEFAULT_FROM_EMAIL",
-    getattr(settings, "EMAIL_HOST_USER", "no-reply@primeyhr.com"),
-)
 
 
 # ============================================================
@@ -72,6 +45,12 @@ def _safe_text(value, default="-"):
         return default
     value = str(value).strip()
     return value if value else default
+
+
+def _normalize_email(value: str) -> str:
+    if not value:
+        return ""
+    return str(value).strip().lower()
 
 
 def _money_str(value) -> str:
@@ -125,7 +104,7 @@ def _build_invoice_recipients(invoice) -> list[str]:
         )
 
     for value in candidates:
-        email = _safe_text(value, "").lower()
+        email = _normalize_email(value)
         if email and email not in recipients:
             recipients.append(email)
 
@@ -152,58 +131,102 @@ def _get_first_existing_attr(instance, attr_names: list[str], default=""):
     return default
 
 
-def _collect_invoice_whatsapp_targets(invoice) -> list[dict]:
+def _get_user_related_profile_candidates(user) -> list:
     """
-    تجميع مستهدفي الواتساب بشكل آمن وبدون تكرار.
+    محاولة الوصول إلى بروفايل المستخدم الشائع بدون فرض اسم محدد.
+    """
+    if not user:
+        return []
 
-    الأولوية:
-    - جوال الشركة
-    - جوال المالك
-    - جوال أول admin/owner داخل الشركة
+    candidates = []
+
+    for attr_name in ["profile", "userprofile"]:
+        try:
+            related_obj = getattr(user, attr_name, None)
+        except Exception:
+            related_obj = None
+
+        if related_obj:
+            candidates.append(related_obj)
+
+    return candidates
+
+
+def _get_best_phone_for_entity(instance) -> str:
+    """
+    جلب أفضل رقم جوال من الكيان مباشرة أو من profile/userprofile إن وجد.
+    """
+    phone_attr_candidates = [
+        "phone",
+        "mobile",
+        "mobile_number",
+        "whatsapp_number",
+        "phone_number",
+    ]
+
+    direct_phone = _get_first_existing_attr(instance, phone_attr_candidates, "")
+    if direct_phone:
+        return direct_phone
+
+    for profile_obj in _get_user_related_profile_candidates(instance):
+        profile_phone = _get_first_existing_attr(profile_obj, phone_attr_candidates, "")
+        if profile_phone:
+            return profile_phone
+
+    return ""
+
+
+def _collect_invoice_notification_targets(invoice) -> list[dict]:
+    """
+    تجميع مستهدفي الإشعار بشكل آمن وبدون تكرار.
     """
     targets: list[dict] = []
     seen_phones: set[str] = set()
+    seen_emails: set[str] = set()
 
     company = getattr(invoice, "company", None)
     owner = getattr(company, "owner", None) if company else None
 
-    def _append_target(phone, name="", role=""):
-        phone = _safe_text(phone, "")
-        if not phone:
-            return
-        if phone in seen_phones:
+    def _append_target(*, phone="", email="", name="", role=""):
+        safe_phone = _safe_text(phone, "")
+        safe_email = _normalize_email(email)
+        safe_name = _safe_text(name, "User")
+        safe_role = _safe_text(role, "")
+
+        key = safe_phone or safe_email
+        if not key:
             return
 
-        seen_phones.add(phone)
+        if safe_phone and safe_phone in seen_phones:
+            return
+
+        if safe_email and safe_email in seen_emails:
+            return
+
+        if safe_phone:
+            seen_phones.add(safe_phone)
+
+        if safe_email:
+            seen_emails.add(safe_email)
+
         targets.append({
-            "phone": phone,
-            "name": _safe_text(name, "User"),
-            "role": _safe_text(role, ""),
+            "phone": safe_phone,
+            "email": safe_email,
+            "name": safe_name,
+            "role": safe_role,
         })
 
-    company_phone = _get_first_existing_attr(
-        company,
-        ["phone", "mobile", "mobile_number", "whatsapp_number"],
-        "",
-    )
     _append_target(
-        company_phone,
+        phone=_get_best_phone_for_entity(company),
+        email=getattr(company, "email", None),
         name=getattr(company, "name", None),
         role="company",
     )
 
-    owner_phone = _get_first_existing_attr(
-        owner,
-        ["phone", "mobile", "mobile_number", "whatsapp_number"],
-        "",
-    )
-    owner_name = _safe_text(
-        getattr(owner, "first_name", None) or getattr(owner, "username", None),
-        "Owner",
-    )
     _append_target(
-        owner_phone,
-        name=owner_name,
+        phone=_get_best_phone_for_entity(owner),
+        email=getattr(owner, "email", None),
+        name=getattr(owner, "first_name", None) or getattr(owner, "username", None),
         role="owner",
     )
 
@@ -217,23 +240,15 @@ def _collect_invoice_whatsapp_targets(invoice) -> list[dict]:
         ) if company else None
 
         admin_user = getattr(admin_link, "user", None) if admin_link else None
-        admin_phone = _get_first_existing_attr(
-            admin_user,
-            ["phone", "mobile", "mobile_number", "whatsapp_number"],
-            "",
-        )
-        admin_name = _safe_text(
-            getattr(admin_user, "first_name", None) or getattr(admin_user, "username", None),
-            "Admin",
-        )
         _append_target(
-            admin_phone,
-            name=admin_name,
+            phone=_get_best_phone_for_entity(admin_user),
+            email=getattr(admin_user, "email", None),
+            name=getattr(admin_user, "first_name", None) or getattr(admin_user, "username", None),
             role=getattr(admin_link, "role", "admin") if admin_link else "admin",
         )
     except Exception:
         logger.exception(
-            "Failed while collecting invoice WhatsApp targets. invoice_id=%s",
+            "Failed while collecting invoice notification targets. invoice_id=%s",
             getattr(invoice, "id", None),
         )
 
@@ -251,7 +266,7 @@ def _generate_invoice_pdf_bytes(*, invoice, payment, subscription) -> bytes | No
 
         buffer = BytesIO()
         pdf = canvas.Canvas(buffer, pagesize=A4)
-        width, height = A4
+        _, height = A4
 
         y = height - 50
 
@@ -260,7 +275,7 @@ def _generate_invoice_pdf_bytes(*, invoice, payment, subscription) -> bytes | No
         pdf.setTitle(f"Invoice {invoice.invoice_number}")
 
         pdf.setFont("Helvetica-Bold", 16)
-        pdf.drawString(40, y, "Primey HR Cloud")
+        pdf.drawString(40, y, "Mham Cloud")
         y -= 28
 
         pdf.setFont("Helvetica-Bold", 13)
@@ -317,7 +332,7 @@ def _generate_invoice_pdf_bytes(*, invoice, payment, subscription) -> bytes | No
             y -= 24
 
         pdf.setFont("Helvetica-Oblique", 9)
-        pdf.drawString(40, y, "Generated automatically by Primey HR Cloud.")
+        pdf.drawString(40, y, "Generated automatically by Mham Cloud.")
 
         pdf.showPage()
         pdf.save()
@@ -333,117 +348,32 @@ def _generate_invoice_pdf_bytes(*, invoice, payment, subscription) -> bytes | No
         return None
 
 
-def _build_cash_payment_whatsapp_message(*, invoice, payment, subscription) -> str:
-    company = getattr(invoice, "company", None)
+# ============================================================
+# Notification Helpers
+# ============================================================
 
-    subtotal_value = (
-        getattr(invoice, "subtotal_amount", None)
-        if hasattr(invoice, "subtotal_amount")
-        else getattr(invoice, "subtotal", None)
-    )
-    vat_value = getattr(invoice, "vat", None)
-    total_value = getattr(invoice, "total_amount", None)
-
-    return (
-        f"تم تأكيد الدفع النقدي بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"رقم الفاتورة: {_safe_text(getattr(invoice, 'invoice_number', None))}\n"
-        f"تاريخ الإصدار: {_date_str(getattr(invoice, 'issue_date', None))}\n"
-        f"تاريخ الدفع: {_date_str(getattr(payment, 'paid_at', None))}\n"
-        f"طريقة الدفع: CASH\n"
-        f"الباقة: {_safe_text(getattr(getattr(subscription, 'plan', None), 'name', None)) if subscription else '-'}\n"
-        f"حالة الاشتراك: {_safe_text(getattr(subscription, 'status', None)) if subscription else '-'}\n"
-        f"Subtotal: {_money_str(subtotal_value)} SAR\n"
-        f"VAT: {_money_str(vat_value)} SAR\n"
-        f"الإجمالي: {_money_str(total_value)} SAR\n\n"
-        f"تم تحديث حالة الفاتورة والاشتراك بنجاح."
-    )
-
-
-def _send_cash_payment_confirmation_whatsapp(*, invoice, payment, subscription) -> None:
+def _load_billing_notification_module():
     """
-    إرسال إشعار واتساب بعد نجاح الدفع النقدي.
+    تحميل مرن لطبقة billing الرسمية.
     """
-    company = getattr(invoice, "company", None)
-    targets = _collect_invoice_whatsapp_targets(invoice)
+    candidate_modules = [
+        "notification_center.services_billing",
+        "notification_center.services_company",
+    ]
 
-    if not targets:
-        logger.warning(
-            "Cash payment WhatsApp skipped: no phone targets found. invoice_id=%s",
-            getattr(invoice, "id", None),
-        )
-        return
-
-    subtotal_value = (
-        getattr(invoice, "subtotal_amount", None)
-        if hasattr(invoice, "subtotal_amount")
-        else getattr(invoice, "subtotal", None)
-    )
-    vat_value = getattr(invoice, "vat", None)
-    total_value = getattr(invoice, "total_amount", None)
-
-    message_text = _build_cash_payment_whatsapp_message(
-        invoice=invoice,
-        payment=payment,
-        subscription=subscription,
-    )
-
-    for target in targets:
+    for module_path in candidate_modules:
         try:
-            send_event_whatsapp_message(
-                scope_type=ScopeType.COMPANY,
-                company=company,
-                event_code="cash_payment_confirmed",
-                recipient_phone=target["phone"],
-                recipient_name=target["name"],
-                recipient_role=target["role"],
-                trigger_source=TriggerSource.SYSTEM,
-                language_code="ar",
-                related_model="Invoice",
-                related_object_id=str(getattr(invoice, "id", "")),
-                context={
-                    "message": message_text,
-                    "company_name": _safe_text(getattr(company, "name", None)),
-                    "recipient_name": target["name"],
-                    "invoice_number": _safe_text(getattr(invoice, "invoice_number", None)),
-                    "payment_method": "CASH",
-                    "amount": f"{_money_str(total_value)} SAR",
-                    "subtotal": f"{_money_str(subtotal_value)} SAR",
-                    "vat": f"{_money_str(vat_value)} SAR",
-                    "status": _safe_text(getattr(subscription, "status", None)) if subscription else "-",
-                    "plan_name": _safe_text(getattr(getattr(subscription, "plan", None), "name", None)) if subscription else "-",
-                },
-            )
+            return importlib.import_module(module_path)
         except Exception:
-            logger.exception(
-                "Failed to send cash payment WhatsApp. invoice_id=%s phone=%s",
-                getattr(invoice, "id", None),
-                target.get("phone"),
-            )
+            continue
+
+    return None
 
 
-def _build_cash_payment_email_html(*, invoice, payment, subscription) -> str:
+def _build_cash_payment_context(*, invoice, payment, subscription, actor) -> dict:
     company = getattr(invoice, "company", None)
     owner = getattr(company, "owner", None) if company else None
 
-    logo_url = escape(PRIMEY_EMAIL_LOGO_URL)
-
-    company_name = escape(_safe_text(getattr(company, "name", None)))
-    company_email = escape(_safe_text(getattr(company, "email", None)))
-    company_phone = escape(_safe_text(getattr(company, "phone", None)))
-    commercial_number = escape(_safe_text(getattr(company, "commercial_number", None)))
-    city = escape(_safe_text(getattr(company, "city", None)))
-    owner_email = escape(_safe_text(getattr(owner, "email", None)))
-
-    plan_name = escape(_safe_text(getattr(getattr(subscription, "plan", None), "name", None))) if subscription else "-"
-    subscription_status = escape(_safe_text(getattr(subscription, "status", None))) if subscription else "-"
-    start_date = escape(_date_str(getattr(subscription, "start_date", None))) if subscription else "-"
-    end_date = escape(_date_str(getattr(subscription, "end_date", None))) if subscription else "-"
-
-    invoice_number = escape(_safe_text(getattr(invoice, "invoice_number", None)))
-    issue_date = escape(_date_str(getattr(invoice, "issue_date", None)))
-    paid_at = escape(_date_str(getattr(payment, "paid_at", None)))
-
     subtotal_value = (
         getattr(invoice, "subtotal_amount", None)
         if hasattr(invoice, "subtotal_amount")
@@ -452,185 +382,126 @@ def _build_cash_payment_email_html(*, invoice, payment, subscription) -> str:
     vat_value = getattr(invoice, "vat", None)
     total_value = getattr(invoice, "total_amount", None)
 
-    subtotal = escape(_money_str(subtotal_value))
-    vat = escape(_money_str(vat_value))
-    total = escape(_money_str(total_value))
-
-    return f"""
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <title>تأكيد الدفع النقدي</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Tahoma,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f7fb;margin:0;padding:24px 0;">
-    <tr>
-      <td align="center">
-        <table width="680" cellpadding="0" cellspacing="0"
-               style="max-width:680px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
-
-          <tr>
-            <td align="center" style="background:#000000;padding:28px 24px;">
-              <img src="{logo_url}" alt="Primey"
-                   style="max-height:56px;width:auto;display:block;margin:0 auto 12px auto;" />
-              <div style="color:#ffffff;font-size:22px;font-weight:700;line-height:1.6;">
-                Primey HR Cloud
-              </div>
-              <div style="color:#d1d5db;font-size:14px;line-height:1.8;">
-                تم تأكيد الدفع النقدي بنجاح
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:32px 28px 20px 28px;">
-              <div style="font-size:16px;color:#111827;line-height:2;">
-                تم تسجيل عملية الدفع وتحديث حالة الفاتورة والاشتراك بنجاح.
-              </div>
-
-              <div style="margin-top:22px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الشركة
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">اسم الشركة:</td><td style="padding:6px 0;">{company_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">البريد الإلكتروني:</td><td style="padding:6px 0;">{company_email}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الجوال:</td><td style="padding:6px 0;">{company_phone}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">السجل التجاري:</td><td style="padding:6px 0;">{commercial_number}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">المدينة:</td><td style="padding:6px 0;">{city}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">بريد المالك:</td><td style="padding:6px 0;">{owner_email}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الاشتراك
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">الباقة:</td><td style="padding:6px 0;">{plan_name}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الحالة:</td><td style="padding:6px 0;">{subscription_status}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ البداية:</td><td style="padding:6px 0;">{start_date}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ النهاية:</td><td style="padding:6px 0;">{end_date}</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:18px;">
-                <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:14px;">
-                  بيانات الفاتورة والدفع
-                </div>
-
-                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;line-height:2;">
-                  <tr><td style="padding:6px 0;font-weight:700;width:170px;">رقم الفاتورة:</td><td style="padding:6px 0;">{invoice_number}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ الإصدار:</td><td style="padding:6px 0;">{issue_date}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">تاريخ الدفع:</td><td style="padding:6px 0;">{paid_at}</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">طريقة الدفع:</td><td style="padding:6px 0;">CASH</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">Subtotal:</td><td style="padding:6px 0;">{subtotal} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">VAT:</td><td style="padding:6px 0;">{vat} SAR</td></tr>
-                  <tr><td style="padding:6px 0;font-weight:700;">الإجمالي:</td><td style="padding:6px 0;">{total} SAR</td></tr>
-                </table>
-              </div>
-
-              <div style="margin-top:22px;font-size:14px;color:#6b7280;line-height:2;">
-                تم إرفاق نسخة PDF من الفاتورة مع هذه الرسالة.
-              </div>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:20px 28px 30px 28px;">
-              <div style="border-top:1px solid #e5e7eb;padding-top:18px;font-size:12px;color:#9ca3af;line-height:1.9;text-align:center;">
-                هذه رسالة آلية من Primey HR Cloud — يرجى عدم الرد عليها مباشرة.
-              </div>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""".strip()
-
-
-def _send_cash_payment_confirmation_email(*, invoice, payment, subscription) -> None:
-    recipients = _build_invoice_recipients(invoice)
-
-    if not recipients:
-        logger.warning(
-            "Cash payment email skipped: no recipients found. invoice_id=%s",
-            getattr(invoice, "id", None),
-        )
-        return
-
-    company = getattr(invoice, "company", None)
-
-    subtotal_value = (
-        getattr(invoice, "subtotal_amount", None)
-        if hasattr(invoice, "subtotal_amount")
-        else getattr(invoice, "subtotal", None)
-    )
-    vat_value = getattr(invoice, "vat", None)
-    total_value = getattr(invoice, "total_amount", None)
-
-    subject = f"تأكيد الدفع النقدي - {_safe_text(getattr(company, 'name', None), 'Company')}"
-
-    text_body = (
-        f"تم تأكيد الدفع النقدي بنجاح داخل Primey HR Cloud.\n\n"
-        f"اسم الشركة: {_safe_text(getattr(company, 'name', None))}\n"
-        f"رقم الفاتورة: {_safe_text(getattr(invoice, 'invoice_number', None))}\n"
-        f"تاريخ الإصدار: {_date_str(getattr(invoice, 'issue_date', None))}\n"
-        f"تاريخ الدفع: {_date_str(getattr(payment, 'paid_at', None))}\n"
-        f"طريقة الدفع: CASH\n"
-        f"الباقة: {_safe_text(getattr(getattr(subscription, 'plan', None), 'name', None)) if subscription else '-'}\n"
-        f"حالة الاشتراك: {_safe_text(getattr(subscription, 'status', None)) if subscription else '-'}\n"
-        f"Subtotal: {_money_str(subtotal_value)} SAR\n"
-        f"VAT: {_money_str(vat_value)} SAR\n"
-        f"الإجمالي: {_money_str(total_value)} SAR\n\n"
-        f"تم إرفاق نسخة PDF من الفاتورة مع هذه الرسالة.\n\n"
-        f"مع تحيات Primey HR Cloud"
-    )
-
-    html_body = _build_cash_payment_email_html(
+    pdf_bytes = _generate_invoice_pdf_bytes(
         invoice=invoice,
         payment=payment,
         subscription=subscription,
     )
 
-    try:
-        message = EmailMultiAlternatives(
-            subject=subject,
-            body=text_body,
-            from_email=DEFAULT_FROM_EMAIL,
-            to=recipients,
-        )
-        message.attach_alternative(html_body, "text/html")
+    return {
+        "invoice_id": getattr(invoice, "id", None),
+        "invoice_number": _safe_text(getattr(invoice, "invoice_number", None)),
+        "invoice_status": _safe_text(getattr(invoice, "status", None)),
+        "billing_reason": _safe_text(getattr(invoice, "billing_reason", None)),
+        "company_id": getattr(company, "id", None) if company else None,
+        "company_name": _safe_text(getattr(company, "name", None)),
+        "company_email": _safe_text(getattr(company, "email", None)),
+        "company_phone": _safe_text(getattr(company, "phone", None)),
+        "company_active": bool(getattr(company, "is_active", False)) if company else False,
+        "owner_user_id": getattr(owner, "id", None) if owner else None,
+        "owner_email": _safe_text(getattr(owner, "email", None)) if owner else "",
+        "payment_id": getattr(payment, "id", None),
+        "payment_method": _safe_text(getattr(payment, "method", None)),
+        "payment_reference": _safe_text(getattr(payment, "reference_number", None)),
+        "paid_at": _date_str(getattr(payment, "paid_at", None)),
+        "subtotal_amount": _money_str(subtotal_value),
+        "vat_amount": _money_str(vat_value),
+        "total_amount": _money_str(total_value),
+        "plan_name": _safe_text(getattr(getattr(subscription, "plan", None), "name", None)) if subscription else "-",
+        "subscription_id": getattr(subscription, "id", None) if subscription else None,
+        "subscription_status": _safe_text(getattr(subscription, "status", None)) if subscription else "-",
+        "subscription_start_date": _date_str(getattr(subscription, "start_date", None)) if subscription else "-",
+        "subscription_end_date": _date_str(getattr(subscription, "end_date", None)) if subscription else "-",
+        "recipients": _build_invoice_recipients(invoice),
+        "targets": _collect_invoice_notification_targets(invoice),
+        "invoice_pdf_bytes": pdf_bytes,
+        "invoice_pdf_filename": f"{_safe_text(getattr(invoice, 'invoice_number', None), 'invoice')}.pdf",
+        "actor_user_id": getattr(actor, "id", None) if actor else None,
+        "actor_username": _safe_text(getattr(actor, "username", None), "") if actor else "",
+    }
 
-        pdf_bytes = _generate_invoice_pdf_bytes(
+
+def _dispatch_cash_payment_confirmation_notification(*, invoice, payment, subscription, actor) -> None:
+    """
+    تمرير إشعار الدفع النقدي المؤكد إلى الطبقة الرسمية فقط.
+    """
+    services_module = _load_billing_notification_module()
+
+    if not services_module:
+        logger.warning(
+            "Billing notification service module not found. invoice_id=%s payment_id=%s",
+            getattr(invoice, "id", None),
+            getattr(payment, "id", None),
+        )
+        return
+
+    candidate_function_names = [
+        "notify_cash_payment_confirmed",
+        "notify_payment_confirmed",
+        "send_cash_payment_confirmation_notification",
+        "send_payment_confirmation_notification",
+    ]
+
+    notify_func = None
+    for func_name in candidate_function_names:
+        notify_func = getattr(services_module, func_name, None)
+        if callable(notify_func):
+            break
+
+    if not callable(notify_func):
+        logger.warning(
+            "Cash payment notification function not found. checked=%s",
+            ", ".join(candidate_function_names),
+        )
+        return
+
+    context = _build_cash_payment_context(
+        invoice=invoice,
+        payment=payment,
+        subscription=subscription,
+        actor=actor,
+    )
+
+    try:
+        notify_func(
+            actor=actor,
+            invoice=invoice,
+            payment=payment,
+            subscription=subscription,
+            company=getattr(invoice, "company", None),
+            extra_context=context,
+        )
+        return
+    except TypeError:
+        pass
+
+    try:
+        notify_func(
+            actor=actor,
+            invoice=invoice,
+            payment=payment,
+            subscription=subscription,
+            company=getattr(invoice, "company", None),
+            context=context,
+        )
+        return
+    except TypeError:
+        pass
+
+    try:
+        notify_func(
             invoice=invoice,
             payment=payment,
             subscription=subscription,
         )
-        if pdf_bytes:
-            filename = f"{_safe_text(getattr(invoice, 'invoice_number', None), 'invoice')}.pdf"
-            message.attach(filename, pdf_bytes, "application/pdf")
-
-        message.send(fail_silently=False)
-
-        logger.info(
-            "Cash payment confirmation email sent successfully. invoice_id=%s recipients=%s",
-            getattr(invoice, "id", None),
-            recipients,
-        )
-
+        return
     except Exception:
         logger.exception(
-            "Failed to send cash payment confirmation email. invoice_id=%s",
+            "Failed while dispatching cash payment confirmation notification. invoice_id=%s payment_id=%s",
             getattr(invoice, "id", None),
+            getattr(payment, "id", None),
         )
+        return
 
 
 @csrf_exempt
@@ -781,24 +652,14 @@ def confirm_cash_payment(request):
             company.save(update_fields=["is_active"])
 
         # ========================================================
-        # ✉️ Send Email After Successful Commit
+        # Notification Center الرسمي فقط بعد نجاح الـ commit
         # ========================================================
         transaction.on_commit(
-            lambda: _send_cash_payment_confirmation_email(
+            lambda: _dispatch_cash_payment_confirmation_notification(
                 invoice=invoice,
                 payment=payment,
                 subscription=subscription,
-            )
-        )
-
-        # ========================================================
-        # 📲 Send WhatsApp After Successful Commit
-        # ========================================================
-        transaction.on_commit(
-            lambda: _send_cash_payment_confirmation_whatsapp(
-                invoice=invoice,
-                payment=payment,
-                subscription=subscription,
+                actor=request.user,
             )
         )
 

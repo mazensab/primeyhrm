@@ -1,6 +1,6 @@
 # ============================================================
 # 🏢 SYSTEM — Company Subscription Detail
-# Primey HR Cloud | V1.0 ULTRA STABLE
+# Mham Cloud | V1.0 ULTRA STABLE
 # ============================================================
 # ✔ Single Company
 # ✔ Includes Subscription

@@ -1,6 +1,6 @@
 # ============================================================
 # 💳 SYSTEM — Payments List (READ ONLY)
-# Primey HR Cloud
+# Mham Cloud
 # ============================================================
 # ✔ Safe Read Only
 # ✔ Status derived from payment state
