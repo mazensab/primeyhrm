@@ -34,14 +34,25 @@ function normalizeLocale(value?: string | null): AppLocale {
   return "en";
 }
 
+function getMetadataBase(): URL {
+  const rawUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "https://mhamcloud.com";
+
+  try {
+    return new URL(rawUrl);
+  } catch {
+    return new URL("https://mhamcloud.com");
+  }
+}
+
 // ======================================================
 // 🌐 Metadata — Favicon + Title
 // ======================================================
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
-  ),
+  metadataBase: getMetadataBase(),
   title: "Mham Cloud",
   description: "Mham Cloud Platform",
   icons: {

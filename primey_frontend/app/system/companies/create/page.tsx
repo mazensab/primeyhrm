@@ -30,7 +30,12 @@ import {
   CheckCircle2,
 } from "lucide-react"
 
-const API = "http://localhost:8000/api"
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://mhamcloud.com"
+
+const API = API_BASE.endsWith("/api") ? API_BASE : `${API_BASE}/api`
 
 type BillingCycle = "monthly" | "yearly"
 type PaymentMethod =
@@ -93,7 +98,8 @@ function getCookie(name: string) {
 
 async function ensureCsrf() {
   try {
-    await fetch(`http://localhost:8000/api/auth/csrf/`, {
+    await fetch(`${API}/auth/csrf/`, {
+      method: "GET",
       credentials: "include",
     })
   } catch {
@@ -259,11 +265,7 @@ export default function CreateCompanyPage() {
 
         const data = await res.json()
 
-        setPlans(
-          Array.isArray(data)
-            ? data
-            : data.plans || data.results || []
-        )
+        setPlans(Array.isArray(data) ? data : data.plans || data.results || [])
       } catch {
         toast.error("Failed to load plans")
       } finally {
@@ -385,7 +387,10 @@ export default function CreateCompanyPage() {
   }) => {
     const { currentDraftId, selectedPaymentMethod, csrfToken } = args
 
-    if (selectedPaymentMethod === "CASH" || selectedPaymentMethod === "BANK_TRANSFER") {
+    if (
+      selectedPaymentMethod === "CASH" ||
+      selectedPaymentMethod === "BANK_TRANSFER"
+    ) {
       toast.success("Draft ready for manual payment review")
       router.push(`/system/payments/${currentDraftId}`)
       return true
@@ -408,7 +413,9 @@ export default function CreateCompanyPage() {
           }),
         })
 
-        const data: StartPaymentResponse | null = await res.json().catch(() => null)
+        const data: StartPaymentResponse | null = await res
+          .json()
+          .catch(() => null)
 
         if (!res.ok || !data) {
           toast.error(data?.message || "Failed to create Tap checkout")
@@ -517,6 +524,12 @@ export default function CreateCompanyPage() {
     try {
       const csrftoken = (await ensureCsrf()) || getCookie("csrftoken")
 
+      if (!csrftoken) {
+        toast.error("CSRF token not found")
+        setLoading(false)
+        return
+      }
+
       const payload = {
         company_name: name,
         email,
@@ -552,7 +565,7 @@ export default function CreateCompanyPage() {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRFToken": csrftoken || "",
+          "X-CSRFToken": csrftoken,
         },
         body: JSON.stringify(payload),
       })
@@ -572,7 +585,7 @@ export default function CreateCompanyPage() {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRFToken": csrftoken || "",
+          "X-CSRFToken": csrftoken,
         },
         body: JSON.stringify({
           draft_id: data.draft_id,
@@ -592,7 +605,7 @@ export default function CreateCompanyPage() {
       const paymentStarted = await startPaymentAfterDraft({
         currentDraftId: String(data.draft_id),
         selectedPaymentMethod: paymentMethod,
-        csrfToken: csrftoken || "",
+        csrfToken: csrftoken,
       })
 
       if (!paymentStarted) {
@@ -620,7 +633,6 @@ export default function CreateCompanyPage() {
         </p>
       </div>
 
-      {/* COMPANY */}
       <Card className="border shadow-sm">
         <CardHeader className="border-b bg-muted/20">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -780,7 +792,6 @@ export default function CreateCompanyPage() {
         </CardContent>
       </Card>
 
-      {/* PLAN */}
       <Card className="border shadow-sm">
         <CardHeader className="border-b bg-muted/20">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -827,7 +838,6 @@ export default function CreateCompanyPage() {
         </CardContent>
       </Card>
 
-      {/* BILLING */}
       <Card className="border shadow-sm">
         <CardHeader className="border-b bg-muted/20">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -871,7 +881,6 @@ export default function CreateCompanyPage() {
         </CardContent>
       </Card>
 
-      {/* PAYMENT METHOD */}
       <Card className="border shadow-sm">
         <CardHeader className="border-b bg-muted/20">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -885,7 +894,9 @@ export default function CreateCompanyPage() {
             <div
               onClick={() => setPaymentMethod("CASH")}
               className={`cursor-pointer rounded-xl border p-4 transition ${
-                paymentMethod === "CASH" ? "border-primary bg-primary/5" : "hover:border-gray-400"
+                paymentMethod === "CASH"
+                  ? "border-primary bg-primary/5"
+                  : "hover:border-gray-400"
               }`}
             >
               <div className="font-medium">Cash</div>
@@ -897,7 +908,9 @@ export default function CreateCompanyPage() {
             <div
               onClick={() => setPaymentMethod("BANK_TRANSFER")}
               className={`cursor-pointer rounded-xl border p-4 transition ${
-                paymentMethod === "BANK_TRANSFER" ? "border-primary bg-primary/5" : "hover:border-gray-400"
+                paymentMethod === "BANK_TRANSFER"
+                  ? "border-primary bg-primary/5"
+                  : "hover:border-gray-400"
               }`}
             >
               <div className="font-medium">Bank Transfer</div>
@@ -909,7 +922,9 @@ export default function CreateCompanyPage() {
             <div
               onClick={() => setPaymentMethod("CREDIT_CARD")}
               className={`cursor-pointer rounded-xl border p-4 transition ${
-                paymentMethod === "CREDIT_CARD" ? "border-primary bg-primary/5" : "hover:border-gray-400"
+                paymentMethod === "CREDIT_CARD"
+                  ? "border-primary bg-primary/5"
+                  : "hover:border-gray-400"
               }`}
             >
               <div className="font-medium">Credit Card</div>
@@ -921,7 +936,9 @@ export default function CreateCompanyPage() {
             <div
               onClick={() => setPaymentMethod("TAMARA")}
               className={`cursor-pointer rounded-xl border p-4 transition ${
-                paymentMethod === "TAMARA" ? "border-primary bg-primary/5" : "hover:border-gray-400"
+                paymentMethod === "TAMARA"
+                  ? "border-primary bg-primary/5"
+                  : "hover:border-gray-400"
               }`}
             >
               <div className="flex items-center gap-2 font-medium">
@@ -944,7 +961,6 @@ export default function CreateCompanyPage() {
         </CardContent>
       </Card>
 
-      {/* INVOICE PREVIEW */}
       <Card className="border shadow-sm">
         <CardHeader className="border-b bg-muted/20">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -1024,7 +1040,6 @@ export default function CreateCompanyPage() {
         </CardContent>
       </Card>
 
-      {/* ADMIN */}
       <Card className="border shadow-sm">
         <CardHeader className="border-b bg-muted/20">
           <CardTitle className="flex items-center gap-2 text-lg">
