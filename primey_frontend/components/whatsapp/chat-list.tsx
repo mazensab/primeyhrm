@@ -4,19 +4,18 @@
 // 📂 الملف: components/whatsapp/chat-list.tsx
 // 🟢 Mham Cloud - WhatsApp Chat List
 // ------------------------------------------------------------
-// ✅ إزالة البطاقة الخارجية عن قائمة الدردشات
-// ✅ جعل القائمة جزءًا من الصفحة مثل المرجع
-// ✅ الاستفادة الكاملة من العرض الموسّع القادم من page.tsx
-// ✅ الحفاظ على الهيدر والبحث والقائمة نفسها
+// ✅ إصلاح قراءة TypeScript الخاطئة لمكوّن ChatListItem
+// ✅ تثبيت نوع المكوّن المستورد صراحة
+// ✅ الحفاظ على نفس سلوك القائمة الحالي
 // ✅ دعم عربي / إنجليزي فعليًا
 // ✅ احترام RTL داخل النصوص فقط
 // ✅ الأرقام دائمًا بالإنجليزية
 // ============================================================
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ComponentType } from "react"
 import { Plus, Search } from "lucide-react"
 
-import ChatListItem from "./chat-list-item"
+import ImportedChatListItem from "./chat-list-item"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -50,6 +49,14 @@ type NormalizedChatItem = {
   lastMessageAt: string
   isResolved: boolean
 }
+
+type ChatListItemProps = {
+  conversation: NormalizedChatItem
+  active?: boolean
+  onSelect?: (conversationId: number) => void
+}
+
+const ChatListItem = ImportedChatListItem as ComponentType<ChatListItemProps>
 
 function normalizeChat(chat: RawChatItem): NormalizedChatItem {
   return {
@@ -239,7 +246,7 @@ export default function ChatList({ chats }: ChatListProps) {
                     key={chat.id}
                     conversation={chat}
                     active={selectedChatId === chat.id}
-                    onSelect={(conversationId) =>
+                    onSelect={(conversationId: number) =>
                       setSelectedChatId(conversationId)
                     }
                   />
