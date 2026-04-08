@@ -445,6 +445,8 @@ const translations: Record<Locale, Dictionary> = {
 
     manualEntryButton: "إدخال حركة",
     manualEntryTitle: "إدخال حركة حضور يدويًا",
+    manualEntryDescription:
+      "استخدم هذه النافذة لتسجيل حركة دخول أو خروج رسمية للموظف عند فقدان البصمة أو الحاجة إلى تصحيح الحركة.",
     manualEntryEmployee: "الموظف",
     manualEntrySelectEmployee: "اختر الموظف",
     manualEntryEmployeeSearch: "ابحث باسم الموظف",
