@@ -4,18 +4,19 @@
 // 📂 الملف: components/whatsapp/chat-list.tsx
 // 🟢 Mham Cloud - WhatsApp Chat List
 // ------------------------------------------------------------
-// ✅ إصلاح قراءة TypeScript الخاطئة لمكوّن ChatListItem
-// ✅ تثبيت نوع المكوّن المستورد صراحة
-// ✅ الحفاظ على نفس سلوك القائمة الحالي
+// ✅ حل نهائي لمشكلة التباس الاستيراد مع chat-list-item
+// ✅ دمج عنصر المحادثة داخل نفس الملف لتجاوز خطأ build
+// ✅ الحفاظ على نفس الشكل والسلوك الحالي
 // ✅ دعم عربي / إنجليزي فعليًا
 // ✅ احترام RTL داخل النصوص فقط
 // ✅ الأرقام دائمًا بالإنجليزية
 // ============================================================
 
-import { useEffect, useMemo, useState, type ComponentType } from "react"
-import { Plus, Search } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { CheckCheck, Plus, Search } from "lucide-react"
 
-import ImportedChatListItem from "./chat-list-item"
+import ChatListItemDropdown from "./chat-list-item-dropdown"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -50,13 +51,11 @@ type NormalizedChatItem = {
   isResolved: boolean
 }
 
-type ChatListItemProps = {
+type ChatListRowProps = {
   conversation: NormalizedChatItem
   active?: boolean
   onSelect?: (conversationId: number) => void
 }
-
-const ChatListItem = ImportedChatListItem as ComponentType<ChatListItemProps>
 
 function normalizeChat(chat: RawChatItem): NormalizedChatItem {
   return {
@@ -118,6 +117,18 @@ function toEnglishDigits(value: string | number): string {
   return raw.replace(/[٠-٩۰-۹]/g, (char) => map[char] ?? char)
 }
 
+function getAvatarFallback(name: string) {
+  const clean = (name || "").trim()
+  if (!clean) return "NA"
+
+  const parts = clean.split(/\s+/).filter(Boolean)
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase()
+  }
+
+  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase()
+}
+
 const translations = {
   ar: {
     title: "المحادثات",
@@ -132,6 +143,123 @@ const translations = {
     addLabel: "Add",
   },
 } as const
+
+function ChatListRow({
+  conversation,
+  active = false,
+  onSelect,
+}: ChatListRowProps) {
+  const [locale, setLocale] = useState<LocaleKey>("en")
+  const [direction, setDirection] = useState<Direction>("ltr")
+
+  useEffect(() => {
+    const syncMeta = () => {
+      const next = getHtmlMeta()
+      setLocale(next.locale)
+      setDirection(next.direction)
+    }
+
+    syncMeta()
+
+    const observer = new MutationObserver(() => {
+      syncMeta()
+    })
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["lang", "dir"],
+    })
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+
+  const isArabic = locale === "ar"
+  const safeLastMessageAt = toEnglishDigits(conversation.lastMessageAt)
+  const safeUnreadCount =
+    conversation.unreadCount > 99
+      ? "99+"
+      : toEnglishDigits(conversation.unreadCount)
+
+  return (
+    <div
+      dir="ltr"
+      onClick={() => onSelect?.(conversation.id)}
+      className={cn(
+        "group relative flex min-w-0 cursor-pointer items-center gap-4 px-6 py-4 transition-colors",
+        active ? "bg-muted" : "hover:bg-muted/60"
+      )}
+    >
+      <div className="relative shrink-0">
+        <Avatar className="h-11 w-11">
+          <AvatarImage src={conversation.avatar} alt={conversation.title} />
+          <AvatarFallback className="text-[12px] font-medium">
+            {getAvatarFallback(conversation.title)}
+          </AvatarFallback>
+        </Avatar>
+
+        <span className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-emerald-500" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <span
+            dir={direction}
+            className={cn(
+              "min-w-0 flex-1 truncate text-[15px] font-semibold leading-6",
+              isArabic ? "text-right" : "text-left"
+            )}
+          >
+            {conversation.title}
+          </span>
+
+          <span
+            dir="ltr"
+            className="shrink-0 whitespace-nowrap text-[12px] leading-6 text-muted-foreground"
+          >
+            {safeLastMessageAt}
+          </span>
+        </div>
+
+        <div className="mt-0.5 flex min-w-0 items-center gap-2">
+          <CheckCheck className="h-4 w-4 shrink-0 text-emerald-500" />
+
+          <span
+            dir={direction}
+            className={cn(
+              "min-w-0 flex-1 truncate text-[13px] text-muted-foreground",
+              isArabic ? "text-right" : "text-left"
+            )}
+          >
+            {conversation.preview}
+          </span>
+
+          {conversation.unreadCount > 0 ? (
+            <span
+              dir="ltr"
+              className="ms-auto inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-semibold text-white"
+            >
+              {safeUnreadCount}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        onClick={(event) => event.stopPropagation()}
+        className={cn(
+          "absolute inset-y-0 right-0 flex items-center px-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
+          active
+            ? "bg-gradient-to-l from-muted via-muted/95 to-transparent"
+            : "bg-gradient-to-l from-background via-background/95 to-transparent"
+        )}
+      >
+        <ChatListItemDropdown />
+      </div>
+    </div>
+  )
+}
 
 export default function ChatList({ chats }: ChatListProps) {
   const [locale, setLocale] = useState<LocaleKey>("en")
@@ -242,7 +370,7 @@ export default function ChatList({ chats }: ChatListProps) {
             <div className="block min-w-0 divide-y">
               {filteredChats.length ? (
                 filteredChats.map((chat) => (
-                  <ChatListItem
+                  <ChatListRow
                     key={chat.id}
                     conversation={chat}
                     active={selectedChatId === chat.id}
