@@ -4,11 +4,12 @@
 // 📂 الملف: components/whatsapp/chat-list-item.tsx
 // 🟢 Mham Cloud - WhatsApp Chat List Item
 // ------------------------------------------------------------
-// ✅ إصلاح خطأ ChatListItemDropdown children
-// ✅ جعل عنصر القائمة متوافقًا مع build الحالي
-// ✅ الحفاظ على نفس توزيع العنصر
-// ✅ الحفاظ على العربية بدون كسر الـ layout
-// ✅ الأرقام والتواريخ دائمًا بالإنجليزية
+// ✅ إصلاح التصدير الخاطئ الذي جعل TypeScript يقرأ المكوّن
+//    على أنه ChatListItemDropdownProps
+// ✅ جعل ChatListItem يستقبل:
+//    conversation / active / onSelect
+// ✅ إزالة تمرير children إلى ChatListItemDropdown
+// ✅ الحفاظ على نفس شكل العنصر الحالي
 // ============================================================
 
 import { useEffect, useState } from "react"
