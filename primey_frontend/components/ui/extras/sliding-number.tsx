@@ -1,31 +1,28 @@
-"use client";
+"use client"
 
-import { useEffect, useId } from "react";
+import { useEffect, useId } from "react"
 import {
-  MotionValue,
   motion,
-  motionValue,
   useSpring,
   useTransform,
-  type Transition,
-} from "motion/react";
-import useMeasure from "react-use-measure";
+  type MotionValue,
+  type SpringOptions,
+} from "motion/react"
+import useMeasure from "react-use-measure"
 
-const TRANSITION: Transition = {
-  type: "spring",
+const SPRING_OPTIONS: SpringOptions = {
   stiffness: 280,
   damping: 18,
   mass: 0.3,
-};
+}
 
 function Digit({ value, place }: { value: number; place: number }) {
-  const valueRoundedToPlace = Math.floor(value / place) % 10;
-  const initial = motionValue(valueRoundedToPlace);
-  const animatedValue = useSpring(initial, TRANSITION);
+  const valueRoundedToPlace = Math.floor(value / place) % 10
+  const animatedValue = useSpring(valueRoundedToPlace, SPRING_OPTIONS)
 
   useEffect(() => {
-    animatedValue.set(valueRoundedToPlace);
-  }, [animatedValue, valueRoundedToPlace]);
+    animatedValue.set(valueRoundedToPlace)
+  }, [animatedValue, valueRoundedToPlace])
 
   return (
     <div className="relative inline-block w-[1ch] overflow-x-visible overflow-y-clip leading-none tabular-nums">
@@ -34,33 +31,33 @@ function Digit({ value, place }: { value: number; place: number }) {
         <Number key={i} mv={animatedValue} number={i} />
       ))}
     </div>
-  );
+  )
 }
 
 function Number({ mv, number }: { mv: MotionValue<number>; number: number }) {
-  const uniqueId = useId();
-  const [ref, bounds] = useMeasure();
+  const uniqueId = useId()
+  const [ref, bounds] = useMeasure()
 
   const y = useTransform(mv, (latest) => {
-    if (!bounds.height) return 0;
+    if (!bounds.height) return 0
 
-    const placeValue = latest % 10;
-    const offset = (10 + number - placeValue) % 10;
-    let memo = offset * bounds.height;
+    const placeValue = latest % 10
+    const offset = (10 + number - placeValue) % 10
+    let memo = offset * bounds.height
 
     if (offset > 5) {
-      memo -= 10 * bounds.height;
+      memo -= 10 * bounds.height
     }
 
-    return memo;
-  });
+    return memo
+  })
 
   if (!bounds.height) {
     return (
       <span ref={ref} className="invisible absolute">
         {number}
       </span>
-    );
+    )
   }
 
   return (
@@ -69,33 +66,33 @@ function Number({ mv, number }: { mv: MotionValue<number>; number: number }) {
       style={{ y }}
       layoutId={`${uniqueId}-${number}`}
       className="absolute inset-0 flex items-center justify-center"
-      transition={TRANSITION}
+      transition={SPRING_OPTIONS}
     >
       {number}
     </motion.span>
-  );
+  )
 }
 
 type SlidingNumberProps = {
-  value: number;
-  padStart?: boolean;
-  decimalSeparator?: string;
-};
+  value: number
+  padStart?: boolean
+  decimalSeparator?: string
+}
 
 export function SlidingNumber({
   value,
   padStart = false,
   decimalSeparator = ".",
 }: SlidingNumberProps) {
-  const absValue = Math.abs(value);
-  const [integerPart, decimalPart] = absValue.toString().split(".");
-  const integerValue = parseInt(integerPart, 10);
+  const absValue = Math.abs(value)
+  const [integerPart, decimalPart] = absValue.toString().split(".")
+  const integerValue = parseInt(integerPart, 10)
   const paddedInteger =
-    padStart && integerValue < 10 ? `0${integerPart}` : integerPart;
-  const integerDigits = paddedInteger.split("");
+    padStart && integerValue < 10 ? `0${integerPart}` : integerPart
+  const integerDigits = paddedInteger.split("")
   const integerPlaces = integerDigits.map((_, i) =>
     Math.pow(10, integerDigits.length - i - 1)
-  );
+  )
 
   return (
     <div className="flex items-center">
@@ -120,5 +117,5 @@ export function SlidingNumber({
         </>
       )}
     </div>
-  );
+  )
 }

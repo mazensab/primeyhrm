@@ -185,7 +185,6 @@ export default function ChatList({ chats }: ChatListProps) {
 
   return (
     <div dir="ltr" className="flex h-full min-h-0 flex-col overflow-hidden">
-      {/* Header */}
       <div className="shrink-0 px-6 pb-3 pt-6">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -213,7 +212,6 @@ export default function ChatList({ chats }: ChatListProps) {
         </div>
       </div>
 
-      {/* Search */}
       <div className="shrink-0 px-6 pb-3">
         <div className="relative flex items-center">
           <Search className="pointer-events-none absolute left-4 h-4 w-4 text-muted-foreground" />
@@ -231,7 +229,6 @@ export default function ChatList({ chats }: ChatListProps) {
         </div>
       </div>
 
-      {/* List */}
       <div className="min-h-0 flex-1">
         <div className="flex h-[calc(100vh_-_18rem)] lg:h-[calc(100vh_-_15.8rem)]">
           <ScrollArea className="w-full min-w-0">
