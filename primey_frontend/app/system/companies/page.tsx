@@ -170,6 +170,30 @@ const translations: Record<Locale, Dictionary> = {
   },
 }
 
+/* ======================================================
+   API Helpers
+====================================================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function getApiBaseUrl() {
+  const envBase =
+    process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envBase) {
+    return trimTrailingSlash(envBase)
+  }
+
+  if (typeof window !== "undefined") {
+    return trimTrailingSlash(window.location.origin)
+  }
+
+  return ""
+}
+
 function getCookie(name: string) {
   if (typeof document === "undefined") return null
 
@@ -200,15 +224,6 @@ function detectLocale(): Locale {
   }
 
   return "en"
-}
-
-function getApiBaseUrl() {
-  const envBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim()
-  if (envBase) {
-    return envBase.replace(/\/+$/, "")
-  }
-
-  return "http://localhost:8000"
 }
 
 function formatNumber(value?: number | string | null) {
@@ -307,7 +322,7 @@ export default function SystemCompaniesPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
 
-  const apiBaseUrl = getApiBaseUrl()
+  const apiBaseUrl = useMemo(() => getApiBaseUrl(), [])
   const t = translations[locale]
   const isArabic = locale === "ar"
   const dir = isArabic ? "rtl" : "ltr"
@@ -318,6 +333,8 @@ export default function SystemCompaniesPage() {
     }
 
     applyLocale()
+
+    if (typeof document === "undefined") return
 
     const htmlElement = document.documentElement
     const observer = new MutationObserver(() => {
@@ -341,6 +358,13 @@ export default function SystemCompaniesPage() {
 
   const loadCompanies = useCallback(
     async (silent = false) => {
+      if (!apiBaseUrl) {
+        setCompanies([])
+        setLoading(false)
+        setRefreshing(false)
+        return
+      }
+
       if (silent) {
         setRefreshing(true)
       } else {
@@ -376,6 +400,8 @@ export default function SystemCompaniesPage() {
   }, [loadCompanies])
 
   const toggleCompany = async (id: number) => {
+    if (!apiBaseUrl) return
+
     setTogglingId(id)
 
     try {

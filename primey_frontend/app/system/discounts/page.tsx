@@ -39,15 +39,31 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-// ======================================================
-// API
-// ======================================================
+/* ======================================================
+   API Helpers
+====================================================== */
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
 
-// ======================================================
-// Types
-// ======================================================
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    return trimTrailingSlash(envApi)
+  }
+
+  if (typeof window !== "undefined") {
+    return trimTrailingSlash(window.location.origin)
+  }
+
+  return ""
+}
+
+/* ======================================================
+   Types
+====================================================== */
 
 type Locale = "ar" | "en"
 type Direction = "rtl" | "ltr"
@@ -71,9 +87,9 @@ interface DiscountFormState {
   expires_at: string
 }
 
-// ======================================================
-// Locale
-// ======================================================
+/* ======================================================
+   Locale
+====================================================== */
 
 const translations = {
   ar: {
@@ -189,9 +205,9 @@ function getDocumentDirection(locale: Locale): Direction {
   return locale === "ar" ? "rtl" : "ltr"
 }
 
-// ======================================================
-// Helpers
-// ======================================================
+/* ======================================================
+   Helpers
+====================================================== */
 
 function getCookie(name: string) {
   if (typeof document === "undefined") return null
@@ -271,11 +287,13 @@ function DiscountStatusPill({
   )
 }
 
-// ======================================================
-// Page
-// ======================================================
+/* ======================================================
+   Page
+====================================================== */
 
 export default function SystemDiscountsPage() {
+  const API = useMemo(() => resolveApiBase(), [])
+
   const [locale, setLocale] = useState<Locale>("en")
   const [direction, setDirection] = useState<Direction>("ltr")
 
@@ -296,10 +314,6 @@ export default function SystemDiscountsPage() {
 
   const t = translations[locale]
   const isArabic = locale === "ar"
-
-  // ======================================================
-  // Sync Locale / Direction
-  // ======================================================
 
   useEffect(() => {
     const syncLocale = () => {
@@ -333,11 +347,13 @@ export default function SystemDiscountsPage() {
     }
   }, [])
 
-  // ======================================================
-  // Fetch
-  // ======================================================
-
   async function fetchDiscounts() {
+    if (!API) {
+      setDiscounts([])
+      setLoading(false)
+      return
+    }
+
     try {
       const res = await fetch(`${API}/api/system/discounts/`, {
         credentials: "include",
@@ -359,12 +375,8 @@ export default function SystemDiscountsPage() {
   }
 
   useEffect(() => {
-    fetchDiscounts()
-  }, [])
-
-  // ======================================================
-  // Derived
-  // ======================================================
+    void fetchDiscounts()
+  }, [API])
 
   const stats = useMemo(() => {
     const total = discounts.length
@@ -374,11 +386,9 @@ export default function SystemDiscountsPage() {
     return { total, active, disabled }
   }, [discounts])
 
-  // ======================================================
-  // Actions
-  // ======================================================
-
   async function createDiscount() {
+    if (!API) return
+
     const normalizedCode = form.code.trim().toUpperCase()
     const numericValue = Number(form.value)
     const numericMaxUses =
@@ -450,6 +460,8 @@ export default function SystemDiscountsPage() {
   }
 
   async function toggleDiscount(id: number) {
+    if (!API) return
+
     try {
       setTogglingId(id)
 
@@ -476,16 +488,8 @@ export default function SystemDiscountsPage() {
     }
   }
 
-  // ======================================================
-  // UI
-  // ======================================================
-
   return (
     <div dir={direction} className="space-y-6">
-      {/* ===================================== */}
-      {/* Header */}
-      {/* ===================================== */}
-
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
@@ -602,7 +606,7 @@ export default function SystemDiscountsPage() {
 
               <Button
                 className="w-full gap-2"
-                onClick={createDiscount}
+                onClick={() => void createDiscount()}
                 disabled={submitting}
               >
                 {submitting ? (
@@ -616,10 +620,6 @@ export default function SystemDiscountsPage() {
           </DialogContent>
         </Dialog>
       </div>
-
-      {/* ===================================== */}
-      {/* Stats */}
-      {/* ===================================== */}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Card className="border-border/60">
@@ -667,10 +667,6 @@ export default function SystemDiscountsPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* ===================================== */}
-      {/* Table */}
-      {/* ===================================== */}
 
       <Card className="border-border/60">
         <CardHeader>
@@ -758,7 +754,7 @@ export default function SystemDiscountsPage() {
                         >
                           <Button
                             variant="outline"
-                            onClick={() => toggleDiscount(discount.id)}
+                            onClick={() => void toggleDiscount(discount.id)}
                             disabled={togglingId === discount.id}
                             className="gap-2"
                           >

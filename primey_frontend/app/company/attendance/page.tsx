@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   BadgeCheck,
   Briefcase,
@@ -73,6 +73,7 @@ const EMPLOYEE_SCHEDULE_PREVIEW_API = "/api/company/attendance/employee-schedule
 
 type Locale = "ar" | "en"
 type ManualActionType = "check_in" | "check_out" | "both"
+type SummaryFilterKey = "present" | "late" | "absent" | "all"
 
 type EmployeeItem = {
   id: number
@@ -322,6 +323,12 @@ type Dictionary = {
   manualEntryPeriodsLabel: string
   manualEntryTargetHoursLabel: string
   manualEntryNoPeriods: string
+
+  summaryQuickFilterHint: string
+  summaryQuickFilterActive: string
+  resetQuickFilter: string
+  reportFilteredTitle: string
+  reportFilteredDescription: string
 }
 
 const translations: Record<Locale, Dictionary> = {
@@ -474,6 +481,12 @@ const translations: Record<Locale, Dictionary> = {
     manualEntryPeriodsLabel: "الفترات",
     manualEntryTargetHoursLabel: "الساعات المطلوبة",
     manualEntryNoPeriods: "لا توجد فترات ثابتة لهذا الجدول",
+
+    summaryQuickFilterHint: "اضغط على أي بطاقة لعرض تفاصيلها مباشرة في التقرير",
+    summaryQuickFilterActive: "التصفية السريعة مفعلة",
+    resetQuickFilter: "إعادة تعيين العرض",
+    reportFilteredTitle: "عرض مفلتر",
+    reportFilteredDescription: "تم تطبيق تصفية سريعة على تقرير الحضور لليوم الحالي.",
   },
   en: {
     headerBadge: "Company Attendance Center",
@@ -624,6 +637,12 @@ const translations: Record<Locale, Dictionary> = {
     manualEntryPeriodsLabel: "Periods",
     manualEntryTargetHoursLabel: "Target Hours",
     manualEntryNoPeriods: "No fixed periods for this schedule",
+
+    summaryQuickFilterHint: "Click any card to jump into its filtered report details",
+    summaryQuickFilterActive: "Quick filter is active",
+    resetQuickFilter: "Reset View",
+    reportFilteredTitle: "Filtered View",
+    reportFilteredDescription: "A quick filter has been applied to today’s attendance report.",
   },
 }
 
@@ -786,7 +805,7 @@ function getScheduleTypeLabel(type?: string | null, locale: Locale = "ar") {
   return type || "—"
 }
 
-function buildSchedulePeriods(schedule: WorkScheduleItem, locale: Locale, t: Dictionary) {
+function buildSchedulePeriods(schedule: WorkScheduleItem, t: Dictionary) {
   const periods: string[] = []
 
   if (schedule.period1_start && schedule.period1_end) {
@@ -811,11 +830,15 @@ function SummaryCard({
   value,
   icon,
   tone = "default",
+  active = false,
+  onClick,
 }: {
   title: string
   value: string | number
-  icon: React.ReactNode
+  icon: ReactNode
   tone?: "default" | "emerald" | "amber" | "rose" | "sky"
+  active?: boolean
+  onClick?: () => void
 }) {
   const toneClasses: Record<string, string> = {
     default: "bg-muted/40 text-foreground",
@@ -826,16 +849,36 @@ function SummaryCard({
   }
 
   return (
-    <Card className="border-border/60 rounded-2xl">
-      <CardContent className="flex items-center justify-between p-5">
-        <div className="space-y-1">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="text-3xl font-semibold tabular-nums">{formatNumber(value)}</p>
-        </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="group w-full text-start"
+    >
+      <Card
+        className={[
+          "rounded-2xl border-border/60 transition-all duration-200",
+          "hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md",
+          "focus-within:border-primary/40",
+          active ? "border-primary/50 shadow-md ring-1 ring-primary/20" : "",
+        ].join(" ")}
+      >
+        <CardContent className="flex items-center justify-between p-5">
+          <div className="space-y-1">
+            <p className="text-sm text-muted-foreground">{title}</p>
+            <p className="text-3xl font-semibold tabular-nums">{formatNumber(value)}</p>
+          </div>
 
-        <div className={`rounded-2xl border p-3 ${toneClasses[tone]}`}>{icon}</div>
-      </CardContent>
-    </Card>
+          <div
+            className={[
+              "rounded-2xl border p-3 transition-transform duration-200 group-hover:scale-105",
+              toneClasses[tone],
+            ].join(" ")}
+          >
+            {icon}
+          </div>
+        </CardContent>
+      </Card>
+    </button>
   )
 }
 
@@ -850,7 +893,7 @@ function TogglePolicyRow({
 }: {
   active: boolean
   onClick: () => void
-  icon: React.ReactNode
+  icon: ReactNode
   label: string
   enabledLabel: string
   disabledLabel: string
@@ -908,6 +951,7 @@ export default function CompanyAttendancePage() {
   const [toDate, setToDate] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [showUnmapped, setShowUnmapped] = useState(false)
+  const [activeSummaryFilter, setActiveSummaryFilter] = useState<SummaryFilterKey | null>(null)
 
   const [manualEntryOpen, setManualEntryOpen] = useState(false)
   const [manualEntryEmployeeSearch, setManualEntryEmployeeSearch] = useState("")
@@ -921,6 +965,8 @@ export default function CompanyAttendancePage() {
     checkIn: "",
     checkOut: "",
   })
+
+  const reportSectionRef = useRef<HTMLDivElement | null>(null)
 
   const today = useMemo(() => new Date().toLocaleDateString("en-CA"), [])
   const isArabic = locale === "ar"
@@ -1083,6 +1129,34 @@ export default function CompanyAttendancePage() {
     void loadAll()
   }, [fromDate, toDate, loadAll])
 
+  const scrollToReport = useCallback(() => {
+    requestAnimationFrame(() => {
+      reportSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      })
+    })
+  }, [])
+
+  const handleSummaryCardClick = useCallback(
+    (filter: SummaryFilterKey) => {
+      setFromDate(today)
+      setToDate(today)
+      setStatusFilter(filter === "all" ? "all" : filter)
+      setActiveSummaryFilter(filter)
+      scrollToReport()
+    },
+    [scrollToReport, today]
+  )
+
+  const handleResetQuickFilter = useCallback(() => {
+    setFromDate(today)
+    setToDate(today)
+    setStatusFilter("all")
+    setActiveSummaryFilter(null)
+    scrollToReport()
+  }, [scrollToReport, today])
+
   const handleSyncDevices = async () => {
     setSyncingDevices(true)
     try {
@@ -1158,12 +1232,7 @@ export default function CompanyAttendancePage() {
 
   const loadEmployeeSchedulePreview = useCallback(
     async (employeeId: string, workDate: string) => {
-      if (!employeeId) {
-        setSchedulePreview(null)
-        return
-      }
-
-      if (!workDate) {
+      if (!employeeId || !workDate) {
         setSchedulePreview(null)
         return
       }
@@ -1175,17 +1244,13 @@ export default function CompanyAttendancePage() {
           date: workDate,
         })
 
-        const data = await fetchJson(
-          `${EMPLOYEE_SCHEDULE_PREVIEW_API}?${params.toString()}`
-        )
+        const data = await fetchJson(`${EMPLOYEE_SCHEDULE_PREVIEW_API}?${params.toString()}`)
 
         setSchedulePreview({
           schedule_type: data?.schedule_type ?? null,
           periods: Array.isArray(data?.periods) ? data.periods : [],
           is_weekend: Boolean(data?.is_weekend),
-          target_daily_hours: data?.target_daily_hours
-            ? String(data.target_daily_hours)
-            : null,
+          target_daily_hours: data?.target_daily_hours ? String(data.target_daily_hours) : null,
         })
       } catch (error) {
         console.error("Employee schedule preview load error:", error)
@@ -1340,22 +1405,16 @@ export default function CompanyAttendancePage() {
 
   const summary = useMemo(() => {
     const linkedEmployees = employees.filter((emp) => !!emp.biotime_code).length
-    const activeEmployees = employees.filter(
-      (emp) => String(emp.status || "").toUpperCase() === "ACTIVE"
-    ).length
     const activeDevices = devices.filter(
       (device) => String(device.status || "").toLowerCase() === "online"
     ).length
-    const activeSchedules = workSchedules.filter((schedule) => !!schedule.is_active).length
 
     return {
       employeesCount: employees.length,
       linkedEmployees,
-      activeEmployees,
       devicesCount: devices.length,
       activeDevices,
       workSchedulesCount: workSchedules.length,
-      activeSchedules,
       unmappedCount: unmappedLogs.length,
       totalAttendanceRecords: dashboard?.total_records ?? 0,
       todayPresent: dashboard?.today.present ?? 0,
@@ -1364,6 +1423,22 @@ export default function CompanyAttendancePage() {
       todayLeave: dashboard?.today.leave ?? 0,
     }
   }, [dashboard, devices, employees, unmappedLogs, workSchedules])
+
+  const activeSummaryLabel = useMemo(() => {
+    if (activeSummaryFilter === "present") return t.todayPresent
+    if (activeSummaryFilter === "late") return t.todayLate
+    if (activeSummaryFilter === "absent") return t.todayAbsent
+    if (activeSummaryFilter === "all") return t.totalAttendanceRecords
+    return null
+  }, [activeSummaryFilter, t.todayPresent, t.todayLate, t.todayAbsent, t.totalAttendanceRecords])
+
+  const reportHeaderTitle = activeSummaryLabel
+    ? `${t.reportFilteredTitle}: ${activeSummaryLabel}`
+    : t.reportTitle
+
+  const reportHeaderDescription = activeSummaryLabel
+    ? t.reportFilteredDescription
+    : t.reportDescription
 
   if (loadingPage) {
     return (
@@ -1433,7 +1508,10 @@ export default function CompanyAttendancePage() {
         </div>
       </div>
 
-      <Dialog open={manualEntryOpen} onOpenChange={(open) => (!open ? handleCloseManualEntry() : setManualEntryOpen(true))}>
+      <Dialog
+        open={manualEntryOpen}
+        onOpenChange={(open) => (!open ? handleCloseManualEntry() : setManualEntryOpen(true))}
+      >
         <DialogContent className="max-w-3xl rounded-2xl">
           <DialogHeader className="space-y-2">
             <DialogTitle className="flex items-center gap-2 text-lg">
@@ -1665,39 +1743,70 @@ export default function CompanyAttendancePage() {
         </DialogContent>
       </Dialog>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard
-          title={t.todayPresent}
-          value={summary.todayPresent}
-          tone="emerald"
-          icon={<UserCheck className="h-5 w-5" />}
-        />
-        <SummaryCard
-          title={t.todayLate}
-          value={summary.todayLate}
-          tone="amber"
-          icon={<Clock3 className="h-5 w-5" />}
-        />
-        <SummaryCard
-          title={t.todayAbsent}
-          value={summary.todayAbsent}
-          tone="rose"
-          icon={<TriangleAlert className="h-5 w-5" />}
-        />
-        <SummaryCard
-          title={t.totalAttendanceRecords}
-          value={summary.totalAttendanceRecords}
-          tone="sky"
-          icon={<CheckCircle2 className="h-5 w-5" />}
-        />
+      <div className="space-y-3">
+        <div className="text-sm text-muted-foreground">{t.summaryQuickFilterHint}</div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryCard
+            title={t.todayPresent}
+            value={summary.todayPresent}
+            tone="emerald"
+            active={activeSummaryFilter === "present"}
+            onClick={() => handleSummaryCardClick("present")}
+            icon={<UserCheck className="h-5 w-5" />}
+          />
+          <SummaryCard
+            title={t.todayLate}
+            value={summary.todayLate}
+            tone="amber"
+            active={activeSummaryFilter === "late"}
+            onClick={() => handleSummaryCardClick("late")}
+            icon={<Clock3 className="h-5 w-5" />}
+          />
+          <SummaryCard
+            title={t.todayAbsent}
+            value={summary.todayAbsent}
+            tone="rose"
+            active={activeSummaryFilter === "absent"}
+            onClick={() => handleSummaryCardClick("absent")}
+            icon={<TriangleAlert className="h-5 w-5" />}
+          />
+          <SummaryCard
+            title={t.totalAttendanceRecords}
+            value={summary.totalAttendanceRecords}
+            tone="sky"
+            active={activeSummaryFilter === "all"}
+            onClick={() => handleSummaryCardClick("all")}
+            icon={<CheckCircle2 className="h-5 w-5" />}
+          />
+        </div>
       </div>
 
-      <Card className="border-border/60 rounded-2xl">
+      <Card ref={reportSectionRef} className="rounded-2xl border-border/60">
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="space-y-1">
-              <CardTitle className="text-base md:text-lg">{t.reportTitle}</CardTitle>
-              <CardDescription>{t.reportDescription}</CardDescription>
+            <div className="space-y-2">
+              {activeSummaryLabel ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className={getStatusBadgeClass(statusFilter)}>
+                    {t.summaryQuickFilterActive}: {activeSummaryLabel}
+                  </Badge>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetQuickFilter}
+                    className="h-8 px-3"
+                  >
+                    {t.resetQuickFilter}
+                  </Button>
+                </div>
+              ) : null}
+
+              <div className="space-y-1">
+                <CardTitle className="text-base md:text-lg">{reportHeaderTitle}</CardTitle>
+                <CardDescription>{reportHeaderDescription}</CardDescription>
+              </div>
             </div>
 
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
@@ -1733,17 +1842,39 @@ export default function CompanyAttendancePage() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-2">
               <Label>{t.fromDate}</Label>
-              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} dir="ltr" />
+              <Input
+                type="date"
+                value={fromDate}
+                onChange={(e) => {
+                  setFromDate(e.target.value)
+                  setActiveSummaryFilter(null)
+                }}
+                dir="ltr"
+              />
             </div>
 
             <div className="space-y-2">
               <Label>{t.toDate}</Label>
-              <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} dir="ltr" />
+              <Input
+                type="date"
+                value={toDate}
+                onChange={(e) => {
+                  setToDate(e.target.value)
+                  setActiveSummaryFilter(null)
+                }}
+                dir="ltr"
+              />
             </div>
 
             <div className="space-y-2">
               <Label>{t.status}</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select
+                value={statusFilter}
+                onValueChange={(value) => {
+                  setStatusFilter(value)
+                  setActiveSummaryFilter(null)
+                }}
+              >
                 <SelectTrigger dir={dir}>
                   <SelectValue placeholder={t.status} />
                 </SelectTrigger>
@@ -1842,21 +1973,21 @@ export default function CompanyAttendancePage() {
 
           <div className="grid gap-4 lg:hidden">
             {loadingRows ? (
-              <Card className="border-border/60 rounded-2xl">
+              <Card className="rounded-2xl border-border/60">
                 <CardContent className="flex items-center justify-center py-12 text-muted-foreground">
                   <Loader2 className="me-2 h-4 w-4 animate-spin" />
                   {t.loadingReport}
                 </CardContent>
               </Card>
             ) : filteredRows.length === 0 ? (
-              <Card className="border-border/60 rounded-2xl">
+              <Card className="rounded-2xl border-border/60">
                 <CardContent className="py-10 text-center text-sm text-muted-foreground">
                   {t.noMatchingRows}
                 </CardContent>
               </Card>
             ) : (
               filteredRows.map((row, index) => (
-                <Card key={`${row.employee_id}-${row.date}-${index}`} className="border-border/60 rounded-2xl">
+                <Card key={`${row.employee_id}-${row.date}-${index}`} className="rounded-2xl border-border/60">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1 space-y-1">
@@ -1916,7 +2047,7 @@ export default function CompanyAttendancePage() {
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card className="border-border/60 rounded-2xl">
+        <Card className="rounded-2xl border-border/60">
           <CardHeader>
             <CardTitle className="text-base md:text-lg">{t.setupSummaryTitle}</CardTitle>
             <CardDescription>{t.setupSummaryDescription}</CardDescription>
@@ -1967,7 +2098,7 @@ export default function CompanyAttendancePage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/60 rounded-2xl">
+        <Card className="rounded-2xl border-border/60">
           <CardHeader>
             <CardTitle className="text-base md:text-lg">{t.attendancePolicyTitle}</CardTitle>
             <CardDescription>{t.attendancePolicyDescription}</CardDescription>
@@ -2064,7 +2195,7 @@ export default function CompanyAttendancePage() {
       </div>
 
       {showUnmapped && (
-        <Card className="border-border/60 rounded-2xl">
+        <Card className="rounded-2xl border-border/60">
           <CardHeader className="pb-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
@@ -2120,14 +2251,14 @@ export default function CompanyAttendancePage() {
 
             <div className="grid gap-4 lg:hidden">
               {unmappedLogs.length === 0 ? (
-                <Card className="border-border/60 rounded-2xl">
+                <Card className="rounded-2xl border-border/60">
                   <CardContent className="py-10 text-center text-sm text-muted-foreground">
                     {t.noUnmappedLogs}
                   </CardContent>
                 </Card>
               ) : (
                 unmappedLogs.map((log) => (
-                  <Card key={log.id} className="border-border/60 rounded-2xl">
+                  <Card key={log.id} className="rounded-2xl border-border/60">
                     <CardContent className="p-4">
                       <div className="space-y-1">
                         <p className="font-semibold">{log.employee_code}</p>
@@ -2167,7 +2298,7 @@ export default function CompanyAttendancePage() {
       )}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card className="border-border/60 rounded-2xl">
+        <Card className="rounded-2xl border-border/60">
           <CardHeader>
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
@@ -2254,14 +2385,14 @@ export default function CompanyAttendancePage() {
 
             <div className="grid gap-4 lg:hidden">
               {filteredEmployees.length === 0 ? (
-                <Card className="border-border/60 rounded-2xl">
+                <Card className="rounded-2xl border-border/60">
                   <CardContent className="py-10 text-center text-sm text-muted-foreground">
                     {t.noMatchingEmployees}
                   </CardContent>
                 </Card>
               ) : (
                 filteredEmployees.slice(0, 10).map((emp) => (
-                  <Card key={emp.id} className="border-border/60 rounded-2xl">
+                  <Card key={emp.id} className="rounded-2xl border-border/60">
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1 space-y-1">
@@ -2300,7 +2431,7 @@ export default function CompanyAttendancePage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/60 rounded-2xl">
+        <Card className="rounded-2xl border-border/60">
           <CardHeader>
             <CardTitle className="text-base md:text-lg">{t.biotimeDevicesTitle}</CardTitle>
             <CardDescription>{t.biotimeDevicesDescription}</CardDescription>
@@ -2361,14 +2492,14 @@ export default function CompanyAttendancePage() {
 
             <div className="grid gap-4 lg:hidden">
               {devices.length === 0 ? (
-                <Card className="border-border/60 rounded-2xl">
+                <Card className="rounded-2xl border-border/60">
                   <CardContent className="py-10 text-center text-sm text-muted-foreground">
                     {t.noDevices}
                   </CardContent>
                 </Card>
               ) : (
                 devices.slice(0, 10).map((device) => (
-                  <Card key={device.id} className="border-border/60 rounded-2xl">
+                  <Card key={device.id} className="rounded-2xl border-border/60">
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1">
@@ -2398,7 +2529,7 @@ export default function CompanyAttendancePage() {
                           <p className="mt-1 font-medium">{device.geo_location || device.location || "—"}</p>
                         </div>
 
-                        <div className="rounded-xl border bg-muted/30 p-3 col-span-2">
+                        <div className="col-span-2 rounded-xl border bg-muted/30 p-3">
                           <p className="text-xs text-muted-foreground">{t.usersCount}</p>
                           <p className="mt-1 font-medium tabular-nums">{formatNumber(device.users ?? 0)}</p>
                         </div>
@@ -2418,7 +2549,7 @@ export default function CompanyAttendancePage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card className="border-border/60 rounded-2xl">
+        <Card className="rounded-2xl border-border/60">
           <CardHeader>
             <CardTitle className="text-base md:text-lg">{t.schedulesTitle}</CardTitle>
             <CardDescription>{t.schedulesDescription}</CardDescription>
@@ -2447,10 +2578,11 @@ export default function CompanyAttendancePage() {
 
                   <div className="space-y-1 text-sm text-muted-foreground">
                     <p>
-                      {t.periods}: {buildSchedulePeriods(schedule, locale, t)}
+                      {t.periods}: {buildSchedulePeriods(schedule, t)}
                     </p>
                     <p>
-                      {t.weeklyWeekend}: {locale === "ar"
+                      {t.weeklyWeekend}:{" "}
+                      {locale === "ar"
                         ? schedule.weekend_days_ar || schedule.weekend_days || "—"
                         : schedule.weekend_days || schedule.weekend_days_ar || "—"}
                     </p>
@@ -2461,7 +2593,7 @@ export default function CompanyAttendancePage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/60 rounded-2xl">
+        <Card className="rounded-2xl border-border/60">
           <CardHeader>
             <CardTitle className="text-base md:text-lg">{t.operationalTitle}</CardTitle>
             <CardDescription>{t.operationalDescription}</CardDescription>

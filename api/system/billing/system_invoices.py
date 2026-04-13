@@ -1,13 +1,13 @@
 # ============================================================
 # 🧾 SYSTEM — All Invoices (Super Admin)
-# Mham Cloud
+# Mham Cloud | PRODUCT-AWARE SAFE
 # ============================================================
 
-from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.db.models import OuterRef, Subquery
 
-from billing_center.models import Invoice, PaymentTransaction
+from billing_center.models import Invoice, Payment, PaymentTransaction
 from company_manager.models import CompanyUser
 
 
@@ -18,7 +18,6 @@ from company_manager.models import CompanyUser
 def system_permission_required(permission: str):
     def decorator(view_func):
         def _wrapped(request, *args, **kwargs):
-
             if not request.user.is_authenticated:
                 return JsonResponse(
                     {"status": "error", "message": "Unauthorized"},
@@ -38,7 +37,10 @@ def system_permission_required(permission: str):
                     json_dumps_params={"ensure_ascii": False},
                 )
 
-            if company_user.role.code not in ("SYSTEM_ADMIN", "SYSTEM_OWNER"):
+            role = getattr(company_user, "role", None)
+            role_code = getattr(role, "code", None)
+
+            if role_code not in ("SYSTEM_ADMIN", "SYSTEM_OWNER"):
                 return JsonResponse(
                     {"status": "error", "message": "Permission denied"},
                     status=403,
@@ -64,7 +66,7 @@ def success(data=None):
 
 
 # ============================================================
-# 📄 SYSTEM — Invoices List (WITH PAYMENT METHOD)
+# 📄 SYSTEM — Invoices List
 # ============================================================
 
 @login_required
@@ -74,20 +76,32 @@ def system_invoices(request):
     ============================================================
     📄 List ALL invoices across ALL companies
     ✔ Includes subscription snapshot
-    ✔ Includes payment_method from latest PAID transaction
+    ✔ Includes payment_method
+    ✔ PRODUCT-AWARE
     ============================================================
     """
 
     # --------------------------------------------------------
-    # 🔗 Subquery: latest successful payment per invoice
+    # Latest successful PaymentTransaction per invoice
     # --------------------------------------------------------
-    latest_payment_method = Subquery(
+    latest_transaction_payment_method = Subquery(
         PaymentTransaction.objects.filter(
             invoice_id=OuterRef("pk"),
-            status="PAID",
+            status="success",
         )
-        .order_by("-processed_at")
+        .order_by("-processed_at", "-created_at", "-id")
         .values("payment_method")[:1]
+    )
+
+    # --------------------------------------------------------
+    # Latest Payment per invoice
+    # --------------------------------------------------------
+    latest_payment_method = Subquery(
+        Payment.objects.filter(
+            invoice_id=OuterRef("pk"),
+        )
+        .order_by("-paid_at", "-id")
+        .values("method")[:1]
     )
 
     invoices = (
@@ -96,15 +110,22 @@ def system_invoices(request):
             "company",
             "subscription",
             "subscription__plan",
+            "subscription__product",
         )
-        .annotate(payment_method=latest_payment_method)
-        .order_by("-issue_date")
+        .annotate(
+            transaction_payment_method=latest_transaction_payment_method,
+            direct_payment_method=latest_payment_method,
+        )
+        .order_by("-issue_date", "-id")
     )
 
     results = []
 
     for inv in invoices:
         sub = inv.subscription
+        resolved_product = getattr(sub, "resolved_product", None) if sub else None
+
+        payment_method = inv.direct_payment_method or inv.transaction_payment_method
 
         results.append({
             "id": inv.id,
@@ -118,16 +139,22 @@ def system_invoices(request):
             "total_amount": str(inv.total_amount),
             "currency": "SAR",
             "status": inv.status,
-            "issued_at": inv.issue_date,
+            "issued_at": inv.issue_date.isoformat() if inv.issue_date else None,
+            "billing_reason": getattr(inv, "billing_reason", None),
 
             # 💳 Payment
-            "payment_method": inv.payment_method,  # ✅ HERE
+            "payment_method": payment_method,
 
-            # 📦 Subscription snapshot
+            # 📦 Subscription
             "subscription_id": sub.id if sub else None,
+            "product": {
+                "id": resolved_product.id,
+                "code": resolved_product.code,
+                "name": resolved_product.name,
+            } if resolved_product else None,
             "plan_name": sub.plan.name if sub and sub.plan else None,
-            "period_start": sub.start_date if sub else None,
-            "period_end": sub.end_date if sub else None,
+            "period_start": sub.start_date.isoformat() if sub and sub.start_date else None,
+            "period_end": sub.end_date.isoformat() if sub and sub.end_date else None,
         })
 
     return success({

@@ -1,6 +1,6 @@
 # ============================================================
 # 🚀 System/Public Onboarding — Confirm Payment & Activate Company
-# Mham Cloud | V3.5 NOTIFICATION-CENTER CLEAN
+# Mham Cloud | V3.6 PRODUCT-AWARE
 # ============================================================
 # ✔ Public Flow Supported
 # ✔ No CASH
@@ -16,7 +16,7 @@
 # ✔ Explicit Gateway Validation Per Payment Method
 # ✔ Safer Invoice Amount Calculation
 # ✔ Payment Methods Cleaned (BANK_TRANSFER / CREDIT_CARD / TAMARA)
-# ✔ CREDIT_CARD is the official Tap-backed method
+# ✔ PRODUCT-AWARE Subscription Creation
 # ============================================================
 
 from __future__ import annotations
@@ -81,11 +81,8 @@ def _normalize_text(value: str) -> str:
 
 def _normalize_payment_method(value: str) -> str:
     method = _normalize_text(value).upper()
-
-    # Tap-backed online card flow
     if method == "TAP":
         return "CREDIT_CARD"
-
     return method
 
 
@@ -135,9 +132,6 @@ def _build_recipients(draft) -> list[str]:
 
 
 def _get_first_existing_attr(instance, attr_names: list[str], default=""):
-    """
-    قراءة أول حقل موجود وغير فارغ من قائمة أسماء محتملة.
-    """
     if not instance:
         return default
 
@@ -155,9 +149,6 @@ def _get_first_existing_attr(instance, attr_names: list[str], default=""):
 
 
 def _get_user_related_profile_candidates(user) -> list:
-    """
-    محاولة الوصول إلى كائنات Profile الشائعة بدون فرض اسم محدد على المشروع.
-    """
     if not user:
         return []
 
@@ -176,9 +167,6 @@ def _get_user_related_profile_candidates(user) -> list:
 
 
 def _get_best_phone_for_entity(instance) -> str:
-    """
-    جلب أفضل رقم جوال من الكيان مباشرة أو من بروفايل مرتبط إن وجد.
-    """
     phone_attr_candidates = [
         "phone",
         "mobile",
@@ -200,10 +188,6 @@ def _get_best_phone_for_entity(instance) -> str:
 
 
 def _populate_admin_user_phone_from_draft(*, admin_user, draft) -> None:
-    """
-    محاولة تعبئة رقم جوال الأدمن الجديد من بيانات المسودة إذا كان موديل المستخدم يدعم ذلك.
-    الهدف: منع ضياع الرقم عند الإرسال بعد الدفع.
-    """
     draft_phone = _safe_text(getattr(draft, "phone", None), "")
     if not draft_phone or not admin_user:
         return
@@ -250,9 +234,6 @@ def _populate_admin_user_phone_from_draft(*, admin_user, draft) -> None:
 
 
 def _collect_notification_targets(*, company, admin_user, company_owner) -> list[dict]:
-    """
-    تجميع المستهدفين بشكل آمن وبدون تكرار.
-    """
     targets: list[dict] = []
     seen_phones: set[str] = set()
     seen_emails: set[str] = set()
@@ -311,9 +292,6 @@ def _collect_notification_targets(*, company, admin_user, company_owner) -> list
 
 
 def _split_admin_name(full_name: str) -> tuple[str, str]:
-    """
-    تقسيم الاسم الكامل إلى first_name / last_name بشكل آمن.
-    """
     full_name = _normalize_text(full_name)
     if not full_name:
         return "", ""
@@ -326,9 +304,6 @@ def _split_admin_name(full_name: str) -> tuple[str, str]:
 
 
 def _calculate_invoice_amounts_from_draft(draft):
-    """
-    الاعتماد على Snapshot المسودة نفسها بدل الحساب العكسي فقط.
-    """
     base_price = Decimal(getattr(draft, "base_price", 0) or 0)
     discount_amount = Decimal(getattr(draft, "discount_amount", 0) or 0)
     vat_amount = Decimal(getattr(draft, "vat_amount", 0) or 0)
@@ -350,14 +325,13 @@ def _calculate_invoice_amounts_from_draft(draft):
     }
 
 
+def _resolve_plan_product(plan):
+    if not plan:
+        return None
+    return getattr(plan, "product", None) if getattr(plan, "product_id", None) else None
+
+
 def _user_can_verify_bank_transfer(user) -> bool:
-    """
-    الصلاحيات المقبولة لاعتماد التحويل البنكي من داخل النظام:
-    - superuser
-    - staff
-    - permission مخصصة
-    - أو membership في مجموعات إدارية/مالية معروفة
-    """
     if not user or not getattr(user, "is_authenticated", False):
         return False
 
@@ -393,11 +367,6 @@ def _user_can_verify_bank_transfer(user) -> bool:
 
 
 def _validate_gateway_confirmation(*, payment_method: str, gateway_status: str) -> tuple[bool, JsonResponse | None]:
-    """
-    قواعد التفعيل:
-    - طرق الدفع الأونلاين: يجب أن يصل gateway_status ناجح فعلاً.
-    - التحويل البنكي: يحتاج تأكيد صريح VERIFIED / CONFIRMED / PAID.
-    """
     online_methods = {"CREDIT_CARD", "TAMARA"}
     online_success_statuses = {"SUCCESS", "PAID", "CAPTURED", "APPROVED", "AUTHORIZED"}
     online_pending_statuses = {"PENDING", "INITIATED", "WAITING", "PROCESSING"}
@@ -470,10 +439,6 @@ def _validate_gateway_confirmation(*, payment_method: str, gateway_status: str) 
 
 
 def _generate_invoice_pdf_bytes(*, company, subscription, invoice, admin_user, payment_method) -> bytes | None:
-    """
-    ما زلنا نولد PDF محليًا، لكن لا نرسله مباشرة من هذا الملف.
-    يتم تمريره للطبقة الرسمية ضمن extra_context.
-    """
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
@@ -506,6 +471,8 @@ def _generate_invoice_pdf_bytes(*, company, subscription, invoice, admin_user, p
         pdf.drawString(40, y, f"Admin Email: {_safe_text(admin_user.email)}")
         y -= 18
         pdf.drawString(40, y, f"Plan: {_safe_text(getattr(subscription.plan, 'name', None))}")
+        y -= 18
+        pdf.drawString(40, y, f"Product: {_safe_text(getattr(getattr(subscription, 'resolved_product', None), 'code', None))}")
         y -= 18
         pdf.drawString(40, y, f"Subscription Status: {_safe_text(subscription.status)}")
         y -= 18
@@ -555,10 +522,6 @@ def _generate_invoice_pdf_bytes(*, company, subscription, invoice, admin_user, p
 
 
 def _load_onboarding_notification_module():
-    """
-    تحميل مرن لطبقة onboarding الرسمية إن كانت موجودة،
-    مع fallback إلى company services لو كان المشروع ما زال في مرحلة انتقالية.
-    """
     candidate_modules = [
         "notification_center.services_onboarding",
         "notification_center.services_company",
@@ -600,6 +563,8 @@ def _build_payment_confirmation_context(
         company_owner=company_owner,
     )
 
+    resolved_product = getattr(subscription, "resolved_product", None)
+
     return {
         "draft_id": getattr(draft, "id", None),
         "company_id": getattr(company, "id", None),
@@ -614,6 +579,9 @@ def _build_payment_confirmation_context(
         "admin_name": _safe_text(admin_user.first_name or admin_user.username),
         "admin_username": _safe_text(admin_user.username),
         "admin_email": _safe_text(admin_user.email),
+        "product_id": getattr(resolved_product, "id", None),
+        "product_code": _safe_text(getattr(resolved_product, "code", None)),
+        "product_name": _safe_text(getattr(resolved_product, "name", None)),
         "plan_name": _safe_text(getattr(subscription.plan, "name", None)),
         "subscription_id": getattr(subscription, "id", None),
         "subscription_status": _safe_text(subscription.status),
@@ -650,10 +618,6 @@ def _dispatch_payment_confirmation_notification(
     gateway_status,
     gateway_transaction_id,
 ) -> None:
-    """
-    تمرير إشعار الدفع المؤكد والتفعيل النهائي إلى الطبقة الرسمية فقط.
-    لا يوجد بريد مباشر ولا واتساب مباشر داخل هذا الملف بعد الآن.
-    """
     services_module = _load_onboarding_notification_module()
 
     if not services_module:
@@ -755,7 +719,6 @@ def _dispatch_payment_confirmation_notification(
 
 # ============================================================
 # ✅ API — Confirm Onboarding Payment
-# URL: /api/system/onboarding/confirm-payment/
 # ============================================================
 
 @require_POST
@@ -798,18 +761,13 @@ def confirm_onboarding_payment(request):
             status=400,
         )
 
-    if payment_method == "CASH":
-        return JsonResponse(
-            {
-                "error": "الدفع النقدي غير متاح في هذا التدفق",
-                "field": "payment_method",
-            },
-            status=400,
-        )
+    gateway_ok, gateway_response = _validate_gateway_confirmation(
+        payment_method=payment_method,
+        gateway_status=gateway_status,
+    )
+    if not gateway_ok:
+        return gateway_response
 
-    # ========================================================
-    # 🔐 Security Guard — BANK_TRANSFER must be internal only
-    # ========================================================
     if payment_method == "BANK_TRANSFER":
         if not _user_can_verify_bank_transfer(getattr(request, "user", None)):
             return JsonResponse(
@@ -820,35 +778,21 @@ def confirm_onboarding_payment(request):
                 status=403,
             )
 
-    gateway_ok, gateway_response = _validate_gateway_confirmation(
-        payment_method=payment_method,
-        gateway_status=gateway_status,
-    )
-    if not gateway_ok:
-        return gateway_response
-
     User = get_user_model()
 
     with transaction.atomic():
-
-        # ====================================================
-        # 1️⃣ Draft (LOCKED + IDEMPOTENT)
-        # ====================================================
         try:
             draft = (
                 CompanyOnboardingTransaction.objects
                 .select_for_update()
-                .select_related("plan", "owner")
+                .select_related("plan__product", "owner")
                 .get(id=draft_id)
             )
         except CompanyOnboardingTransaction.DoesNotExist:
             return JsonResponse({"error": "المسودة غير موجودة"}, status=404)
 
         if draft.status == "PAID":
-            return JsonResponse(
-                {"error": "تم تأكيد هذه العملية سابقًا"},
-                status=409,
-            )
+            return JsonResponse({"error": "تم تأكيد هذه العملية سابقًا"}, status=409)
 
         if draft.status not in {"DRAFT", "CONFIRMED", "PENDING_PAYMENT"}:
             return JsonResponse(
@@ -859,9 +803,19 @@ def confirm_onboarding_payment(request):
                 status=409,
             )
 
-        # ====================================================
-        # 2️⃣ Prevent Duplicate Commercial Number
-        # ====================================================
+        if not draft.plan:
+            return JsonResponse({"error": "المسودة لا تحتوي على باقة صالحة"}, status=400)
+
+        plan_product = _resolve_plan_product(draft.plan)
+        if not plan_product:
+            return JsonResponse(
+                {
+                    "error": "الباقة الحالية غير مرتبطة بأي منتج",
+                    "field": "plan.product",
+                },
+                status=400,
+            )
+
         if draft.commercial_number:
             exists = Company.objects.filter(
                 commercial_number=draft.commercial_number
@@ -876,25 +830,16 @@ def confirm_onboarding_payment(request):
                     status=409,
                 )
 
-        # ====================================================
-        # 3️⃣ Company Admin — USERNAME SOURCE OF TRUTH
-        # ====================================================
         admin_username = _normalize_username(draft.admin_username)
         admin_email = _normalize_email(draft.admin_email)
         admin_password = _normalize_text(draft.admin_password)
         admin_full_name = _normalize_text(draft.admin_name)
 
         if not admin_username:
-            return JsonResponse(
-                {"error": "اسم المستخدم غير موجود في المسودة"},
-                status=400,
-            )
+            return JsonResponse({"error": "اسم المستخدم غير موجود في المسودة"}, status=400)
 
         if not admin_password:
-            return JsonResponse(
-                {"error": "كلمة مرور المسؤول غير موجودة في المسودة"},
-                status=400,
-            )
+            return JsonResponse({"error": "كلمة مرور المسؤول غير موجودة في المسودة"}, status=400)
 
         first_name, last_name = _split_admin_name(admin_full_name)
 
@@ -916,19 +861,12 @@ def confirm_onboarding_payment(request):
                 status=409,
             )
 
-        # ====================================================
-        # ✅ محاولة تعبئة جوال الأدمن من المسودة
-        # ====================================================
         _populate_admin_user_phone_from_draft(
             admin_user=admin_user,
             draft=draft,
         )
 
-        # ====================================================
-        # 4️⃣ Company — CREATE ONLY AFTER VERIFIED PAYMENT
-        # ====================================================
         national_address = draft.national_address or {}
-
         company_owner = draft.owner if getattr(draft, "owner_id", None) else admin_user
 
         company = Company.objects.create(
@@ -954,11 +892,9 @@ def confirm_onboarding_payment(request):
             is_active=True,
         )
 
-        # ====================================================
-        # 5️⃣ Subscription
-        # ====================================================
         subscription = CompanySubscription.objects.create(
             company=company,
+            product=plan_product,
             plan=draft.plan,
             start_date=draft.start_date,
             end_date=draft.end_date,
@@ -966,9 +902,6 @@ def confirm_onboarding_payment(request):
             apps_snapshot=draft.plan.apps if isinstance(draft.plan.apps, list) else [],
         )
 
-        # ====================================================
-        # 6️⃣ Invoice (PAID AFTER VERIFIED PAYMENT)
-        # ====================================================
         invoice_amounts = _calculate_invoice_amounts_from_draft(draft)
 
         invoice = Invoice.objects.create(
@@ -983,14 +916,20 @@ def confirm_onboarding_payment(request):
             is_approved=True,
             approved_at=timezone.now(),
             subscription_snapshot={
-                "plan": draft.plan.name,
+                "type": "NEW_SUBSCRIPTION",
+                "product": {
+                    "id": plan_product.id,
+                    "code": plan_product.code,
+                    "name": plan_product.name,
+                },
+                "plan": {
+                    "id": draft.plan.id,
+                    "name": draft.plan.name,
+                },
                 "duration": draft.duration,
             },
         )
 
-        # ====================================================
-        # 7️⃣ Payment (NO CASH)
-        # ====================================================
         Payment.objects.create(
             invoice=invoice,
             amount=draft.total_amount,
@@ -998,16 +937,10 @@ def confirm_onboarding_payment(request):
             created_by=company_owner,
         )
 
-        # ====================================================
-        # 8️⃣ Finalize Draft
-        # ====================================================
         draft.status = "PAID"
         draft.admin_password = ""
         draft.save(update_fields=["status", "admin_password"])
 
-        # ====================================================
-        # 9️⃣ Notification Center الرسمي فقط
-        # ====================================================
         transaction.on_commit(
             lambda: _dispatch_payment_confirmation_notification(
                 actor=getattr(request, "user", None),
@@ -1032,6 +965,7 @@ def confirm_onboarding_payment(request):
             "gateway_status": gateway_status,
             "gateway_transaction_id": gateway_transaction_id or None,
             "subscription": {
+                "product": plan_product.code,
                 "plan": subscription.plan.name,
                 "status": subscription.status,
                 "start_date": subscription.start_date,

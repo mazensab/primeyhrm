@@ -1,25 +1,32 @@
 # ============================================================
 # 🧾 SYSTEM — Company Subscription Invoices API
-# Mham Cloud | V1.1 ULTRA STABLE (FINAL FIX)
+# Mham Cloud | V2.0 PRODUCT-AWARE
 # ============================================================
-# ✔ Single Source of Truth
-# ✔ Subscription-scoped invoices
+# ✔ Product-aware
+# ✔ Supports ALL company subscriptions
+# ✔ Optional subscription_id filter
 # ✔ Frontend Contract Compatible
 # ✔ READ ONLY
 # ============================================================
 
-from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 
-from company_manager.models import Company
 from billing_center.models import CompanySubscription, Invoice, Payment
+from company_manager.models import Company
 
 
 @login_required
 def company_subscription_invoices(request, company_id):
     """
     GET /api/system/companies/<company_id>/subscription/invoices/
+
+    Optional query params:
+    - subscription_id: return invoices for one specific subscription only
+
+    Default behavior:
+    - return invoices across ALL subscriptions of the company
     """
 
     # ========================================================
@@ -28,36 +35,66 @@ def company_subscription_invoices(request, company_id):
     company = get_object_or_404(Company, id=company_id)
 
     # ========================================================
-    # 📦 Latest Subscription (ANY STATUS)
+    # 📦 Company Subscriptions
     # ========================================================
-    subscription = (
+    subscriptions_qs = (
         CompanySubscription.objects
         .filter(company=company)
-        .select_related("plan")
-        .order_by("-created_at")
-        .first()
+        .select_related("product", "plan")
+        .order_by("-created_at", "-id")
     )
 
+    subscription_id = request.GET.get("subscription_id")
+
+    if subscription_id:
+        subscriptions_qs = subscriptions_qs.filter(id=subscription_id)
+
+    subscriptions = list(subscriptions_qs)
+
     # --------------------------------------------------------
-    # No subscription → empty but valid response
+    # No subscriptions → empty but valid response
     # --------------------------------------------------------
-    if not subscription:
+    if not subscriptions:
         return JsonResponse(
             {
                 "company_id": company.id,
                 "company_name": company.name,
-                "subscription": None,
+                "subscriptions": [],
                 "items": [],
             },
             status=200,
         )
 
+    subscription_map = {}
+    subscription_ids = []
+
+    for sub in subscriptions:
+        resolved_product = getattr(sub, "resolved_product", None)
+
+        subscription_map[sub.id] = {
+            "id": sub.id,
+            "status": sub.status,
+            "start_date": sub.start_date.isoformat() if sub.start_date else None,
+            "end_date": sub.end_date.isoformat() if sub.end_date else None,
+            "product": {
+                "id": resolved_product.id,
+                "code": resolved_product.code,
+                "name": resolved_product.name,
+            } if resolved_product else None,
+            "plan": {
+                "id": sub.plan.id,
+                "name": sub.plan.name,
+            } if sub.plan else None,
+        }
+        subscription_ids.append(sub.id)
+
     # ========================================================
-    # 🧾 Invoices linked to subscription
+    # 🧾 Invoices linked to company subscriptions
     # ========================================================
     invoices_qs = (
         Invoice.objects
-        .filter(subscription=subscription)
+        .filter(company=company, subscription_id__in=subscription_ids)
+        .select_related("subscription", "subscription__product", "subscription__plan")
         .order_by("-created_at", "-id")
     )
 
@@ -65,19 +102,17 @@ def company_subscription_invoices(request, company_id):
 
     for inv in invoices_qs:
         payments_qs = Payment.objects.filter(invoice=inv)
-
         paid_amount = sum(float(p.amount) for p in payments_qs)
+
+        sub = inv.subscription
+        resolved_product = getattr(sub, "resolved_product", None) if sub else None
 
         items.append({
             "id": inv.id,
             "invoice_number": inv.invoice_number,
             "status": inv.status,
-
-            "issue_date": inv.issue_date.isoformat()
-            if inv.issue_date else None,
-
+            "issue_date": inv.issue_date.isoformat() if inv.issue_date else None,
             "total_amount": float(inv.total_amount),
-
             "total_after_discount": float(
                 inv.total_after_discount
                 if inv.total_after_discount is not None
@@ -92,6 +127,15 @@ def company_subscription_invoices(request, company_id):
 
             "created_at": inv.created_at.isoformat()
             if hasattr(inv, "created_at") and inv.created_at else None,
+
+            # Product-aware fields
+            "subscription_id": inv.subscription_id,
+            "product": {
+                "id": resolved_product.id,
+                "code": resolved_product.code,
+                "name": resolved_product.name,
+            } if resolved_product else None,
+            "plan_name": sub.plan.name if sub and sub.plan else None,
         })
 
     # ========================================================
@@ -101,16 +145,7 @@ def company_subscription_invoices(request, company_id):
         {
             "company_id": company.id,
             "company_name": company.name,
-
-            "subscription": {
-                "id": subscription.id,
-                "status": subscription.status,
-                "start_date": subscription.start_date,
-                "end_date": subscription.end_date,
-                "plan_name": subscription.plan.name
-                if subscription.plan else None,
-            },
-
+            "subscriptions": list(subscription_map.values()),
             "items": items,
         },
         status=200,

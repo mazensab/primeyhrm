@@ -35,7 +35,27 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+/* ======================================================
+   API Helpers
+====================================================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    return trimTrailingSlash(envApi)
+  }
+
+  if (typeof window !== "undefined") {
+    return trimTrailingSlash(window.location.origin)
+  }
+
+  return ""
+}
 
 type Locale = "ar" | "en"
 type Direction = "rtl" | "ltr"
@@ -279,6 +299,8 @@ function StatusPill({
 }
 
 export default function SystemPaymentsPage() {
+  const API = useMemo(() => resolveApiBase(), [])
+
   const [locale, setLocale] = useState<Locale>("en")
   const [direction, setDirection] = useState<Direction>("ltr")
 
@@ -327,6 +349,11 @@ export default function SystemPaymentsPage() {
 
   useEffect(() => {
     async function fetchPayments() {
+      if (!API) {
+        setLoading(false)
+        return
+      }
+
       try {
         const res = await fetch(`${API}/api/system/payments/`, {
           credentials: "include",
@@ -355,11 +382,16 @@ export default function SystemPaymentsPage() {
       }
     }
 
-    fetchPayments()
-  }, [t.paymentsLoadError])
+    void fetchPayments()
+  }, [API, t.paymentsLoadError])
 
   useEffect(() => {
     async function fetchPendingDrafts() {
+      if (!API) {
+        setPendingDraftsLoading(false)
+        return
+      }
+
       try {
         setPendingDraftsLoading(true)
 
@@ -440,8 +472,8 @@ export default function SystemPaymentsPage() {
       }
     }
 
-    fetchPendingDrafts()
-  }, [t.pendingLoadError])
+    void fetchPendingDrafts()
+  }, [API, t.pendingLoadError])
 
   function formatDate(date: string) {
     const parsed = new Date(date)
@@ -545,7 +577,6 @@ export default function SystemPaymentsPage() {
       const paymentDate = getDateOnly(payment.paid_at)
 
       const matchesDateFrom = !dateFrom || (paymentDate && paymentDate >= dateFrom)
-
       const matchesDateTo = !dateTo || (paymentDate && paymentDate <= dateTo)
 
       return matchesSearch && matchesMethod && matchesDateFrom && matchesDateTo

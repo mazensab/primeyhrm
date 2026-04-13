@@ -1,15 +1,6 @@
 # ====================================================================
 # 💳 Confirm Cash Payment — FINAL ULTRA STABLE
-# Mham Cloud | Super Admin Only
-# ====================================================================
-# ✔ Confirm manual CASH payment
-# ✔ Invoice -> PAID
-# ✔ Subscription -> ACTIVE
-# ✔ Company -> ACTIVE (AUTO RULE after first successful payment)
-# ✔ Upgrade Flow Supported
-# ✔ Idempotent & Transaction-safe
-# ✔ Notification Center Only (No direct email / no direct WhatsApp)
-# ✔ Invoice PDF Context Supported
+# Mham Cloud | Super Admin Only | PRODUCT-AWARE
 # ====================================================================
 
 from __future__ import annotations
@@ -69,13 +60,20 @@ def _date_str(value) -> str:
         return str(value)
 
 
+def _resolve_subscription_product(subscription):
+    if not subscription:
+        return None
+    resolved_product = getattr(subscription, "resolved_product", None)
+    return resolved_product
+
+
+def _resolve_plan_product(plan):
+    if not plan:
+        return None
+    return getattr(plan, "product", None) if getattr(plan, "product_id", None) else None
+
+
 def _build_invoice_recipients(invoice) -> list[str]:
-    """
-    تحديد المستلمين بدون تكرار:
-    - company.email
-    - company.owner.email
-    - أول admin داخل الشركة
-    """
     recipients: list[str] = []
 
     company = getattr(invoice, "company", None)
@@ -112,9 +110,6 @@ def _build_invoice_recipients(invoice) -> list[str]:
 
 
 def _get_first_existing_attr(instance, attr_names: list[str], default=""):
-    """
-    قراءة أول حقل موجود وغير فارغ من قائمة أسماء محتملة.
-    """
     if not instance:
         return default
 
@@ -132,9 +127,6 @@ def _get_first_existing_attr(instance, attr_names: list[str], default=""):
 
 
 def _get_user_related_profile_candidates(user) -> list:
-    """
-    محاولة الوصول إلى بروفايل المستخدم الشائع بدون فرض اسم محدد.
-    """
     if not user:
         return []
 
@@ -153,9 +145,6 @@ def _get_user_related_profile_candidates(user) -> list:
 
 
 def _get_best_phone_for_entity(instance) -> str:
-    """
-    جلب أفضل رقم جوال من الكيان مباشرة أو من profile/userprofile إن وجد.
-    """
     phone_attr_candidates = [
         "phone",
         "mobile",
@@ -177,9 +166,6 @@ def _get_best_phone_for_entity(instance) -> str:
 
 
 def _collect_invoice_notification_targets(invoice) -> list[dict]:
-    """
-    تجميع مستهدفي الإشعار بشكل آمن وبدون تكرار.
-    """
     targets: list[dict] = []
     seen_phones: set[str] = set()
     seen_emails: set[str] = set()
@@ -256,10 +242,6 @@ def _collect_invoice_notification_targets(invoice) -> list[dict]:
 
 
 def _generate_invoice_pdf_bytes(*, invoice, payment, subscription) -> bytes | None:
-    """
-    إنشاء PDF بسيط للفـاتورة.
-    إذا تعذر إنشاء الـ PDF لا نفشل عملية الدفع.
-    """
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
@@ -317,11 +299,15 @@ def _generate_invoice_pdf_bytes(*, invoice, payment, subscription) -> bytes | No
         y -= 28
 
         if subscription:
+            resolved_product = _resolve_subscription_product(subscription)
+
             pdf.setFont("Helvetica-Bold", 12)
             pdf.drawString(40, y, "Subscription")
             y -= 22
 
             pdf.setFont("Helvetica", 10)
+            pdf.drawString(40, y, f"Product: {_safe_text(getattr(resolved_product, 'code', None))}")
+            y -= 18
             pdf.drawString(40, y, f"Plan: {_safe_text(getattr(getattr(subscription, 'plan', None), 'name', None))}")
             y -= 18
             pdf.drawString(40, y, f"Status: {_safe_text(getattr(subscription, 'status', None))}")
@@ -348,14 +334,7 @@ def _generate_invoice_pdf_bytes(*, invoice, payment, subscription) -> bytes | No
         return None
 
 
-# ============================================================
-# Notification Helpers
-# ============================================================
-
 def _load_billing_notification_module():
-    """
-    تحميل مرن لطبقة billing الرسمية.
-    """
     candidate_modules = [
         "notification_center.services_billing",
         "notification_center.services_company",
@@ -373,6 +352,7 @@ def _load_billing_notification_module():
 def _build_cash_payment_context(*, invoice, payment, subscription, actor) -> dict:
     company = getattr(invoice, "company", None)
     owner = getattr(company, "owner", None) if company else None
+    resolved_product = _resolve_subscription_product(subscription)
 
     subtotal_value = (
         getattr(invoice, "subtotal_amount", None)
@@ -407,6 +387,9 @@ def _build_cash_payment_context(*, invoice, payment, subscription, actor) -> dic
         "subtotal_amount": _money_str(subtotal_value),
         "vat_amount": _money_str(vat_value),
         "total_amount": _money_str(total_value),
+        "product_id": getattr(resolved_product, "id", None) if resolved_product else None,
+        "product_code": _safe_text(getattr(resolved_product, "code", None)) if resolved_product else "-",
+        "product_name": _safe_text(getattr(resolved_product, "name", None)) if resolved_product else "-",
         "plan_name": _safe_text(getattr(getattr(subscription, "plan", None), "name", None)) if subscription else "-",
         "subscription_id": getattr(subscription, "id", None) if subscription else None,
         "subscription_status": _safe_text(getattr(subscription, "status", None)) if subscription else "-",
@@ -422,9 +405,6 @@ def _build_cash_payment_context(*, invoice, payment, subscription, actor) -> dic
 
 
 def _dispatch_cash_payment_confirmation_notification(*, invoice, payment, subscription, actor) -> None:
-    """
-    تمرير إشعار الدفع النقدي المؤكد إلى الطبقة الرسمية فقط.
-    """
     services_module = _load_billing_notification_module()
 
     if not services_module:
@@ -508,20 +488,6 @@ def _dispatch_cash_payment_confirmation_notification(*, invoice, payment, subscr
 @require_POST
 @transaction.atomic
 def confirm_cash_payment(request):
-    """
-    Confirm Cash Payment (Manual)
-
-    - Super Admin only
-    - Marks invoice as PAID
-    - Creates Payment record (SOURCE OF TRUTH)
-    - Activates subscription
-    - Auto-activates company (RULE: after ACTIVE subscription)
-    - Supports UPGRADE invoices
-    """
-
-    # ============================================================
-    # 🔐 Authorization
-    # ============================================================
     if not request.user.is_authenticated or not request.user.is_superuser:
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
@@ -530,33 +496,18 @@ def confirm_cash_payment(request):
         invoice_id = payload.get("invoice_id")
 
         if not invoice_id:
-            return JsonResponse(
-                {"error": "invoice_id is required"},
-                status=400
-            )
+            return JsonResponse({"error": "invoice_id is required"}, status=400)
 
-        # ========================================================
-        # 🧾 Invoice
-        # ========================================================
         invoice = Invoice.objects.select_for_update().select_related(
-            "subscription__plan",
+            "subscription__plan__product",
             "company__owner",
         ).get(id=invoice_id)
 
         if invoice.status == "PAID":
-            return JsonResponse(
-                {"error": "Invoice already paid"},
-                status=400
-            )
+            return JsonResponse({"error": "Invoice already paid"}, status=400)
 
-        # ========================================================
-        # 🔄 Subscription Reference
-        # ========================================================
         subscription = invoice.subscription
 
-        # ========================================================
-        # 💳 Create Payment (SOURCE OF TRUTH)
-        # ========================================================
         payment = Payment.objects.create(
             invoice=invoice,
             amount=invoice.total_amount,
@@ -566,20 +517,14 @@ def confirm_cash_payment(request):
             created_by=request.user,
         )
 
-        # ========================================================
-        # ✅ Update Invoice (STATUS ONLY)
-        # ========================================================
         invoice.status = "PAID"
         invoice.save(update_fields=["status"])
 
-        # ========================================================
-        # 🔄 Subscription Logic
-        # ========================================================
         if subscription:
+            if not subscription.product_id and getattr(subscription.plan, "product_id", None):
+                subscription.product = subscription.plan.product
+                subscription.save(update_fields=["product"])
 
-            # ----------------------------------------------------
-            # UPGRADE FLOW
-            # ----------------------------------------------------
             if invoice.billing_reason == "UPGRADE":
                 snapshot = invoice.subscription_snapshot or {}
                 target_plan_data = snapshot.get("target_plan") or {}
@@ -588,18 +533,38 @@ def confirm_cash_payment(request):
                 if not target_plan_id:
                     return JsonResponse(
                         {"error": "Upgrade target plan not found in invoice snapshot"},
-                        status=400
+                        status=400,
                     )
 
                 try:
-                    target_plan = SubscriptionPlan.objects.get(id=target_plan_id)
+                    target_plan = SubscriptionPlan.objects.select_related("product").get(id=target_plan_id)
                 except SubscriptionPlan.DoesNotExist:
                     return JsonResponse(
                         {"error": "Target upgrade plan does not exist"},
-                        status=404
+                        status=404,
+                    )
+
+                current_product = _resolve_subscription_product(subscription)
+                target_product = _resolve_plan_product(target_plan)
+
+                if not current_product or not target_product:
+                    return JsonResponse(
+                        {"error": "Product mapping is incomplete for current or target plan"},
+                        status=400,
+                    )
+
+                if current_product.id != target_product.id:
+                    return JsonResponse(
+                        {
+                            "error": "Cross-product upgrade is not allowed",
+                            "current_product": current_product.code,
+                            "target_product": target_product.code,
+                        },
+                        status=400,
                     )
 
                 subscription.plan = target_plan
+                subscription.product = target_product
 
                 if subscription.status != "ACTIVE":
                     subscription.status = "ACTIVE"
@@ -607,18 +572,17 @@ def confirm_cash_payment(request):
                 if not subscription.start_date:
                     subscription.start_date = now().date()
 
-                subscription.save(update_fields=["plan", "status", "start_date"])
+                subscription.save(update_fields=["plan", "product", "status", "start_date"])
 
-            # ----------------------------------------------------
-            # RENEWAL FLOW
-            # ----------------------------------------------------
             elif invoice.billing_reason == "RENEWAL":
+                previous_product = _resolve_subscription_product(subscription)
 
                 subscription.status = "EXPIRED"
                 subscription.save(update_fields=["status"])
 
                 new_subscription = CompanySubscription.objects.create(
                     company=subscription.company,
+                    product=previous_product,
                     plan=subscription.plan,
                     start_date=now().date(),
                     end_date=subscription.end_date,
@@ -628,32 +592,29 @@ def confirm_cash_payment(request):
 
                 subscription = new_subscription
 
-            # ----------------------------------------------------
-            # NORMAL ACTIVATION (Onboarding)
-            # ----------------------------------------------------
             else:
+                update_fields = []
 
                 if subscription.status != "ACTIVE":
                     subscription.status = "ACTIVE"
-                    subscription.start_date = (
-                        subscription.start_date or now().date()
-                    )
+                    update_fields.append("status")
 
-                    subscription.save(
-                        update_fields=["status", "start_date"]
-                    )
+                if not subscription.start_date:
+                    subscription.start_date = now().date()
+                    update_fields.append("start_date")
 
-        # ========================================================
-        # 🟢 AUTO ACTIVATE COMPANY
-        # ========================================================
+                if not subscription.product_id and getattr(subscription.plan, "product_id", None):
+                    subscription.product = subscription.plan.product
+                    update_fields.append("product")
+
+                if update_fields:
+                    subscription.save(update_fields=update_fields)
+
         company = invoice.company
         if company and not company.is_active:
             company.is_active = True
             company.save(update_fields=["is_active"])
 
-        # ========================================================
-        # Notification Center الرسمي فقط بعد نجاح الـ commit
-        # ========================================================
         transaction.on_commit(
             lambda: _dispatch_cash_payment_confirmation_notification(
                 invoice=invoice,
@@ -663,35 +624,23 @@ def confirm_cash_payment(request):
             )
         )
 
-        # ========================================================
-        # ✅ Response
-        # ========================================================
+        resolved_product = _resolve_subscription_product(subscription)
+
         return JsonResponse({
             "success": True,
             "invoice_id": invoice.id,
             "invoice_number": invoice.invoice_number,
             "billing_reason": invoice.billing_reason,
-            "subscription_status": (
-                subscription.status if subscription else None
-            ),
-            "active_plan": (
-                subscription.plan.name
-                if subscription and subscription.plan
-                else None
-            ),
+            "subscription_status": subscription.status if subscription else None,
+            "active_product": getattr(resolved_product, "code", None) if resolved_product else None,
+            "active_plan": subscription.plan.name if subscription and subscription.plan else None,
             "company_active": company.is_active if company else False,
             "message": "تم تأكيد الدفع وتفعيل الاشتراك/الترقية بنجاح",
         })
 
     except Invoice.DoesNotExist:
-        return JsonResponse(
-            {"error": "Invoice not found"},
-            status=404
-        )
+        return JsonResponse({"error": "Invoice not found"}, status=404)
 
     except Exception as e:
         logger.exception("confirm_cash_payment failed")
-        return JsonResponse(
-            {"error": str(e)},
-            status=500
-        )
+        return JsonResponse({"error": str(e)}, status=500)

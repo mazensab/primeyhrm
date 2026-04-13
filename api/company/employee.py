@@ -48,6 +48,10 @@ from notification_center.services_hr import (
 )
 from whatsapp_center.utils import normalize_phone_number
 
+from billing_center.services.subscription_limits import (
+    check_employee_creation_limit,
+)
+
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
@@ -796,7 +800,6 @@ def employee_detail(request, employee_id):
         "updated_at": emp.updated_at,
     })
 
-
 @csrf_exempt
 @require_POST
 @login_required
@@ -868,6 +871,48 @@ def employee_create(request):
         return JsonResponse(
             {"status": "error", "message": "Email already exists"},
             status=400,
+        )
+
+    # =====================================================
+    # 🔐 Subscription Limit Check — Employees
+    # Product-aware + Limit-aware
+    # =====================================================
+    employee_limit_check = check_employee_creation_limit(company)
+
+    if not employee_limit_check.allowed:
+        logger.warning(
+            "Employee creation blocked by subscription limit | company=%s | code=%s | usage=%s | max=%s | subscription_id=%s",
+            getattr(company, "id", None),
+            employee_limit_check.code,
+            employee_limit_check.current_usage,
+            employee_limit_check.max_allowed,
+            employee_limit_check.subscription_id,
+        )
+
+        limit_message_map = {
+            "NO_PRODUCT_SUBSCRIPTION": "لا يوجد اشتراك نشط للمنتج المطلوب.",
+            "LIMIT_EXCEEDED": "تم الوصول إلى الحد الأقصى المسموح لعدد الموظفين في الباقة الحالية.",
+            "NO_COMPANY": "تعذر تحديد الشركة الحالية.",
+        }
+
+        return JsonResponse(
+            {
+                "status": "error",
+                "message": limit_message_map.get(
+                    employee_limit_check.code,
+                    employee_limit_check.message or "تعذر إنشاء الموظف بسبب قيود الاشتراك.",
+                ),
+                "limit": {
+                    "resource": "employees",
+                    "product_code": employee_limit_check.product_code,
+                    "current_usage": employee_limit_check.current_usage,
+                    "max_allowed": employee_limit_check.max_allowed,
+                    "remaining": employee_limit_check.remaining,
+                    "subscription_id": employee_limit_check.subscription_id,
+                    "code": employee_limit_check.code,
+                },
+            },
+            status=402,
         )
 
     # =====================================================
@@ -987,7 +1032,17 @@ def employee_create(request):
         ),
         "branches_count": emp.branches.count(),
         "company_user_id": company_user.id,
+        "limit": {
+            "resource": "employees",
+            "product_code": employee_limit_check.product_code,
+            "current_usage_before_create": employee_limit_check.current_usage,
+            "max_allowed": employee_limit_check.max_allowed,
+            "remaining_before_create": employee_limit_check.remaining,
+            "subscription_id": employee_limit_check.subscription_id,
+        },
     })
+
+
 
 # ======================================================
 # 🔗 Link Employee with Biotime

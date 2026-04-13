@@ -79,15 +79,22 @@ import { cn } from "@/lib/utils"
    API Config
 ====================================================== */
 
-function normalizeApiBase(raw?: string) {
-  const fallback = "http://localhost:8000/api"
-  const value = (raw || fallback).replace(/\/$/, "")
-
-  if (value.endsWith("/api")) return value
-  return `${value}/api`
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
 }
 
-const API_BASE = normalizeApiBase(process.env.NEXT_PUBLIC_API_URL)
+function normalizeApiBase(raw?: string) {
+  if (raw?.trim()) {
+    const value = trimTrailingSlash(raw.trim())
+    return value.endsWith("/api") ? value : `${value}/api`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${trimTrailingSlash(window.location.origin)}/api`
+  }
+
+  return "/api"
+}
 
 /* ======================================================
    Types
@@ -544,6 +551,11 @@ function StatCard({
 ====================================================== */
 
 export default function SystemUsersPage() {
+  const API_BASE = useMemo(
+    () => normalizeApiBase(process.env.NEXT_PUBLIC_API_URL),
+    []
+  )
+
   const [locale, setLocale] = useState<Locale>("en")
   const [direction, setDirection] = useState<Direction>("ltr")
 
@@ -622,6 +634,7 @@ export default function SystemUsersPage() {
           headers: {
             Accept: "application/json",
           },
+          cache: "no-store",
         })
 
         const data: UsersListResponse = await response.json()
@@ -643,7 +656,7 @@ export default function SystemUsersPage() {
         setRefreshing(false)
       }
     },
-    [t.usersLoadError]
+    [API_BASE, t.usersLoadError]
   )
 
   const fetchRoles = useCallback(async () => {
@@ -654,6 +667,7 @@ export default function SystemUsersPage() {
         headers: {
           Accept: "application/json",
         },
+        cache: "no-store",
       })
 
       const data: RolesResponse = await response.json()
@@ -668,11 +682,11 @@ export default function SystemUsersPage() {
     } catch (error) {
       console.error("Fetch roles error:", error)
     }
-  }, [])
+  }, [API_BASE])
 
   useEffect(() => {
-    fetchUsers(true)
-    fetchRoles()
+    void fetchUsers(true)
+    void fetchRoles()
   }, [fetchUsers, fetchRoles])
 
   const filteredUsers = useMemo(() => {
@@ -929,7 +943,7 @@ export default function SystemUsersPage() {
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            onClick={() => fetchUsers(false)}
+            onClick={() => void fetchUsers(false)}
             disabled={refreshing}
             className="gap-2"
           >
@@ -1086,7 +1100,12 @@ export default function SystemUsersPage() {
                   {t.cancel}
                 </Button>
 
-                <Button type="button" onClick={handleCreateUser} disabled={submitting} className="gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void handleCreateUser()}
+                  disabled={submitting}
+                  className="gap-2"
+                >
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1382,7 +1401,7 @@ export default function SystemUsersPage() {
                               {t.viewProfile}
                             </DropdownMenuItem>
 
-                            <DropdownMenuItem onClick={() => handleToggleStatus(user.id)}>
+                            <DropdownMenuItem onClick={() => void handleToggleStatus(user.id)}>
                               {user.status === "ACTIVE" ? t.disableUser : t.enableUser}
                             </DropdownMenuItem>
 
@@ -1392,7 +1411,7 @@ export default function SystemUsersPage() {
                             {roles.map((item) => (
                               <DropdownMenuItem
                                 key={`${user.id}-${item.code}`}
-                                onClick={() => handleChangeRole(user.id, item.code)}
+                                onClick={() => void handleChangeRole(user.id, item.code)}
                               >
                                 {item.label}
                               </DropdownMenuItem>
@@ -1560,7 +1579,7 @@ export default function SystemUsersPage() {
             </Button>
 
             <Button
-              onClick={handleResetPassword}
+              onClick={() => void handleResetPassword()}
               disabled={actionLoadingId === resetUserId}
               className="gap-2"
             >

@@ -29,7 +29,28 @@ import {
   QrCode
 } from "lucide-react"
 
-const API = "http://localhost:8000/api"
+/* ==============================
+   API Helpers
+============================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    const value = trimTrailingSlash(envApi)
+    return value.endsWith("/api") ? value : `${value}/api`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${trimTrailingSlash(window.location.origin)}/api`
+  }
+
+  return "/api"
+}
 
 type PaymentMethod =
   | "CASH"
@@ -54,12 +75,10 @@ interface InvoiceDetail {
 }
 
 export default function InvoicePage() {
+  const API = useMemo(() => resolveApiBase(), [])
   const params = useParams()
   const router = useRouter()
 
-  /* ==============================
-     SAFE PARAM
-  ============================== */
   const invoiceNumber = useMemo(() => {
     const raw =
       params?.invoice_number ??
@@ -74,9 +93,6 @@ export default function InvoicePage() {
   const [method, setMethod] = useState<PaymentMethod>("CASH")
   const [qrValue, setQrValue] = useState("")
 
-  /* ==============================
-     HELPERS
-  ============================== */
   function formatDate(date: string | null) {
     if (!date) return "-"
 
@@ -132,9 +148,16 @@ export default function InvoicePage() {
     }
   }
 
-  /* ==============================
-     LOAD INVOICE
-  ============================== */
+  function getCookie(name: string) {
+    if (typeof document === "undefined") return ""
+
+    const cookie = document.cookie
+      .split("; ")
+      .find((row) => row.startsWith(`${name}=`))
+
+    return cookie ? decodeURIComponent(cookie.split("=")[1]) : ""
+  }
+
   useEffect(() => {
     if (!invoiceNumber) {
       setLoading(false)
@@ -149,7 +172,8 @@ export default function InvoicePage() {
         const res = await fetch(
           `${API}/system/invoices/${invoiceNumber}/`,
           {
-            credentials: "include"
+            credentials: "include",
+            cache: "no-store",
           }
         )
 
@@ -171,31 +195,22 @@ export default function InvoicePage() {
       }
     }
 
-    loadInvoice()
-  }, [invoiceNumber])
+    void loadInvoice()
+  }, [API, invoiceNumber])
 
-  /* ==============================
-     QR VALUE
-  ============================== */
   useEffect(() => {
     if (typeof window !== "undefined") {
       setQrValue(window.location.href)
     }
   }, [invoiceNumber])
 
-  /* ==============================
-     PAY
-  ============================== */
   const pay = async () => {
     if (!invoice) return
 
     try {
       setPaying(true)
 
-      const csrf = document.cookie
-        .split("; ")
-        .find((row) => row.startsWith("csrftoken="))
-        ?.split("=")[1]
+      const csrf = getCookie("csrftoken")
 
       const res = await fetch(
         `${API}/system/payments/confirm-cash/`,
@@ -225,7 +240,8 @@ export default function InvoicePage() {
       const refreshRes = await fetch(
         `${API}/system/invoices/${invoice.invoice_number}/`,
         {
-          credentials: "include"
+          credentials: "include",
+          cache: "no-store",
         }
       )
 
@@ -242,9 +258,6 @@ export default function InvoicePage() {
     }
   }
 
-  /* ==============================
-     LOADING
-  ============================== */
   if (loading) {
     return (
       <div className="p-10">
@@ -281,9 +294,6 @@ export default function InvoicePage() {
     qrValue || invoice.invoice_number
   )}`
 
-  /* ==============================
-     UI
-  ============================== */
   return (
     <>
       <style jsx global>{`
@@ -866,7 +876,7 @@ export default function InvoicePage() {
                     </div>
 
                     <Button
-                      onClick={pay}
+                      onClick={() => void pay()}
                       className="w-full"
                       disabled={paying}
                     >

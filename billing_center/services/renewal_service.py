@@ -1,11 +1,16 @@
 # ============================================================
 # 🔄 Renewal Service — Subscription Auto Renewal
-# Mham Cloud | Billing Center
+# Mham Cloud | Billing Center | PRODUCT-AWARE SAFE
+# ============================================================
+# ✔ Creates renewal invoice only
+# ✔ Does NOT extend subscription dates directly
+# ✔ Idempotent-safe
+# ✔ Respects active product subscription model
+# ✔ Safe notification hook
 # ============================================================
 
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -31,10 +36,10 @@ def _get_billing_cycle(subscription: CompanySubscription) -> str:
     return "yearly" if duration > 31 else "monthly"
 
 
-def _get_plan_amount_and_end_date(subscription: CompanySubscription) -> tuple[Decimal, object, str]:
+def _get_plan_amount(subscription: CompanySubscription) -> tuple[Decimal, str]:
     """
     ============================================================
-    Resolve billing amount + next end date + invoice label
+    Resolve billing amount + invoice label
     ============================================================
     """
     billing_cycle = _get_billing_cycle(subscription)
@@ -42,14 +47,18 @@ def _get_plan_amount_and_end_date(subscription: CompanySubscription) -> tuple[De
 
     if billing_cycle == "yearly":
         amount = Decimal(plan.price_yearly)
-        new_end_date = subscription.end_date + timedelta(days=365)
         label = "Y"
     else:
         amount = Decimal(plan.price_monthly)
-        new_end_date = subscription.end_date + timedelta(days=30)
         label = "M"
 
-    return amount, new_end_date, label
+    return amount, label
+
+
+def _resolve_subscription_product(subscription: CompanySubscription):
+    if not subscription:
+        return None
+    return getattr(subscription, "resolved_product", None)
 
 
 # ============================================================
@@ -63,13 +72,14 @@ def generate_renewal_invoice(subscription: CompanySubscription) -> Invoice | Non
     - Safe
     - Idempotent
     - Monthly / Yearly
-    - No duplicate invoices
+    - No duplicate pending invoice
     - No renewal if unpaid invoice exists
+    - Does NOT extend subscription dates directly
     ============================================================
     """
 
     # ------------------------------------------------------------
-    # 1️⃣ تحقق أساسي
+    # 1️⃣ Basic Validation
     # ------------------------------------------------------------
     if not subscription:
         return None
@@ -84,37 +94,52 @@ def generate_renewal_invoice(subscription: CompanySubscription) -> Invoice | Non
     if not plan:
         return None
 
+    resolved_product = _resolve_subscription_product(subscription)
+    if not resolved_product:
+        return None
+
     today = timezone.now().date()
 
     # ------------------------------------------------------------
-    # 2️⃣ 🛑 منع التجديد إذا توجد فاتورة غير مدفوعة
+    # 2️⃣ Prevent renewal if there is already a pending invoice
     # ------------------------------------------------------------
-    has_unpaid = Invoice.objects.filter(
-        subscription=subscription,
-        status="PENDING",
-    ).exists()
+    existing_pending_invoice = (
+        Invoice.objects
+        .filter(
+            subscription=subscription,
+            status="PENDING",
+        )
+        .order_by("-id")
+        .first()
+    )
 
-    if has_unpaid:
-        return None
-
-    # ------------------------------------------------------------
-    # 3️⃣ منع تكرار الفاتورة لنفس اليوم
-    # ------------------------------------------------------------
-    existing_invoice = Invoice.objects.filter(
-        subscription=subscription,
-        issue_date=today,
-    ).first()
-
-    if existing_invoice:
-        return existing_invoice
+    if existing_pending_invoice:
+        return existing_pending_invoice
 
     # ------------------------------------------------------------
-    # 4️⃣ تحديد دورة الفوترة + المبلغ + تاريخ النهاية الجديد
+    # 3️⃣ Prevent creating same-day duplicate renewal invoice
     # ------------------------------------------------------------
-    amount, new_end_date, label = _get_plan_amount_and_end_date(subscription)
+    existing_today_invoice = (
+        Invoice.objects
+        .filter(
+            subscription=subscription,
+            billing_reason="RENEWAL",
+            issue_date=today,
+        )
+        .order_by("-id")
+        .first()
+    )
+
+    if existing_today_invoice:
+        return existing_today_invoice
 
     # ------------------------------------------------------------
-    # 5️⃣ إنشاء الفاتورة
+    # 4️⃣ Resolve billing amount only
+    # ------------------------------------------------------------
+    amount, label = _get_plan_amount(subscription)
+
+    # ------------------------------------------------------------
+    # 5️⃣ Create invoice only
     # ------------------------------------------------------------
     invoice = Invoice.objects.create(
         company=subscription.company,
@@ -125,21 +150,33 @@ def generate_renewal_invoice(subscription: CompanySubscription) -> Invoice | Non
         total_amount=amount,
         subtotal_amount=amount,
         total_after_discount=amount,
+        billing_reason="RENEWAL",
         status="PENDING",
+        subscription_snapshot={
+            "type": "RENEWAL",
+            "subscription_id": subscription.id,
+            "product": {
+                "id": resolved_product.id,
+                "code": resolved_product.code,
+                "name": resolved_product.name,
+            },
+            "plan": {
+                "id": plan.id,
+                "name": plan.name,
+            },
+            "billing_cycle": _get_billing_cycle(subscription),
+        },
     )
 
     # ------------------------------------------------------------
-    # 6️⃣ تحديث تاريخ نهاية الاشتراك (كما هو معتمد حاليًا في النظام)
+    # 6️⃣ Safe notification only
     # ------------------------------------------------------------
-    subscription.end_date = new_end_date
-    subscription.save(update_fields=["end_date"])
-
-    # ------------------------------------------------------------
-    # 7️⃣ 🔔 إشعار إنشاء فاتورة تجديد
-    # ------------------------------------------------------------
-    notify_invoice_created(
-        company=subscription.company,
-        invoice_number=invoice.invoice_number,
-    )
+    try:
+        notify_invoice_created(
+            company=subscription.company,
+            invoice_number=invoice.invoice_number,
+        )
+    except Exception:
+        pass
 
     return invoice

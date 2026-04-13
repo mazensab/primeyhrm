@@ -25,7 +25,27 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 
-const API_BASE = "http://localhost:8000/api/system/settings"
+/* =====================================================
+   API Helpers
+===================================================== */
+
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveSettingsApiBase(): string {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    return `${trimTrailingSlash(envApi)}/api/system/settings`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${trimTrailingSlash(window.location.origin)}/api/system/settings`
+  }
+
+  return "/api/system/settings"
+}
 
 /* =====================================================
    Types
@@ -262,7 +282,7 @@ function getCookie(name: string) {
   const parts = value.split(`; ${name}=`)
 
   if (parts.length === 2) {
-    return parts.pop()?.split(";").shift()
+    return parts.pop()?.split(";").shift() || null
   }
 
   return null
@@ -320,6 +340,8 @@ function toModuleLabel(moduleKey: string) {
 }
 
 export default function SystemSettingsPage() {
+  const API_BASE = useMemo(() => resolveSettingsApiBase(), [])
+
   const [locale, setLocale] = useState<Locale>("en")
   const [direction, setDirection] = useState<Direction>("ltr")
 
@@ -477,10 +499,11 @@ export default function SystemSettingsPage() {
         headers: {
           Accept: "application/json",
         },
+        cache: "no-store",
       })
 
       if (!res.ok) {
-        throw new Error("API returned error")
+        throw new Error(`API returned error: ${res.status}`)
       }
 
       const data = await res.json()
@@ -505,9 +528,9 @@ export default function SystemSettingsPage() {
   }
 
   useEffect(() => {
-    loadSettings()
+    void loadSettings()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [API_BASE])
 
   /* =====================================================
      UPDATE GENERAL SETTING
@@ -706,7 +729,12 @@ export default function SystemSettingsPage() {
         throw new Error(data?.message || t.toastTestFailed)
       }
 
-      toast.success(data?.message || (locale === "ar" ? "تم إرسال البريد التجريبي بنجاح" : "Test email sent successfully"))
+      toast.success(
+        data?.message ||
+          (locale === "ar"
+            ? "تم إرسال البريد التجريبي بنجاح"
+            : "Test email sent successfully")
+      )
     } catch (error) {
       console.error(error)
       toast.error(error instanceof Error ? error.message : t.toastTestFailed)
@@ -755,7 +783,7 @@ export default function SystemSettingsPage() {
 
         <Button
           variant="outline"
-          onClick={loadSettings}
+          onClick={() => void loadSettings()}
           className="w-full sm:w-auto"
           disabled={isBusy}
         >
@@ -782,7 +810,7 @@ export default function SystemSettingsPage() {
               disabled={savingField === "platform_active" || isBusy}
               onCheckedChange={(v) => {
                 setPlatformActive(v)
-                updateGeneralSetting("platform_active", v)
+                void updateGeneralSetting("platform_active", v)
               }}
             />
           </div>
@@ -800,7 +828,7 @@ export default function SystemSettingsPage() {
               disabled={savingField === "maintenance_mode" || isBusy}
               onCheckedChange={(v) => {
                 setMaintenanceMode(v)
-                updateGeneralSetting("maintenance_mode", v)
+                void updateGeneralSetting("maintenance_mode", v)
               }}
             />
           </div>
@@ -818,7 +846,7 @@ export default function SystemSettingsPage() {
               disabled={savingField === "readonly_mode" || isBusy}
               onCheckedChange={(v) => {
                 setReadonlyMode(v)
-                updateGeneralSetting("readonly_mode", v)
+                void updateGeneralSetting("readonly_mode", v)
               }}
             />
           </div>
@@ -836,7 +864,7 @@ export default function SystemSettingsPage() {
               disabled={savingField === "billing_enabled" || isBusy}
               onCheckedChange={(v) => {
                 setBillingEnabled(v)
-                updateGeneralSetting("billing_enabled", v)
+                void updateGeneralSetting("billing_enabled", v)
               }}
             />
           </div>
@@ -963,7 +991,7 @@ export default function SystemSettingsPage() {
 
             <Button
               type="button"
-              onClick={handleSaveAllEmail}
+              onClick={() => void handleSaveAllEmail()}
               disabled={!canSaveAllEmail}
               className="w-full sm:w-auto"
             >
@@ -994,7 +1022,7 @@ export default function SystemSettingsPage() {
                 }
                 onBlur={() => {
                   if (emailSettings.smtp_server !== initialEmailSettings.smtp_server) {
-                    updateEmailSetting("smtp_server", emailSettings.smtp_server)
+                    void updateEmailSetting("smtp_server", emailSettings.smtp_server)
                   }
                 }}
                 placeholder={t.placeholders.smtpHost}
@@ -1017,7 +1045,7 @@ export default function SystemSettingsPage() {
                 }
                 onBlur={() => {
                   if (Number(emailSettings.smtp_port) !== Number(initialEmailSettings.smtp_port)) {
-                    updateEmailSetting("smtp_port", emailSettings.smtp_port)
+                    void updateEmailSetting("smtp_port", emailSettings.smtp_port)
                   }
                 }}
                 placeholder={t.placeholders.smtpPort}
@@ -1040,7 +1068,7 @@ export default function SystemSettingsPage() {
                 }
                 onBlur={() => {
                   if (emailSettings.username !== initialEmailSettings.username) {
-                    updateEmailSetting("username", emailSettings.username)
+                    void updateEmailSetting("username", emailSettings.username)
                   }
                 }}
                 placeholder={t.placeholders.username}
@@ -1063,7 +1091,7 @@ export default function SystemSettingsPage() {
                   }
                   onBlur={() => {
                     if (emailSettings.password !== initialEmailSettings.password) {
-                      updateEmailSetting("password", emailSettings.password)
+                      void updateEmailSetting("password", emailSettings.password)
                     }
                   }}
                   placeholder={t.placeholders.password}
@@ -1104,7 +1132,7 @@ export default function SystemSettingsPage() {
                   ...prev,
                   use_tls: v,
                 }))
-                updateEmailSetting("use_tls", v)
+                void updateEmailSetting("use_tls", v)
               }}
             />
           </div>
@@ -1126,7 +1154,7 @@ export default function SystemSettingsPage() {
             <div className="flex items-end">
               <Button
                 variant="outline"
-                onClick={handleTestEmail}
+                onClick={() => void handleTestEmail()}
                 disabled={testingEmail || !emailSettings.is_ready || isBusy}
                 className="w-full lg:w-auto"
               >
@@ -1175,7 +1203,7 @@ export default function SystemSettingsPage() {
                 <Switch
                   checked={enabled}
                   disabled={isBusy}
-                  onCheckedChange={(v) => updateModule(moduleKey, v)}
+                  onCheckedChange={(v) => void updateModule(moduleKey, v)}
                 />
               </div>
             ))
@@ -1185,7 +1213,12 @@ export default function SystemSettingsPage() {
 
       {/* FOOTER ACTIONS */}
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <Button variant="outline" onClick={loadSettings} disabled={isBusy} className="w-full sm:w-auto">
+        <Button
+          variant="outline"
+          onClick={() => void loadSettings()}
+          disabled={isBusy}
+          className="w-full sm:w-auto"
+        >
           <RefreshCw className={`${direction === "rtl" ? "ml-2" : "mr-2"} h-4 w-4`} />
           {t.reload}
         </Button>

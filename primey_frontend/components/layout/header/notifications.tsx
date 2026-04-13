@@ -18,9 +18,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
-const API = process.env.NEXT_PUBLIC_API_URL;
-const WS = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
-
+/* =========================================================
+   🌍 Locale Types
+========================================================= */
 type AppLocale = "ar" | "en";
 
 interface Notification {
@@ -32,6 +32,42 @@ interface Notification {
   is_read: boolean;
   link?: string | null;
   created_at: string;
+}
+
+/* =========================================================
+   🔗 Helpers - Resolve API & WS Base Safely
+========================================================= */
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function resolveApiBase(): string {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim();
+
+  if (envApi) {
+    return trimTrailingSlash(envApi);
+  }
+
+  if (typeof window !== "undefined") {
+    return trimTrailingSlash(window.location.origin);
+  }
+
+  return "";
+}
+
+function resolveWsBase(): string {
+  const envWs = process.env.NEXT_PUBLIC_WS_URL?.trim();
+
+  if (envWs) {
+    return trimTrailingSlash(envWs);
+  }
+
+  if (typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}`;
+  }
+
+  return "";
 }
 
 const Notifications = () => {
@@ -49,26 +85,38 @@ const Notifications = () => {
 
   const isArabic = locale === "ar";
 
-  // ======================================================
-  // Detect current scope
-  // ======================================================
-
+  /* =========================================================
+     🧭 Detect Current Scope
+  ========================================================= */
   const isCompanyScope = useMemo(() => {
     return pathname?.startsWith("/company");
   }, [pathname]);
 
-  const apiBase = isCompanyScope
-    ? `${API}/api/company/notifications`
-    : `${API}/api/system/notifications`;
+  const apiRoot = useMemo(() => resolveApiBase(), []);
+  const wsRoot = useMemo(() => resolveWsBase(), []);
+
+  const apiBase = useMemo(() => {
+    if (!apiRoot) return "";
+
+    return isCompanyScope
+      ? `${apiRoot}/api/company/notifications`
+      : `${apiRoot}/api/system/notifications`;
+  }, [apiRoot, isCompanyScope]);
+
+  const wsNotificationsUrl = useMemo(() => {
+    if (!wsRoot) return "";
+
+    // حالياً قناة النظام تعمل على مستوى المستخدم الحالي
+    return `${wsRoot}/ws/system/notifications/`;
+  }, [wsRoot]);
 
   const pageHref = isCompanyScope
     ? "/company/notifications"
     : "/system/notifications";
 
-  // ======================================================
-  // Load locale from localStorage
-  // ======================================================
-
+  /* =========================================================
+     🍪 Load Locale from localStorage
+  ========================================================= */
   useEffect(() => {
     try {
       const savedLocale =
@@ -82,11 +130,16 @@ const Notifications = () => {
     }
   }, []);
 
-  // ======================================================
-  // Load notifications from backend
-  // ======================================================
-
+  /* =========================================================
+     📥 Load Notifications from Backend
+  ========================================================= */
   async function loadNotifications() {
+    if (!apiBase) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -113,47 +166,61 @@ const Notifications = () => {
   }
 
   useEffect(() => {
-    loadNotifications();
+    void loadNotifications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase]);
 
-  // ======================================================
-  // WebSocket realtime notifications
-  // ======================================================
-  // حالياً نُبقي نفس قناة النظام لأنها تعمل على مستوى المستخدم الحالي.
-  // لو أنشأت لاحقًا قناة company مستقلة نبدّلها هنا فقط.
-
+  /* =========================================================
+     🔔 WebSocket Realtime Notifications
+  ========================================================= */
   useEffect(() => {
-    if (!WS) return;
+    if (!wsNotificationsUrl) return;
 
-    const socket = new WebSocket(`${WS}/ws/system/notifications/`);
-    socketRef.current = socket;
+    let socket: WebSocket | null = null;
 
-    socket.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
+    try {
+      socket = new WebSocket(wsNotificationsUrl);
+      socketRef.current = socket;
 
-        setNotifications((prev) => [payload, ...prev]);
-        setUnreadCount((prev) => prev + 1);
-      } catch (err) {
-        console.error("Realtime notification error", err);
-      }
-    };
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as Notification;
 
-    socket.onclose = () => {
-      console.log("Notification socket closed");
-    };
+          setNotifications((prev) => [payload, ...prev]);
+          setUnreadCount((prev) => prev + 1);
+        } catch (err) {
+          console.error("Realtime notification parse error", err);
+        }
+      };
+
+      socket.onerror = (error) => {
+        console.error("Notification socket error", error);
+      };
+
+      socket.onclose = () => {
+        console.log("Notification socket closed");
+      };
+    } catch (error) {
+      console.error("Notification socket initialization error", error);
+    }
 
     return () => {
-      socket.close();
+      try {
+        socketRef.current?.close();
+      } catch (error) {
+        console.error("Notification socket close error", error);
+      } finally {
+        socketRef.current = null;
+      }
     };
-  }, []);
+  }, [wsNotificationsUrl]);
 
-  // ======================================================
-  // Mark single notification as read
-  // ======================================================
-
+  /* =========================================================
+     ✅ Mark Single Notification as Read
+  ========================================================= */
   async function markAsRead(id: number) {
+    if (!apiBase) return;
+
     try {
       const res = await fetch(`${apiBase}/read/${id}/`, {
         method: "POST",
@@ -170,16 +237,15 @@ const Notifications = () => {
 
       setUnreadCount((prev) => (prev > 0 ? prev - 1 : 0));
     } catch (err) {
-      console.error("mark read error", err);
+      console.error("Mark read error", err);
     }
   }
 
-  // ======================================================
-  // Mark all notifications as read
-  // ======================================================
-
+  /* =========================================================
+     ✅ Mark All Notifications as Read
+  ========================================================= */
   async function markAllAsRead() {
-    if (unreadCount <= 0) return;
+    if (unreadCount <= 0 || !apiBase) return;
 
     try {
       setMarkingAll(true);
@@ -196,16 +262,15 @@ const Notifications = () => {
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
     } catch (err) {
-      console.error("mark all read error", err);
+      console.error("Mark all read error", err);
     } finally {
       setMarkingAll(false);
     }
   }
 
-  // ======================================================
-  // Format date by locale
-  // ======================================================
-
+  /* =========================================================
+     🕒 Format Date by Locale
+  ========================================================= */
   function formatNotificationDate(value: string) {
     try {
       return new Date(value).toLocaleString(isArabic ? "ar-SA" : "en-US");
@@ -214,10 +279,9 @@ const Notifications = () => {
     }
   }
 
-  // ======================================================
-  // Handle click
-  // ======================================================
-
+  /* =========================================================
+     🖱️ Handle Notification Click
+  ========================================================= */
   async function handleNotificationClick(item: Notification) {
     if (!item.is_read) {
       await markAsRead(item.id);

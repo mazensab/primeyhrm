@@ -1,7 +1,6 @@
 # ============================================================
 # 📂 api/system/subscriptions/change_plan.py
-# Mham Cloud
-# Change Subscription Plan API — Notification Center Clean
+# Mham Cloud | PRODUCT-AWARE
 # ============================================================
 
 from __future__ import annotations
@@ -67,10 +66,19 @@ def _date_str(value) -> str:
         return str(value)
 
 
+def _resolve_plan_product(plan):
+    if not plan:
+        return None
+    return getattr(plan, "product", None) if getattr(plan, "product_id", None) else None
+
+
+def _resolve_subscription_product(subscription):
+    if not subscription:
+        return None
+    return getattr(subscription, "resolved_product", None)
+
+
 def _generate_upgrade_invoice_number() -> str:
-    """
-    توليد رقم فاتورة فريد لطلبات ترقية الباقة
-    """
     while True:
         candidate = (
             f"INV-UPG-"
@@ -118,10 +126,6 @@ def _collect_subscription_recipients(subscription) -> list[str]:
 
 
 def _get_first_existing_attr(instance, attr_names: list[str], default=""):
-    """
-    قراءة أول حقل موجود وغير فارغ من قائمة أسماء محتملة.
-    مفيد لاختلاف تسمية حقول الجوال بين النماذج.
-    """
     if not instance:
         return default
 
@@ -139,9 +143,6 @@ def _get_first_existing_attr(instance, attr_names: list[str], default=""):
 
 
 def _get_user_related_profile_candidates(user) -> list:
-    """
-    محاولة الوصول إلى بروفايل المستخدم الشائع بدون فرض اسم محدد.
-    """
     if not user:
         return []
 
@@ -160,9 +161,6 @@ def _get_user_related_profile_candidates(user) -> list:
 
 
 def _get_best_phone_for_entity(instance) -> str:
-    """
-    جلب أفضل رقم جوال من الكيان مباشرة أو من profile/userprofile إن وجد.
-    """
     phone_attr_candidates = [
         "phone",
         "mobile",
@@ -184,9 +182,6 @@ def _get_best_phone_for_entity(instance) -> str:
 
 
 def _collect_subscription_notification_targets(subscription) -> list[dict]:
-    """
-    تجميع مستهدفي الإشعار بشكل آمن وبدون تكرار.
-    """
     targets: list[dict] = []
     seen_phones: set[str] = set()
     seen_emails: set[str] = set()
@@ -267,9 +262,6 @@ def _collect_subscription_notification_targets(subscription) -> list[dict]:
 # ============================================================
 
 def _load_subscription_notification_module():
-    """
-    تحميل مرن لطبقة الاشتراكات/الفوترة الرسمية.
-    """
     candidate_modules = [
         "notification_center.services_billing",
         "notification_center.services_company",
@@ -287,6 +279,8 @@ def _load_subscription_notification_module():
 def _build_upgrade_context(*, subscription, current_plan, new_plan, invoice, difference, actor) -> dict:
     company = getattr(subscription, "company", None)
     owner = getattr(company, "owner", None) if company else None
+    current_product = _resolve_plan_product(current_plan)
+    new_product = _resolve_plan_product(new_plan)
 
     return {
         "subscription_id": getattr(subscription, "id", None),
@@ -295,12 +289,15 @@ def _build_upgrade_context(*, subscription, current_plan, new_plan, invoice, dif
         "company_email": _safe_text(getattr(company, "email", None)),
         "owner_user_id": getattr(owner, "id", None) if owner else None,
         "owner_email": _safe_text(getattr(owner, "email", None)) if owner else "",
+        "product_code": _safe_text(getattr(current_product, "code", None)),
+        "product_name": _safe_text(getattr(current_product, "name", None)),
         "current_plan_id": getattr(current_plan, "id", None),
         "current_plan_name": _safe_text(getattr(current_plan, "name", None)),
         "current_plan_price_yearly": _money_str(getattr(current_plan, "price_yearly", None)),
         "new_plan_id": getattr(new_plan, "id", None),
         "new_plan_name": _safe_text(getattr(new_plan, "name", None)),
         "new_plan_price_yearly": _money_str(getattr(new_plan, "price_yearly", None)),
+        "new_product_code": _safe_text(getattr(new_product, "code", None)),
         "difference_amount": _money_str(difference),
         "invoice_id": getattr(invoice, "id", None),
         "invoice_number": _safe_text(getattr(invoice, "invoice_number", None)),
@@ -318,6 +315,8 @@ def _build_upgrade_context(*, subscription, current_plan, new_plan, invoice, dif
 def _build_downgrade_context(*, subscription, current_plan, new_plan, actor) -> dict:
     company = getattr(subscription, "company", None)
     owner = getattr(company, "owner", None) if company else None
+    current_product = _resolve_plan_product(current_plan)
+    new_product = _resolve_plan_product(new_plan)
 
     return {
         "subscription_id": getattr(subscription, "id", None),
@@ -326,12 +325,15 @@ def _build_downgrade_context(*, subscription, current_plan, new_plan, actor) -> 
         "company_email": _safe_text(getattr(company, "email", None)),
         "owner_user_id": getattr(owner, "id", None) if owner else None,
         "owner_email": _safe_text(getattr(owner, "email", None)) if owner else "",
+        "product_code": _safe_text(getattr(current_product, "code", None)),
+        "product_name": _safe_text(getattr(current_product, "name", None)),
         "current_plan_id": getattr(current_plan, "id", None),
         "current_plan_name": _safe_text(getattr(current_plan, "name", None)),
         "current_plan_price_yearly": _money_str(getattr(current_plan, "price_yearly", None)),
         "new_plan_id": getattr(new_plan, "id", None),
         "new_plan_name": _safe_text(getattr(new_plan, "name", None)),
         "new_plan_price_yearly": _money_str(getattr(new_plan, "price_yearly", None)),
+        "new_product_code": _safe_text(getattr(new_product, "code", None)),
         "subscription_start_date": _date_str(getattr(subscription, "start_date", None)),
         "subscription_end_date": _date_str(getattr(subscription, "end_date", None)),
         "recipients": _collect_subscription_recipients(subscription),
@@ -506,67 +508,66 @@ def _dispatch_downgrade_notification(*, subscription, current_plan, new_plan, ac
 
 # ============================================================
 # API
-# POST /api/system/subscriptions/<id>/change-plan/
 # ============================================================
 
 @require_POST
 @login_required
 @transaction.atomic
 def change_subscription_plan(request, subscription_id):
-
     payload = _json_payload(request)
 
     if not payload:
-        return JsonResponse({
-            "error": "Invalid payload"
-        }, status=400)
+        return JsonResponse({"error": "Invalid payload"}, status=400)
 
     plan_id = payload.get("plan_id")
-
     if not plan_id:
-        return JsonResponse({
-            "error": "plan_id required"
-        }, status=400)
+        return JsonResponse({"error": "plan_id required"}, status=400)
 
     try:
         subscription = (
             CompanySubscription.objects
             .select_for_update()
-            .select_related("company__owner", "plan")
+            .select_related("company__owner", "plan__product", "product")
             .get(id=subscription_id)
         )
     except CompanySubscription.DoesNotExist:
-        return JsonResponse({
-            "error": "Subscription not found"
-        }, status=404)
+        return JsonResponse({"error": "Subscription not found"}, status=404)
 
     try:
-        new_plan = SubscriptionPlan.objects.get(id=plan_id)
+        new_plan = SubscriptionPlan.objects.select_related("product").get(id=plan_id)
     except SubscriptionPlan.DoesNotExist:
-        return JsonResponse({
-            "error": "Plan not found"
-        }, status=404)
+        return JsonResponse({"error": "Plan not found"}, status=404)
 
     current_plan = subscription.plan
-
-    # --------------------------------------------------------
-    # Same Plan
-    # --------------------------------------------------------
+    if not current_plan:
+        return JsonResponse({"error": "Current subscription has no plan"}, status=400)
 
     if current_plan.id == new_plan.id:
-        return JsonResponse({
-            "message": "Already on this plan"
-        })
+        return JsonResponse({"message": "Already on this plan"})
+
+    current_product = _resolve_subscription_product(subscription)
+    new_product = _resolve_plan_product(new_plan)
+
+    if not current_product or not new_product:
+        return JsonResponse(
+            {"error": "Product mapping is incomplete for current or target plan"},
+            status=400,
+        )
+
+    if current_product.id != new_product.id:
+        return JsonResponse(
+            {
+                "error": "Cross-product plan change is not allowed",
+                "current_product": current_product.code,
+                "target_product": new_product.code,
+            },
+            status=400,
+        )
 
     current_price = current_plan.price_yearly or 0
     new_price = new_plan.price_yearly or 0
 
-    # --------------------------------------------------------
-    # Upgrade
-    # --------------------------------------------------------
-
     if new_price > current_price:
-
         difference = Decimal(new_price) - Decimal(current_price)
 
         invoice = Invoice.objects.create(
@@ -581,6 +582,11 @@ def change_subscription_plan(request, subscription_id):
             subscription_snapshot={
                 "type": "UPGRADE",
                 "subscription_id": subscription.id,
+                "product": {
+                    "id": current_product.id,
+                    "code": current_product.code,
+                    "name": current_product.name,
+                },
                 "current_plan": {
                     "id": current_plan.id,
                     "name": current_plan.name,
@@ -610,12 +616,9 @@ def change_subscription_plan(request, subscription_id):
             "action": "upgrade",
             "invoice_id": invoice.id,
             "invoice_number": invoice.invoice_number,
-            "amount_due": str(difference)
+            "amount_due": str(difference),
+            "product": current_product.code,
         })
-
-    # --------------------------------------------------------
-    # Downgrade
-    # --------------------------------------------------------
 
     transaction.on_commit(
         lambda: _dispatch_downgrade_notification(
@@ -628,5 +631,6 @@ def change_subscription_plan(request, subscription_id):
 
     return JsonResponse({
         "action": "downgrade_not_supported_yet",
+        "product": current_product.code,
         "message": "Downgrade scheduling requires a dedicated storage layer first."
     })

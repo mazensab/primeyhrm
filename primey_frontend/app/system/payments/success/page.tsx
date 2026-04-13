@@ -14,7 +14,28 @@ import { toast } from "sonner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 
-const API_BASE = "http://localhost:8000/api"
+/* ======================================================
+   API Helpers
+====================================================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    const value = trimTrailingSlash(envApi)
+    return value.endsWith("/api") ? value : `${value}/api`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${trimTrailingSlash(window.location.origin)}/api`
+  }
+
+  return "/api"
+}
 
 type LookupSuccessPayload = {
   success: true
@@ -68,6 +89,7 @@ function getLookupErrorMessage(data: LookupPayload): string {
 }
 
 export default function TapPaymentSuccessPage() {
+  const API = useMemo(() => resolveApiBase(), [])
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -104,6 +126,13 @@ export default function TapPaymentSuccessPage() {
       return
     }
 
+    if (!API) {
+      setLoading(false)
+      setErrorState("تعذر الوصول إلى الخادم.")
+      setMessage("تعذر التحقق من العملية بسبب إعدادات الاتصال.")
+      return
+    }
+
     let isMounted = true
 
     async function resolvePayment(currentAttempt: number) {
@@ -119,7 +148,7 @@ export default function TapPaymentSuccessPage() {
         )
 
         const response = await fetch(
-          `${API_BASE}/system/payments/tap/success-lookup/?tap_id=${encodeURIComponent(tapId)}`,
+          `${API}/system/payments/tap/success-lookup/?tap_id=${encodeURIComponent(tapId)}`,
           {
             method: "GET",
             credentials: "include",
@@ -200,12 +229,12 @@ export default function TapPaymentSuccessPage() {
       }
     }
 
-    resolvePayment(attempt)
+    void resolvePayment(attempt)
 
     return () => {
       isMounted = false
     }
-  }, [attempt, router, tapId])
+  }, [API, attempt, router, tapId])
 
   function handleRetryNow() {
     if (!tapId) {

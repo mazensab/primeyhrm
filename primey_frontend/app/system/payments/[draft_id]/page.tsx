@@ -30,7 +30,26 @@ import {
   CreditCard,
 } from "lucide-react"
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+/* =========================================================
+   🌐 API Helpers
+========================================================= */
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    return trimTrailingSlash(envApi)
+  }
+
+  if (typeof window !== "undefined") {
+    return trimTrailingSlash(window.location.origin)
+  }
+
+  return ""
+}
 
 type DraftStatus = "DRAFT" | "CONFIRMED" | "PAID" | string
 type PaymentMethod =
@@ -118,9 +137,11 @@ function getCookie(name: string) {
   return null
 }
 
-async function ensureCsrf() {
+async function ensureCsrf(apiBase: string) {
+  if (!apiBase) return null
+
   try {
-    await fetch(`${API}/api/auth/csrf/`, {
+    await fetch(`${apiBase}/api/auth/csrf/`, {
       credentials: "include",
     })
   } catch {
@@ -227,6 +248,7 @@ function getMethodIcon(method?: PaymentMethod) {
    📄 Page
 ========================================================= */
 export default function PaymentPage() {
+  const API = useMemo(() => resolveApiBase(), [])
   const params = useParams()
   const router = useRouter()
 
@@ -238,11 +260,14 @@ export default function PaymentPage() {
   const [loading, setLoading] = useState(true)
   const [confirming, setConfirming] = useState(false)
 
-  /* =========================================================
-     📥 Load Draft Preview
-  ========================================================= */
   useEffect(() => {
     if (!draftId) {
+      setLoading(false)
+      setDraft(null)
+      return
+    }
+
+    if (!API) {
       setLoading(false)
       setDraft(null)
       return
@@ -278,12 +303,9 @@ export default function PaymentPage() {
       }
     }
 
-    loadDraft()
-  }, [draftId])
+    void loadDraft()
+  }, [API, draftId])
 
-  /* =========================================================
-     🧠 Derived Values
-  ========================================================= */
   const planName = draft?.plan?.name || "-"
   const basePrice = normalizeNumber(draft?.pricing?.base_price)
   const discountAmount = normalizeNumber(draft?.pricing?.discount_amount)
@@ -313,9 +335,6 @@ export default function PaymentPage() {
     }
   }, [draft])
 
-  /* =========================================================
-     ✅ Confirm Bank Transfer
-  ========================================================= */
   const confirmBankTransfer = async () => {
     if (!draftId) {
       toast.error("رقم الطلب غير موجود")
@@ -337,10 +356,15 @@ export default function PaymentPage() {
       return
     }
 
+    if (!API) {
+      toast.error("تعذر الوصول إلى الخادم")
+      return
+    }
+
     try {
       setConfirming(true)
 
-      const csrfToken = await ensureCsrf()
+      const csrfToken = await ensureCsrf(API)
 
       const res = await fetch(`${API}/api/system/onboarding/confirm-payment/`, {
         method: "POST",
@@ -388,9 +412,6 @@ export default function PaymentPage() {
     }
   }
 
-  /* =========================================================
-     🖥️ States
-  ========================================================= */
   if (loading) {
     return (
       <div className="mx-auto max-w-5xl p-6">
@@ -428,9 +449,6 @@ export default function PaymentPage() {
     )
   }
 
-  /* =========================================================
-     🧾 UI
-  ========================================================= */
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6" dir="rtl">
       <div className="flex flex-col gap-4 rounded-3xl border bg-background p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
@@ -756,7 +774,7 @@ export default function PaymentPage() {
                 </div>
               ) : (
                 <Button
-                  onClick={confirmBankTransfer}
+                  onClick={() => void confirmBankTransfer()}
                   disabled={confirming || !canVerifyBankTransfer}
                   className="w-full gap-2"
                 >

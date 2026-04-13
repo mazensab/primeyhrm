@@ -23,6 +23,10 @@ from django.db import transaction
 from company_manager.models import CompanyBranch, CompanyUser
 from biotime_center.sync_service import create_or_sync_branch  # ✅ PATCH
 
+from billing_center.services.subscription_limits import (
+    check_branch_creation_limit,
+)
+
 logger = logging.getLogger(__name__)
 
 # ================================================================
@@ -124,6 +128,45 @@ def branch_create(request):
         if not name:
             return api_error("اسم الفرع مطلوب.", status=400)
 
+        # ====================================================
+        # 🔐 Subscription Limit Check — Branches
+        # Product-aware + Limit-aware
+        # ====================================================
+        branch_limit_check = check_branch_creation_limit(company_user.company)
+
+        if not branch_limit_check.allowed:
+            logger.warning(
+                "Branch creation blocked by subscription limit | company=%s | code=%s | usage=%s | max=%s | subscription_id=%s",
+                getattr(company_user.company, "id", None),
+                branch_limit_check.code,
+                branch_limit_check.current_usage,
+                branch_limit_check.max_allowed,
+                branch_limit_check.subscription_id,
+            )
+
+            limit_message_map = {
+                "NO_PRODUCT_SUBSCRIPTION": "لا يوجد اشتراك نشط للمنتج المطلوب.",
+                "LIMIT_EXCEEDED": "تم الوصول إلى الحد الأقصى المسموح لعدد الفروع في الباقة الحالية.",
+                "NO_COMPANY": "تعذر تحديد الشركة الحالية.",
+            }
+
+            return api_error(
+                limit_message_map.get(
+                    branch_limit_check.code,
+                    branch_limit_check.message or "تعذر إنشاء الفرع بسبب قيود الاشتراك.",
+                ),
+                status=402,
+                limit={
+                    "resource": "branches",
+                    "product_code": branch_limit_check.product_code,
+                    "current_usage": branch_limit_check.current_usage,
+                    "max_allowed": branch_limit_check.max_allowed,
+                    "remaining": branch_limit_check.remaining,
+                    "subscription_id": branch_limit_check.subscription_id,
+                    "code": branch_limit_check.code,
+                },
+            )
+
         if CompanyBranch.objects.filter(
             company=company_user.company,
             name=name,
@@ -143,6 +186,14 @@ def branch_create(request):
             is_active=branch.is_active,
             biotime_code=branch.biotime_code,
             message="✔ تم إنشاء الفرع بنجاح.",
+            limit={
+                "resource": "branches",
+                "product_code": branch_limit_check.product_code,
+                "current_usage_before_create": branch_limit_check.current_usage,
+                "max_allowed": branch_limit_check.max_allowed,
+                "remaining_before_create": branch_limit_check.remaining,
+                "subscription_id": branch_limit_check.subscription_id,
+            },
         )
 
     except Exception:
@@ -152,7 +203,6 @@ def branch_create(request):
             "❌ حدث خطأ أثناء إنشاء الفرع.",
             status=500,
         )
-
 
 # ================================================================
 # ✏️ API — Update Branch (WITH BIOTIME SYNC)

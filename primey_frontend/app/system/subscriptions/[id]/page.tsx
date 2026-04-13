@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import Link from "next/link"
+import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 
 import {
@@ -21,11 +22,39 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table"
+import {
+  Loader2,
+  ShieldCheck,
+  ShieldX,
+  Clock3,
+} from "lucide-react"
 
+/* ======================================================
+   API Helpers
+====================================================== */
 
-// ======================================================
-// Types
-// ======================================================
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    const value = trimTrailingSlash(envApi)
+    return value.endsWith("/api") ? value : `${value}/api`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${trimTrailingSlash(window.location.origin)}/api`
+  }
+
+  return "/api"
+}
+
+/* ======================================================
+   Types
+====================================================== */
 
 interface Subscription {
   id: number
@@ -69,15 +98,84 @@ interface Usage {
   max_devices: number
 }
 
+/* ======================================================
+   Helpers
+====================================================== */
 
-// ======================================================
-// Page
-// ======================================================
+function normalizeStatus(status: string): string {
+  return String(status || "").trim().toUpperCase()
+}
+
+function formatMoney(value: number | null | undefined) {
+  const num = Number(value || 0)
+
+  if (Number.isNaN(num)) {
+    return "0.00 SAR"
+  }
+
+  return `${num.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false,
+  })} SAR`
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+
+  return `${year}/${month}/${day}`
+}
+
+function normalizeCycle(cycle: string | null | undefined) {
+  const raw = String(cycle || "").toUpperCase()
+  if (raw === "MONTHLY") return "شهري"
+  if (raw === "YEARLY") return "سنوي"
+  return cycle || "-"
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const normalized = normalizeStatus(status)
+
+  const isActive = normalized === "ACTIVE"
+  const isExpired = normalized === "EXPIRED"
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        isActive
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : isExpired
+            ? "border-red-200 bg-red-50 text-red-700"
+            : "border-amber-200 bg-amber-50 text-amber-700",
+      ].join(" ")}
+    >
+      {isActive ? (
+        <ShieldCheck className="me-1 h-3.5 w-3.5" />
+      ) : isExpired ? (
+        <ShieldX className="me-1 h-3.5 w-3.5" />
+      ) : (
+        <Clock3 className="me-1 h-3.5 w-3.5" />
+      )}
+      {status}
+    </span>
+  )
+}
+
+/* ======================================================
+   Page
+====================================================== */
 
 export default function SubscriptionDetailsPage() {
-
+  const API = useMemo(() => resolveApiBase(), [])
   const params = useParams()
-  const id = params?.id
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id
 
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [renewals, setRenewals] = useState<Renewal[]>([])
@@ -87,105 +185,84 @@ export default function SubscriptionDetailsPage() {
 
   const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    async function fetchData() {
+      if (!API || !id) {
+        setLoading(false)
+        return
+      }
 
-// ======================================================
-// Fetch Data
-// ======================================================
+      try {
+        const res = await fetch(
+          `${API}/system/subscriptions/${id}/`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          }
+        )
 
-useEffect(() => {
+        const data = await res.json()
 
-  async function fetchData() {
-
-    try {
-
-      const res = await fetch(
-        `http://localhost:8000/api/system/subscriptions/${id}/`,
-        {
-          credentials: "include",
+        if (!res.ok) {
+          toast.error(data?.error || "تعذر تحميل بيانات الاشتراك")
+          setSubscription(null)
+          return
         }
-      )
 
-      const data = await res.json()
-
-      setSubscription(data.subscription)
-      setRenewals(data.renewals || [])
-      setInvoices(data.invoices || [])
-      setPayments(data.payments || [])
-      setUsage(data.usage || null)
-
-    } catch (err) {
-
-      console.error("Subscription fetch error:", err)
-
-    } finally {
-
-      setLoading(false)
-
+        setSubscription(data.subscription || null)
+        setRenewals(data.renewals || [])
+        setInvoices(data.invoices || [])
+        setPayments(data.payments || [])
+        setUsage(data.usage || null)
+      } catch (err) {
+        console.error("Subscription fetch error:", err)
+        toast.error("تعذر تحميل بيانات الاشتراك")
+        setSubscription(null)
+      } finally {
+        setLoading(false)
+      }
     }
+
+    void fetchData()
+  }, [API, id])
+
+  function getCookie(name: string) {
+    if (typeof document === "undefined") return null
+
+    const value = `; ${document.cookie}`
+    const parts = value.split(`; ${name}=`)
+
+    if (parts.length === 2) {
+      return parts.pop()?.split(";").shift()
+    }
+
+    return null
   }
 
-  if (id) fetchData()
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 p-6 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading subscription...
+      </div>
+    )
+  }
 
-}, [id])
-
-if (loading) return <div>Loading subscription...</div>
-if (!subscription) return <div>Subscription not found</div>
- // ======================================================
- // CSRF
- // ======================================================
-
- function getCookie(name: string) {
-
-   if (typeof document === "undefined") return null
-
-   const value = `; ${document.cookie}`
-   const parts = value.split(`; ${name}=`)
-
-   if (parts.length === 2)
-     return parts.pop()?.split(";").shift()
-
-   return null
- }
-
-  // ======================================================
-  // UI
-  // ======================================================
+  if (!subscription) {
+    return <div className="p-6">Subscription not found</div>
+  }
 
   return (
-
     <div className="space-y-6">
-
-      {/* ================================================= */}
-      {/* Header */}
-      {/* ================================================= */}
-
       <div className="flex items-center justify-between">
-
         <h1 className="text-2xl font-bold">
           Subscription #{subscription.id}
         </h1>
 
-        <Badge
-          variant={
-            subscription.status === "ACTIVE"
-              ? "default"
-              : subscription.status === "EXPIRED"
-              ? "destructive"
-              : "secondary"
-          }
-        >
-          {subscription.status}
-        </Badge>
-
+        <StatusBadge status={subscription.status} />
       </div>
 
-
-      {/* ================================================= */}
-      {/* Overview */}
-      {/* ================================================= */}
-
       <div className="grid gap-4 md:grid-cols-4">
-
         <Card>
           <CardHeader>
             <CardTitle>Company</CardTitle>
@@ -209,7 +286,7 @@ if (!subscription) return <div>Subscription not found</div>
             <CardTitle>Billing Cycle</CardTitle>
           </CardHeader>
           <CardContent>
-            {subscription.billing_cycle}
+            {normalizeCycle(subscription.billing_cycle)}
           </CardContent>
         </Card>
 
@@ -218,27 +295,18 @@ if (!subscription) return <div>Subscription not found</div>
             <CardTitle>Price</CardTitle>
           </CardHeader>
           <CardContent>
-            {subscription.price} SAR
+            {formatMoney(subscription.price)}
           </CardContent>
         </Card>
-
       </div>
 
-
-      {/* ================================================= */}
-      {/* Usage */}
-      {/* ================================================= */}
-
       {usage && (
-
         <Card>
-
           <CardHeader>
             <CardTitle>Usage</CardTitle>
           </CardHeader>
 
-          <CardContent className="grid md:grid-cols-2 gap-4">
-
+          <CardContent className="grid gap-4 md:grid-cols-2">
             <div>
               Employees
               <div className="text-xl font-bold">
@@ -252,28 +320,17 @@ if (!subscription) return <div>Subscription not found</div>
                 {usage.devices} / {usage.max_devices}
               </div>
             </div>
-
           </CardContent>
-
         </Card>
-
       )}
 
-
-      {/* ================================================= */}
-      {/* Renewal History */}
-      {/* ================================================= */}
-
       <Card>
-
         <CardHeader>
           <CardTitle>Renewal History</CardTitle>
         </CardHeader>
 
         <CardContent>
-
           <Table>
-
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -283,40 +340,33 @@ if (!subscription) return <div>Subscription not found</div>
             </TableHeader>
 
             <TableBody>
-
-              {renewals.map((r) => (
-
-                <TableRow key={r.id}>
-                  <TableCell>{r.date}</TableCell>
-                  <TableCell>{r.plan}</TableCell>
-                  <TableCell>{r.amount} SAR</TableCell>
+              {renewals.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-center text-muted-foreground">
+                    No renewal history
+                  </TableCell>
                 </TableRow>
-
-              ))}
-
+              ) : (
+                renewals.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>{formatDate(r.date)}</TableCell>
+                    <TableCell>{r.plan}</TableCell>
+                    <TableCell>{formatMoney(r.amount)}</TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
-
           </Table>
-
         </CardContent>
-
       </Card>
 
-
-      {/* ================================================= */}
-      {/* Invoices */}
-      {/* ================================================= */}
-
       <Card>
-
         <CardHeader>
           <CardTitle>Invoices</CardTitle>
         </CardHeader>
 
         <CardContent>
-
           <Table>
-
             <TableHeader>
               <TableRow>
                 <TableHead>Invoice</TableHead>
@@ -327,48 +377,41 @@ if (!subscription) return <div>Subscription not found</div>
             </TableHeader>
 
             <TableBody>
-
-              {invoices.map((i) => (
-
-                <TableRow key={i.id}>
-                  <TableCell>
-                    <a
-                      href={`/system/invoices/${i.id}`}
-                      className="text-blue-600 hover:underline font-medium"
-                    >
-                      {i.invoice}
-                    </a>
+              {invoices.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    No invoices found
                   </TableCell>
-                  <TableCell>{i.date}</TableCell>
-                  <TableCell>{i.amount} SAR</TableCell>
-                  <TableCell>{i.status}</TableCell>
                 </TableRow>
-
-              ))}
-
+              ) : (
+                invoices.map((i) => (
+                  <TableRow key={i.id}>
+                    <TableCell>
+                      <Link
+                        href={`/system/invoices/${i.invoice}`}
+                        className="font-medium text-blue-600 hover:underline"
+                      >
+                        {i.invoice}
+                      </Link>
+                    </TableCell>
+                    <TableCell>{formatDate(i.date)}</TableCell>
+                    <TableCell>{formatMoney(i.amount)}</TableCell>
+                    <TableCell>{i.status}</TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
-
           </Table>
-
         </CardContent>
-
       </Card>
 
-
-      {/* ================================================= */}
-      {/* Payments */}
-      {/* ================================================= */}
-
       <Card>
-
         <CardHeader>
           <CardTitle>Payments</CardTitle>
         </CardHeader>
 
         <CardContent>
-
           <Table>
-
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -378,55 +421,45 @@ if (!subscription) return <div>Subscription not found</div>
             </TableHeader>
 
             <TableBody>
-
-              {payments.map((p) => (
-
-                <TableRow key={p.id}>
-                  <TableCell>{p.date}</TableCell>
-                  <TableCell>{p.amount} SAR</TableCell>
-                  <TableCell>{p.method}</TableCell>
+              {payments.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-center text-muted-foreground">
+                    No payments found
+                  </TableCell>
                 </TableRow>
-
-              ))}
-
+              ) : (
+                payments.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell>{formatDate(p.date)}</TableCell>
+                    <TableCell>{formatMoney(p.amount)}</TableCell>
+                    <TableCell>{p.method}</TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
-
           </Table>
-
         </CardContent>
-
       </Card>
 
-
-      {/* ================================================= */}
-      {/* Actions */}
-      {/* ================================================= */}
-
       <Card>
-
         <CardHeader>
           <CardTitle>Subscription Actions</CardTitle>
         </CardHeader>
 
-        <CardContent className="flex gap-3 flex-wrap">
-
-          <Button
-            variant="outline"
-            onClick={() => {
-              window.location.href = `/system/subscriptions/${id}/change-plan`
-            }}
-          >
-            Change Plan
+        <CardContent className="flex flex-wrap gap-3">
+          <Button asChild variant="outline">
+            <Link href={`/system/subscriptions/${id}/change-plan`}>
+              Change Plan
+            </Link>
           </Button>
+
           <Button
             onClick={async () => {
-
               try {
-
                 const csrf = getCookie("csrftoken")
 
                 const res = await fetch(
-                  `http://localhost:8000/api/system/subscriptions/${id}/renew/`,
+                  `${API}/system/subscriptions/${id}/renew/`,
                   {
                     method: "POST",
                     credentials: "include",
@@ -446,25 +479,18 @@ if (!subscription) return <div>Subscription not found</div>
                 toast.success("Renewal invoice created successfully")
 
                 setTimeout(() => {
-                  window.location.href = `/system/invoices/${data.invoice_id}`
+                  window.location.href = `/system/invoices/${data.invoice_number || data.invoice_id}`
                 }, 800)
-
               } catch (err) {
-
                 console.error("Renew error:", err)
                 toast.error("Renew failed")
-
               }
-
             }}
           >
             Renew Subscription
-          </Button>          
-
+          </Button>
         </CardContent>
-
       </Card>
-
     </div>
   )
 }

@@ -1,6 +1,6 @@
 # ============================================================
 # 🔄 Renew Company Subscription
-# Mham Cloud — Notification Center Clean
+# Mham Cloud — Notification Center Clean | PRODUCT-AWARE
 # ============================================================
 
 from __future__ import annotations
@@ -57,6 +57,12 @@ def _date_str(value) -> str:
         return str(value)
 
 
+def _resolve_subscription_product(subscription):
+    if not subscription:
+        return None
+    return getattr(subscription, "resolved_product", None)
+
+
 def _collect_recipients(subscription) -> list[str]:
     recipients: list[str] = []
 
@@ -94,9 +100,6 @@ def _collect_recipients(subscription) -> list[str]:
 
 
 def _get_first_existing_attr(instance, attr_names: list[str], default=""):
-    """
-    قراءة أول حقل موجود وغير فارغ من قائمة أسماء محتملة.
-    """
     if not instance:
         return default
 
@@ -114,9 +117,6 @@ def _get_first_existing_attr(instance, attr_names: list[str], default=""):
 
 
 def _get_user_related_profile_candidates(user) -> list:
-    """
-    محاولة الوصول إلى بروفايل المستخدم الشائع بدون فرض اسم محدد.
-    """
     if not user:
         return []
 
@@ -135,9 +135,6 @@ def _get_user_related_profile_candidates(user) -> list:
 
 
 def _get_best_phone_for_entity(instance) -> str:
-    """
-    جلب أفضل رقم جوال من الكيان مباشرة أو من profile/userprofile إن وجد.
-    """
     phone_attr_candidates = [
         "phone",
         "mobile",
@@ -159,9 +156,6 @@ def _get_best_phone_for_entity(instance) -> str:
 
 
 def _collect_notification_targets(subscription) -> list[dict]:
-    """
-    تجميع مستهدفي الإشعار بشكل آمن وبدون تكرار.
-    """
     targets: list[dict] = []
     seen_phones: set[str] = set()
     seen_emails: set[str] = set()
@@ -242,9 +236,6 @@ def _collect_notification_targets(subscription) -> list[dict]:
 # ============================================================
 
 def _load_subscription_notification_module():
-    """
-    تحميل مرن لطبقة الاشتراكات/الفوترة الرسمية.
-    """
     candidate_modules = [
         "notification_center.services_billing",
         "notification_center.services_company",
@@ -263,6 +254,7 @@ def _build_renewal_context(*, subscription, invoice, duration, subtotal, vat_amo
     company = getattr(subscription, "company", None)
     owner = getattr(company, "owner", None) if company else None
     plan = getattr(subscription, "plan", None)
+    product = _resolve_subscription_product(subscription)
 
     return {
         "subscription_id": getattr(subscription, "id", None),
@@ -272,6 +264,9 @@ def _build_renewal_context(*, subscription, invoice, duration, subtotal, vat_amo
         "company_phone": _safe_text(getattr(company, "phone", None)),
         "owner_user_id": getattr(owner, "id", None) if owner else None,
         "owner_email": _safe_text(getattr(owner, "email", None)) if owner else "",
+        "product_id": getattr(product, "id", None) if product else None,
+        "product_code": _safe_text(getattr(product, "code", None)) if product else "-",
+        "product_name": _safe_text(getattr(product, "name", None)) if product else "-",
         "plan_id": getattr(plan, "id", None) if plan else None,
         "plan_name": _safe_text(getattr(plan, "name", None)),
         "duration": _safe_text(duration),
@@ -373,64 +368,54 @@ def _dispatch_renewal_notification(*, subscription, invoice, duration, subtotal,
 
 @require_POST
 def renew_subscription(request, subscription_id):
-
-    # ------------------------------------------------
-    # Action Type (future support)
-    # ------------------------------------------------
     action = request.POST.get("action", "RENEWAL")
     duration = request.POST.get("duration", "monthly")
 
     with transaction.atomic():
         subscription = get_object_or_404(
-            CompanySubscription.objects.select_related("company__owner", "plan"),
-            id=subscription_id
+            CompanySubscription.objects.select_related("company__owner", "plan__product", "product"),
+            id=subscription_id,
         )
 
         company = subscription.company
         plan = subscription.plan
+        resolved_product = _resolve_subscription_product(subscription)
 
-        # ------------------------------------------------
-        # Safety Guard
-        # ------------------------------------------------
-        active = CompanySubscription.objects.filter(
+        if not plan:
+            return JsonResponse({"error": "Subscription has no plan"}, status=400)
+
+        if not resolved_product:
+            return JsonResponse({"error": "Subscription is not linked to any product"}, status=400)
+
+        active_same_product = CompanySubscription.objects.filter(
             company=company,
-            status="ACTIVE"
+            product=resolved_product,
+            status="ACTIVE",
         ).exclude(id=subscription.id).exists()
 
-        if active:
+        if active_same_product:
             return JsonResponse({
-                "error": "Company already has active subscription"
+                "error": "Company already has another active subscription for this product",
+                "product": resolved_product.code,
             }, status=400)
 
-        # ------------------------------------------------
-        # Prevent duplicate renewal invoice
-        # ------------------------------------------------
         existing_invoice = Invoice.objects.filter(
             subscription=subscription,
             billing_reason="RENEWAL",
-            status="PENDING"
+            status="PENDING",
         ).first()
 
         if existing_invoice:
             return JsonResponse({
                 "error": "Renewal invoice already exists",
-                "invoice_id": existing_invoice.id
+                "invoice_id": existing_invoice.id,
             }, status=400)
 
-        # ------------------------------------------------
-        # Calculate Price
-        # ------------------------------------------------
-        if duration == "yearly":
-            price = plan.price_yearly
-        else:
-            price = plan.price_monthly
+        price = plan.price_yearly if duration == "yearly" else plan.price_monthly
 
         vat_amount = price * VAT_RATE
         total = price + vat_amount
 
-        # ------------------------------------------------
-        # Create Invoice
-        # ------------------------------------------------
         invoice = Invoice.objects.create(
             company=company,
             subscription=subscription,
@@ -440,11 +425,22 @@ def renew_subscription(request, subscription_id):
             total_amount=total,
             billing_reason=action,
             status="PENDING",
+            subscription_snapshot={
+                "type": "RENEWAL",
+                "subscription_id": subscription.id,
+                "product": {
+                    "id": resolved_product.id,
+                    "code": resolved_product.code,
+                    "name": resolved_product.name,
+                },
+                "plan": {
+                    "id": plan.id,
+                    "name": plan.name,
+                },
+                "duration": duration,
+            },
         )
 
-        # ------------------------------------------------
-        # Notification Center الرسمي فقط بعد نجاح الـ commit
-        # ------------------------------------------------
         transaction.on_commit(
             lambda: _dispatch_renewal_notification(
                 subscription=subscription,
@@ -460,5 +456,6 @@ def renew_subscription(request, subscription_id):
     return JsonResponse({
         "success": True,
         "invoice_id": invoice.id,
-        "invoice_number": invoice.invoice_number
+        "invoice_number": invoice.invoice_number,
+        "product": resolved_product.code,
     })

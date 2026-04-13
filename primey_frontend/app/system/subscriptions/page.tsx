@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Eye,
   CreditCard,
-  AlertTriangle,
   CheckCircle2,
   Clock3,
   XCircle,
@@ -30,9 +29,32 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-// ======================================================
-// Types
-// ======================================================
+/* ======================================================
+   API Helpers
+====================================================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    const value = trimTrailingSlash(envApi)
+    return value.endsWith("/api") ? value : `${value}/api`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${trimTrailingSlash(window.location.origin)}/api`
+  }
+
+  return "/api"
+}
+
+/* ======================================================
+   Types
+====================================================== */
 
 type Locale = "ar" | "en"
 type Direction = "rtl" | "ltr"
@@ -48,9 +70,9 @@ interface Subscription {
   price: number
 }
 
-// ======================================================
-// Locale Helpers
-// ======================================================
+/* ======================================================
+   Locale Helpers
+====================================================== */
 
 const translations = {
   ar: {
@@ -78,7 +100,6 @@ const translations = {
     loading: "جارٍ تحميل الاشتراكات...",
     empty: "لا توجد اشتراكات مطابقة",
     refresh: "تحديث",
-    retry: "إعادة المحاولة",
     fetchSuccess: "تم تحديث الاشتراكات بنجاح",
     fetchError: "تعذر تحميل الاشتراكات",
     statusActive: "نشط",
@@ -114,7 +135,6 @@ const translations = {
     loading: "Loading subscriptions...",
     empty: "No matching subscriptions found",
     refresh: "Refresh",
-    retry: "Retry",
     fetchSuccess: "Subscriptions refreshed successfully",
     fetchError: "Failed to load subscriptions",
     statusActive: "Active",
@@ -161,9 +181,9 @@ function detectDirection(locale: Locale): Direction {
   return locale === "ar" ? "rtl" : "ltr"
 }
 
-// ======================================================
-// Formatting Helpers
-// ======================================================
+/* ======================================================
+   Formatting Helpers
+====================================================== */
 
 function formatNumberEn(value: number): string {
   const safeValue = Number.isFinite(value) ? value : 0
@@ -250,11 +270,13 @@ function SubscriptionStatusBadge({
   )
 }
 
-// ======================================================
-// Page
-// ======================================================
+/* ======================================================
+   Page
+====================================================== */
 
 export default function SystemSubscriptionsPage() {
+  const API = useMemo(() => resolveApiBase(), [])
+
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -265,10 +287,6 @@ export default function SystemSubscriptionsPage() {
 
   const t = translations[locale]
   const isArabic = locale === "ar"
-
-  // ======================================================
-  // Sync Language / Direction
-  // ======================================================
 
   useEffect(() => {
     const syncLanguage = () => {
@@ -303,13 +321,16 @@ export default function SystemSubscriptionsPage() {
     }
   }, [])
 
-  // ======================================================
-  // Fetch Subscriptions
-  // ======================================================
-
   const fetchSubscriptions = async (showSuccessToast = false) => {
+    if (!API) {
+      setSubscriptions([])
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
     try {
-      const res = await fetch("http://localhost:8000/api/system/subscriptions/", {
+      const res = await fetch(`${API}/system/subscriptions/`, {
         credentials: "include",
         headers: {
           Accept: "application/json",
@@ -338,20 +359,12 @@ export default function SystemSubscriptionsPage() {
 
   useEffect(() => {
     void fetchSubscriptions(false)
-  }, [])
-
-  // ======================================================
-  // Actions
-  // ======================================================
+  }, [API])
 
   const handleRefresh = async () => {
     setRefreshing(true)
     await fetchSubscriptions(true)
   }
-
-  // ======================================================
-  // Filters
-  // ======================================================
 
   const filtered = useMemo(() => {
     return subscriptions.filter((sub) => {
@@ -373,10 +386,6 @@ export default function SystemSubscriptionsPage() {
       return true
     })
   }, [subscriptions, search, filter])
-
-  // ======================================================
-  // Stats
-  // ======================================================
 
   const stats = useMemo(() => {
     const total = subscriptions.length
@@ -405,16 +414,8 @@ export default function SystemSubscriptionsPage() {
     { value: "expired", label: t.expired },
   ]
 
-  // ======================================================
-  // UI
-  // ======================================================
-
   return (
     <div dir={direction} className="space-y-6">
-      {/* ===================================== */}
-      {/* Page Header */}
-      {/* ===================================== */}
-
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
@@ -428,7 +429,7 @@ export default function SystemSubscriptionsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            onClick={handleRefresh}
+            onClick={() => void handleRefresh()}
             disabled={refreshing || loading}
             className="gap-2"
           >
@@ -441,10 +442,6 @@ export default function SystemSubscriptionsPage() {
           </Button>
         </div>
       </div>
-
-      {/* ===================================== */}
-      {/* Stats */}
-      {/* ===================================== */}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="border-border/60">
@@ -508,10 +505,6 @@ export default function SystemSubscriptionsPage() {
         </Card>
       </div>
 
-      {/* ===================================== */}
-      {/* Search + Filters */}
-      {/* ===================================== */}
-
       <Card className="border-border/60">
         <CardHeader className="pb-3">
           <CardTitle className="text-base md:text-lg">
@@ -540,12 +533,7 @@ export default function SystemSubscriptionsPage() {
             {t.searchHint}
           </p>
 
-          <div
-            className={[
-              "flex flex-wrap gap-2",
-              isArabic ? "justify-start" : "justify-start",
-            ].join(" ")}
-          >
+          <div className="flex flex-wrap gap-2">
             {filterButtons.map((item) => (
               <Button
                 key={item.value}
@@ -561,10 +549,6 @@ export default function SystemSubscriptionsPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* ===================================== */}
-      {/* Desktop / Tablet Table */}
-      {/* ===================================== */}
 
       <Card className="hidden border-border/60 lg:block">
         <CardHeader>
@@ -659,10 +643,6 @@ export default function SystemSubscriptionsPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* ===================================== */}
-      {/* Mobile / Small Tablet Cards */}
-      {/* ===================================== */}
 
       <div className="grid gap-4 lg:hidden">
         <Card className="border-border/60">

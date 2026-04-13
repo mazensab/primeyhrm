@@ -1,7 +1,13 @@
 # ======================================================
 # 🧩 Job Title API — Company Scope
 # Mham Cloud
-# Version: JT1.7 FINAL (SAFE BIO TIME)
+# Version: JT1.8 FINAL (SAFE BIO TIME + PRODUCT GUARD)
+# ======================================================
+# ✔ List Job Titles
+# ✔ Create Job Title
+# ✔ Update OR Create Job Title
+# ✔ Safe BioTime Integration
+# ✔ HR Product Subscription Guard on Create
 # ======================================================
 
 import json
@@ -10,6 +16,9 @@ from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 
+from billing_center.services.subscription_limits import (
+    get_active_product_subscription,
+)
 from company_manager.models import JobTitle, CompanyUser
 
 
@@ -48,6 +57,30 @@ def _require_company(request):
     return company, None
 
 
+def _check_hr_product_subscription(company):
+    """
+    نتحقق فقط من وجود اشتراك HR نشط قبل إنشاء مسمى وظيفي جديد.
+    لا يوجد حاليًا max_job_titles معتمد، لكن نمنع الإنشاء
+    إذا لم يوجد اشتراك منتج HR أصلًا.
+    """
+    subscription = get_active_product_subscription(company, "HR")
+    if subscription:
+        return subscription, None
+
+    return None, JsonResponse(
+        {
+            "status": "error",
+            "message": "لا يوجد اشتراك HR نشط لهذه الشركة.",
+            "limit": {
+                "resource": "job_titles",
+                "product_code": "HR",
+                "code": "NO_PRODUCT_SUBSCRIPTION",
+            },
+        },
+        status=402,
+    )
+
+
 # ======================================================
 # 📄 List Job Titles
 # ======================================================
@@ -83,11 +116,29 @@ def job_title_create(request):
     if error:
         return error
 
+    subscription, subscription_guard = _check_hr_product_subscription(company)
+    if subscription_guard:
+        return subscription_guard
+
     payload = _parse_body(request)
     name = (payload.get("name") or "").strip()
 
     if not name:
         return HttpResponseBadRequest("Job title name is required")
+
+    existing = (
+        JobTitle.objects
+        .filter(company=company, name=name)
+        .first()
+    )
+    if existing:
+        return JsonResponse(
+            {
+                "status": "error",
+                "message": "اسم المسمى الوظيفي مستخدم مسبقًا.",
+            },
+            status=409,
+        )
 
     jt = JobTitle.objects.create(
         company=company,
@@ -111,6 +162,8 @@ def job_title_create(request):
         "status": "success",
         "id": jt.id,
         "created": True,
+        "product": "HR",
+        "subscription_id": subscription.id if subscription else None,
     })
 
 
@@ -139,6 +192,10 @@ def job_title_update(request, job_title_id):
     # 🆕 Create if not exists (Local DB only)
     # --------------------------------------------------
     if not jt:
+        subscription, subscription_guard = _check_hr_product_subscription(company)
+        if subscription_guard:
+            return subscription_guard
+
         if not name:
             return JsonResponse(
                 {
@@ -146,6 +203,20 @@ def job_title_update(request, job_title_id):
                     "message": "Job title not found and name is required to create",
                 },
                 status=400,
+            )
+
+        existing = (
+            JobTitle.objects
+            .filter(company=company, name=name)
+            .first()
+        )
+        if existing:
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "message": "اسم المسمى الوظيفي مستخدم مسبقًا.",
+                },
+                status=409,
             )
 
         jt = JobTitle.objects.create(
@@ -158,20 +229,39 @@ def job_title_update(request, job_title_id):
             "status": "success",
             "id": jt.id,
             "created": True,
+            "product": "HR",
+            "subscription_id": subscription.id if subscription else None,
         })
 
     # --------------------------------------------------
     # ✏️ Update local fields
     # --------------------------------------------------
     if name is not None:
-        jt.name = name
+        cleaned_name = str(name).strip()
+        if cleaned_name:
+            exists = (
+                JobTitle.objects
+                .filter(company=company, name=cleaned_name)
+                .exclude(id=jt.id)
+                .exists()
+            )
+            if exists:
+                return JsonResponse(
+                    {
+                        "status": "error",
+                        "message": "اسم المسمى الوظيفي مستخدم مسبقًا.",
+                    },
+                    status=409,
+                )
+
+            jt.name = cleaned_name
 
     if isinstance(is_active, bool):
         jt.is_active = is_active
 
     jt.save(update_fields=["name", "is_active"])
 
-        # --------------------------------------------------
+    # --------------------------------------------------
     # 🧠 BioTime SYNC (UPDATE ONLY - SAFE)
     # --------------------------------------------------
     try:
@@ -215,3 +305,9 @@ def job_title_update(request, job_title_id):
         print(
             f"[JobTitle BioTime Update] skipped jt={jt.id}: {e}"
         )
+
+    return JsonResponse({
+        "status": "success",
+        "id": jt.id,
+        "created": False,
+    })

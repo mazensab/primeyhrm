@@ -33,7 +33,27 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+/* ======================================================
+   API Helpers
+====================================================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    return trimTrailingSlash(envApi)
+  }
+
+  if (typeof window !== "undefined") {
+    return trimTrailingSlash(window.location.origin)
+  }
+
+  return ""
+}
 
 type Locale = "ar" | "en"
 type Direction = "rtl" | "ltr"
@@ -279,6 +299,8 @@ function InvoiceStatusPill({
 }
 
 export default function InvoicesPage() {
+  const API = useMemo(() => resolveApiBase(), [])
+
   const [locale, setLocale] = useState<Locale>("en")
   const [direction, setDirection] = useState<Direction>("ltr")
 
@@ -293,9 +315,6 @@ export default function InvoicesPage() {
   const t = translations[locale]
   const isArabic = locale === "ar"
 
-  /* ===============================
-     LOCALE / DIRECTION
-  =============================== */
   useEffect(() => {
     const syncLocale = () => {
       const nextLocale = getDocumentLocale()
@@ -328,11 +347,13 @@ export default function InvoicesPage() {
     }
   }, [])
 
-  /* ===============================
-     LOAD INVOICES
-  =============================== */
   useEffect(() => {
     async function loadInvoices() {
+      if (!API) {
+        setLoading(false)
+        return
+      }
+
       try {
         const res = await fetch(`${API}/api/system/invoices/`, {
           credentials: "include",
@@ -355,12 +376,9 @@ export default function InvoicesPage() {
       }
     }
 
-    loadInvoices()
-  }, [])
+    void loadInvoices()
+  }, [API])
 
-  /* ===============================
-     FILTER OPTIONS
-  =============================== */
   const invoiceStatuses = useMemo(() => {
     return Array.from(
       new Set(
@@ -371,9 +389,6 @@ export default function InvoicesPage() {
     )
   }, [invoices])
 
-  /* ===============================
-     FILTER
-  =============================== */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
 
@@ -400,9 +415,6 @@ export default function InvoicesPage() {
     })
   }, [invoices, search, statusFilter, dateFrom, dateTo])
 
-  /* ===============================
-     ACTIONS
-  =============================== */
   function handlePrint() {
     try {
       window.print()
@@ -448,9 +460,6 @@ export default function InvoicesPage() {
     toast.success(t.resetSuccess)
   }
 
-  /* ===============================
-     UI
-  =============================== */
   return (
     <>
       <style jsx global>{`

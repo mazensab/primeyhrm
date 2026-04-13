@@ -1,13 +1,14 @@
 # ======================================================
 # 🏢 Department API — Company Scope
 # Mham Cloud
-# Version: D2.6 FINAL (UPSERT + BIOTIME SYNC ✅)
+# Version: D2.7 FINAL (UPSERT + BIOTIME SYNC + LIMIT SAFE ✅)
 # ======================================================
 # ✔ Create OR Update (Upsert Safe)
 # ✔ Biotime auto sync on save
 # ✔ CSRF exempt for internal POST APIs
 # ✔ Session Auth preserved
 # ✔ No behavioral regression
+# ✔ Product-aware limit guard ready
 # ======================================================
 
 import json
@@ -18,6 +19,9 @@ from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 
+from billing_center.services.subscription_limits import (
+    get_active_product_subscription,
+)
 from company_manager.models import CompanyDepartment, CompanyUser
 from biotime_center.sync_service import create_or_sync_department
 
@@ -72,6 +76,30 @@ def _require_company(request):
     return company, None
 
 
+def _check_hr_product_subscription(company):
+    """
+    نتحقق فقط من وجود اشتراك HR نشط قبل إنشاء قسم جديد.
+    لا يوجد حاليًا max_departments معتمد، لكن نمنع الإنشاء
+    إذا لم يوجد اشتراك منتج HR أصلًا.
+    """
+    subscription = get_active_product_subscription(company, "HR")
+    if subscription:
+        return subscription, None
+
+    return None, JsonResponse(
+        {
+            "status": "error",
+            "message": "لا يوجد اشتراك HR نشط لهذه الشركة.",
+            "limit": {
+                "resource": "departments",
+                "product_code": "HR",
+                "code": "NO_PRODUCT_SUBSCRIPTION",
+            },
+        },
+        status=402,
+    )
+
+
 # ======================================================
 # 📄 List Departments (READ)
 # ======================================================
@@ -113,8 +141,12 @@ def department_create(request):
     if guard:
         return guard
 
+    subscription, subscription_guard = _check_hr_product_subscription(company)
+    if subscription_guard:
+        return subscription_guard
+
     payload = _parse_body(request)
-    name = payload.get("name")
+    name = (payload.get("name") or "").strip()
 
     if not name:
         return HttpResponseBadRequest("Department name is required")
@@ -140,6 +172,8 @@ def department_create(request):
         "status": "success",
         "id": dep.id,
         "created": created,
+        "product": "HR",
+        "subscription_id": subscription.id if subscription else None,
     })
 
 

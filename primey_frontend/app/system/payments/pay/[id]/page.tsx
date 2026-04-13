@@ -1,7 +1,7 @@
 "use client"
 
 import Image from "next/image"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import QRCode from "react-qr-code"
 
@@ -12,6 +12,29 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+
+/* ======================================================
+   API Helpers
+====================================================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    const value = trimTrailingSlash(envApi)
+    return value.endsWith("/api") ? value : `${value}/api`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${trimTrailingSlash(window.location.origin)}/api`
+  }
+
+  return "/api"
+}
 
 interface PaymentDetail {
   id: number
@@ -35,6 +58,7 @@ interface PaymentDetail {
 }
 
 export default function PaymentDetailsPage() {
+  const API = useMemo(() => resolveApiBase(), [])
   const params = useParams()
   const paymentId = Array.isArray(params.id) ? params.id[0] : params.id
 
@@ -43,10 +67,19 @@ export default function PaymentDetailsPage() {
 
   useEffect(() => {
     async function fetchPayment() {
+      if (!API || !paymentId) {
+        setLoading(false)
+        setPayment(null)
+        return
+      }
+
       try {
         const res = await fetch(
-          `http://localhost:8000/api/system/payments/${paymentId}/`,
-          { credentials: "include" }
+          `${API}/system/payments/${paymentId}/`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          }
         )
 
         if (!res.ok) {
@@ -64,12 +97,8 @@ export default function PaymentDetailsPage() {
       }
     }
 
-    if (paymentId) {
-      fetchPayment()
-    } else {
-      setLoading(false)
-    }
-  }, [paymentId])
+    void fetchPayment()
+  }, [API, paymentId])
 
   if (loading) {
     return <div className="p-6">Loading receipt...</div>
@@ -81,10 +110,6 @@ export default function PaymentDetailsPage() {
 
   return (
     <div className="receipt-area mx-auto max-w-3xl space-y-8">
-      {/* =========================
-      LOGO CENTER
-      ========================= */}
-
       <div className="flex justify-center">
         <Image
           src="/logo/primey.svg"
@@ -105,10 +130,6 @@ export default function PaymentDetailsPage() {
           Receipt #{payment.id}
         </p>
       </div>
-
-      {/* =========================
-      Receipt Body
-      ========================= */}
 
       <Card>
         <CardContent className="space-y-6 p-8">
@@ -198,10 +219,6 @@ export default function PaymentDetailsPage() {
         </CardContent>
       </Card>
 
-      {/* =========================
-      QR Code
-      ========================= */}
-
       <div className="flex justify-center">
         <QRCode
           value={`Invoice:${payment.invoice?.number || "-"}|Amount:${payment.amount}|Payment:${payment.id}`}
@@ -209,19 +226,11 @@ export default function PaymentDetailsPage() {
         />
       </div>
 
-      {/* =========================
-      Actions
-      ========================= */}
-
       <div className="no-print flex justify-center gap-3">
         <Button onClick={() => window.print()}>
           Print Receipt
         </Button>
       </div>
-
-      {/* =========================
-      Print Style
-      ========================= */}
 
       <style jsx global>{`
         .logo-large {

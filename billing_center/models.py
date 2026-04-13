@@ -1,20 +1,67 @@
 # =====================================================================
-# 📦 Billing Center — Models V10.1 Ultra Stable (PUBLIC FLOW PATCHED 🔒)
+# 📦 Billing Center — Models V11.0 Product-Aware Foundation
 # Mham Cloud — Subscription + Invoicing + Unified Payments
 # =====================================================================
 
-from django.db import models
-from django.utils import timezone
-from django.conf import settings
 from decimal import Decimal
 
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+
 from company_manager.models import Company
+
+
+# =====================================================================
+# 🧩 0) Product
+# =====================================================================
+class Product(models.Model):
+    """
+    المنتج الرئيسي داخل المنصة
+    أمثلة:
+    - HR
+    - ACCOUNTING
+    - SALES
+    """
+
+    name = models.CharField(max_length=255, unique=True)
+    code = models.CharField(max_length=100, unique=True, db_index=True)
+    description = models.TextField(blank=True, null=True)
+
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+        verbose_name = "Product"
+        verbose_name_plural = "Products"
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
 
 
 # =====================================================================
 # 💳 1) SubscriptionPlan
 # =====================================================================
 class SubscriptionPlan(models.Model):
+    """
+    الباقة التجارية.
+    في المرحلة الانتقالية:
+    - product قابل لأن يكون فارغًا مؤقتًا حتى تكتمل الـ migrations
+    - apps تبقى كما هي للحفاظ على التوافق مع النظام الحالي
+    """
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="plans",
+    )
+
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
 
@@ -31,7 +78,15 @@ class SubscriptionPlan(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["product", "is_active"]),
+        ]
+
     def __str__(self):
+        if self.product_id:
+            return f"{self.product.code} — {self.name}"
         return self.name
 
 
@@ -39,7 +94,6 @@ class SubscriptionPlan(models.Model):
 # 💸 2) Discount
 # =====================================================================
 class Discount(models.Model):
-
     DISCOUNT_TYPES = [
         ("percentage", "نسبة مئوية"),
         ("fixed", "قيمة ثابتة"),
@@ -63,6 +117,9 @@ class Discount(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["-created_at"]
+
     def __str__(self):
         return self.code
 
@@ -71,6 +128,12 @@ class Discount(models.Model):
 # 🧾 3) CompanySubscription
 # =====================================================================
 class CompanySubscription(models.Model):
+    """
+    اشتراك الشركة.
+    في البنية الجديدة:
+    - نفس الشركة يمكن أن تملك عدة اشتراكات
+    - لكن اشتراك ACTIVE واحد فقط لكل company + product
+    """
 
     STATUS_CHOICES = [
         ("ACTIVE", "نشط"),
@@ -82,13 +145,23 @@ class CompanySubscription(models.Model):
     company = models.ForeignKey(
         Company,
         on_delete=models.CASCADE,
-        related_name="subscriptions"
+        related_name="subscriptions",
+    )
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="company_subscriptions",
     )
 
     plan = models.ForeignKey(
         SubscriptionPlan,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
+        related_name="company_subscriptions",
     )
 
     start_date = models.DateField(default=timezone.now)
@@ -108,31 +181,60 @@ class CompanySubscription(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # ------------------------------------------------
-    # Database Safety Constraint
-    # يمنع وجود أكثر من اشتراك ACTIVE لنفس الشركة
-    # ------------------------------------------------
     class Meta:
+        ordering = ["-created_at", "-id"]
         constraints = [
+            # ------------------------------------------------
+            # Database Safety Constraint (NEW)
+            # يمنع وجود أكثر من اشتراك ACTIVE لنفس الشركة
+            # ولنفس المنتج في نفس الوقت
+            # ------------------------------------------------
             models.UniqueConstraint(
-                fields=["company"],
+                fields=["company", "product"],
                 condition=models.Q(status="ACTIVE"),
-                name="unique_active_subscription_per_company",
+                name="unique_active_subscription_per_company_product",
             )
         ]
+        indexes = [
+            models.Index(fields=["company", "product", "status"]),
+            models.Index(fields=["company", "status"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        """
+        مزامنة المنتج تلقائيًا من الخطة أثناء المرحلة الانتقالية
+        لتقليل احتمالات البيانات الناقصة.
+        """
+        if self.plan_id and not self.product_id and getattr(self.plan, "product_id", None):
+            self.product = self.plan.product
+        super().save(*args, **kwargs)
+
+    @property
+    def resolved_product(self):
+        """
+        إرجاع المنتج بشكل آمن:
+        - product المباشر أولًا
+        - ثم plan.product كـ fallback
+        """
+        if self.product_id:
+            return self.product
+        if self.plan_id and getattr(self.plan, "product_id", None):
+            return self.plan.product
+        return None
 
     def is_active(self):
         return self.status == "ACTIVE"
 
     def __str__(self):
-        return self.company.name
+        company_name = getattr(self.company, "name", "-")
+        product_code = getattr(self.resolved_product, "code", "NO_PRODUCT")
+        return f"{company_name} — {product_code}"
 
 
 # =====================================================================
 # 🧾 4) Invoice
 # =====================================================================
 class Invoice(models.Model):
-
     STATUS_CHOICES = [
         ("PENDING", "قيد الانتظار"),
         ("PAID", "مدفوعة"),
@@ -162,7 +264,10 @@ class Invoice(models.Model):
     # Legacy / Existing billing fields
     # -----------------------------------------------------------------
     subtotal_amount = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
     )
 
     discount_code = models.CharField(max_length=50, null=True, blank=True)
@@ -173,19 +278,26 @@ class Invoice(models.Model):
         blank=True,
     )
     discount_value = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
     )
     discount_amount = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0
+        max_digits=10,
+        decimal_places=2,
+        default=0,
     )
 
     total_after_discount = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
     )
 
     # -----------------------------------------------------------------
     # New fields required by onboarding/payment flow
-    # confirm_payment.py currently writes subtotal + vat مباشرة
     # -----------------------------------------------------------------
     subtotal = models.DecimalField(
         max_digits=10,
@@ -211,7 +323,7 @@ class Invoice(models.Model):
     )
 
     # ------------------------------------------------
-    # Billing Reason (سبب الفاتورة)
+    # Billing Reason
     # ------------------------------------------------
     BILLING_REASONS = [
         ("NEW_SUBSCRIPTION", "اشتراك جديد"),
@@ -233,6 +345,14 @@ class Invoice(models.Model):
     pdf_file = models.FileField(upload_to="invoices/", null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["-issue_date", "-id"]
+        indexes = [
+            models.Index(fields=["company", "status"]),
+            models.Index(fields=["invoice_number"]),
+            models.Index(fields=["billing_reason"]),
+        ]
+
     def approve(self):
         if not self.is_approved:
             self.is_approved = True
@@ -247,7 +367,6 @@ class Invoice(models.Model):
 # 💰 5) Payment
 # =====================================================================
 class Payment(models.Model):
-
     PAYMENT_METHODS = [
         ("BANK_TRANSFER", "حوالة"),
         ("CREDIT_CARD", "بطاقة"),
@@ -277,6 +396,9 @@ class Payment(models.Model):
         blank=True,
     )
 
+    class Meta:
+        ordering = ["-paid_at", "-id"]
+
     def __str__(self):
         return f"{self.amount} — {self.method}"
 
@@ -285,7 +407,6 @@ class Payment(models.Model):
 # 💳 6) PaymentTransaction
 # =====================================================================
 class PaymentTransaction(models.Model):
-
     STATUS_CHOICES = [
         ("pending", "بانتظار"),
         ("success", "ناجحة"),
@@ -344,6 +465,14 @@ class PaymentTransaction(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["company", "status"]),
+            models.Index(fields=["invoice", "status"]),
+            models.Index(fields=["transaction_id"]),
+        ]
+
     def mark_success(self):
         self.status = "success"
         self.processed_at = timezone.now()
@@ -362,7 +491,6 @@ class PaymentTransaction(models.Model):
 # 🧾 7) CompanyOnboardingTransaction — Draft Only
 # =====================================================================
 class CompanyOnboardingTransaction(models.Model):
-
     STATUS_CHOICES = [
         ("DRAFT", "Draft"),
         ("CONFIRMED", "Confirmed"),
@@ -371,11 +499,6 @@ class CompanyOnboardingTransaction(models.Model):
         ("CANCELLED", "ملغاة"),
     ]
 
-    # -----------------------------------------------------------------
-    # مهم جدًا:
-    # owner أصبح اختياريًا لدعم Public Registration Flow
-    # لأن التسجيل الخارجي قد يتم بدون مستخدم Logged-In
-    # -----------------------------------------------------------------
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -397,14 +520,13 @@ class CompanyOnboardingTransaction(models.Model):
     national_address = models.JSONField(default=dict, blank=True)
 
     # -------------------------------
-    # 👤 Admin Snapshot (PATCHED ✅)
+    # 👤 Admin Snapshot
     # -------------------------------
     admin_username = models.CharField(
         max_length=150,
         db_index=True,
         help_text="Username الحقيقي للمسؤول",
     )
-
     admin_name = models.CharField(max_length=255)
     admin_email = models.EmailField()
     admin_password = models.CharField(max_length=255)
@@ -454,6 +576,15 @@ class CompanyOnboardingTransaction(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    @property
+    def resolved_product(self):
+        if self.plan_id and getattr(self.plan, "product_id", None):
+            return self.plan.product
+        return None
+
     def __str__(self):
         return f"Onboarding #{self.id} — {self.company_name}"
 
@@ -462,7 +593,6 @@ class CompanyOnboardingTransaction(models.Model):
 # 👤 8) AccountSubscription
 # =====================================================================
 class AccountSubscription(models.Model):
-
     STATUS_CHOICES = [
         ("ACTIVE", "نشط"),
         ("EXPIRED", "منتهي"),
@@ -493,6 +623,18 @@ class AccountSubscription(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["owner", "status"]),
+        ]
+
+    @property
+    def resolved_product(self):
+        if self.plan_id and getattr(self.plan, "product_id", None):
+            return self.plan.product
+        return None
 
     def is_active(self):
         return self.status == "ACTIVE"

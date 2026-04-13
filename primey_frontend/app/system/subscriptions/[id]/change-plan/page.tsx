@@ -24,7 +24,27 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+/* ======================================================
+   API Helpers
+====================================================== */
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "")
+}
+
+function resolveApiBase() {
+  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim()
+
+  if (envApi) {
+    return trimTrailingSlash(envApi)
+  }
+
+  if (typeof window !== "undefined") {
+    return trimTrailingSlash(window.location.origin)
+  }
+
+  return ""
+}
 
 interface Plan {
   id: number
@@ -59,9 +79,10 @@ interface Preview {
 }
 
 export default function ChangePlanPage() {
+  const API_BASE = useMemo(() => resolveApiBase(), [])
   const params = useParams()
   const router = useRouter()
-  const id = params?.id
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id
 
   const [plans, setPlans] = useState<Plan[]>([])
   const [subscription, setSubscription] = useState<Subscription | null>(null)
@@ -91,6 +112,7 @@ export default function ChangePlanPage() {
     return Number(value || 0).toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
+      useGrouping: false,
     })
   }
 
@@ -126,6 +148,12 @@ export default function ChangePlanPage() {
   }
 
   async function fetchData(silent = false) {
+    if (!API_BASE || !id) {
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
     try {
       if (silent) {
         setRefreshing(true)
@@ -179,9 +207,11 @@ export default function ChangePlanPage() {
     if (id) {
       void fetchData()
     }
-  }, [id])
+  }, [API_BASE, id])
 
   async function previewChange(planId: number) {
+    if (!API_BASE || !id) return
+
     try {
       setPreviewLoading(true)
 
@@ -221,6 +251,11 @@ export default function ChangePlanPage() {
   async function confirmChange() {
     if (!selectedPlan) {
       toast.error("اختر باقة أولًا")
+      return
+    }
+
+    if (!API_BASE || !id) {
+      toast.error("تعذر الوصول إلى الخادم")
       return
     }
 
@@ -545,7 +580,7 @@ export default function ChangePlanPage() {
               <Button
                 type="button"
                 className="rounded-2xl"
-                onClick={confirmChange}
+                onClick={() => void confirmChange()}
                 disabled={confirmLoading || !selectedPlan}
               >
                 {confirmLoading ? (
