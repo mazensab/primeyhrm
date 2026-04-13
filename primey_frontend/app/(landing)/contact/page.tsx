@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Clock, Mail, Phone, SendHorizonal, ShieldCheck } from "lucide-react";
+import {
+  Building2,
+  Clock,
+  Mail,
+  Phone,
+  SendHorizonal,
+  ShieldCheck,
+} from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -28,7 +35,24 @@ import { Textarea } from "@/components/ui/textarea";
 import SectionContainer from "@/components/layout/section-container";
 import SectionHeader from "@/components/layout/section-header";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+/* =========================================================
+   🌐 API Helpers
+========================================================= */
+const ENV_API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "";
+
+function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (ENV_API_BASE) {
+    return `${ENV_API_BASE}${normalizedPath}`;
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${normalizedPath}`;
+  }
+
+  return normalizedPath;
+}
 
 const SUBJECT_OPTIONS = [
   "Sales Inquiry",
@@ -81,7 +105,7 @@ function ContactPageContent() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${API_BASE}/api/public/contact/`, {
+      const response = await fetch(buildApiUrl("/api/public/contact/"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -115,6 +139,7 @@ function ContactPageContent() {
         error instanceof Error
           ? error.message
           : "Something went wrong while sending your message.";
+
       toast.error(message);
     } finally {
       setIsSubmitting(false);
@@ -131,7 +156,7 @@ function ContactPageContent() {
 
       <section className="mx-auto grid max-w-7xl grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="flex flex-col gap-6">
-          <Card className="border-border/60 bg-background/80 backdrop-blur-sm shadow-sm">
+          <Card className="border-border/60 bg-background/80 shadow-sm backdrop-blur-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-xl">
                 <ShieldCheck className="h-5 w-5" />
@@ -181,7 +206,7 @@ function ContactPageContent() {
           </Card>
         </div>
 
-        <Card className="border-border/60 bg-background/80 backdrop-blur-sm shadow-sm">
+        <Card className="border-border/60 bg-background/80 shadow-sm backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
               <SendHorizonal className="h-5 w-5" />
@@ -191,14 +216,19 @@ function ContactPageContent() {
 
           <CardContent>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6">
+              <form
+                onSubmit={form.handleSubmit(onSubmit)}
+                className="grid gap-6"
+              >
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                   <FormField
                     control={form.control}
                     name="firstName"
                     render={({ field, fieldState }) => (
                       <FormItem>
-                        <FormLabel className="font-semibold">First Name</FormLabel>
+                        <FormLabel className="font-semibold">
+                          First Name
+                        </FormLabel>
                         <FormControl>
                           <Input placeholder="Mazen" {...field} />
                         </FormControl>
@@ -216,7 +246,9 @@ function ContactPageContent() {
                     name="lastName"
                     render={({ field, fieldState }) => (
                       <FormItem>
-                        <FormLabel className="font-semibold">Last Name</FormLabel>
+                        <FormLabel className="font-semibold">
+                          Last Name
+                        </FormLabel>
                         <FormControl>
                           <Input placeholder="Al..." {...field} />
                         </FormControl>
@@ -237,7 +269,11 @@ function ContactPageContent() {
                     <FormItem>
                       <FormLabel className="font-semibold">Email</FormLabel>
                       <FormControl>
-                        <Input type="email" placeholder="name@company.com" {...field} />
+                        <Input
+                          type="email"
+                          placeholder="name@company.com"
+                          {...field}
+                        />
                       </FormControl>
                       {fieldState.error && (
                         <p className="text-sm text-destructive">
@@ -262,14 +298,24 @@ function ContactPageContent() {
                         </FormControl>
 
                         <SelectContent>
-                          <SelectItem value="Sales Inquiry">Sales Inquiry</SelectItem>
-                          <SelectItem value="Demo Request">Demo Request</SelectItem>
-                          <SelectItem value="Technical Support">Technical Support</SelectItem>
+                          <SelectItem value="Sales Inquiry">
+                            Sales Inquiry
+                          </SelectItem>
+                          <SelectItem value="Demo Request">
+                            Demo Request
+                          </SelectItem>
+                          <SelectItem value="Technical Support">
+                            Technical Support
+                          </SelectItem>
                           <SelectItem value="Billing & Subscription">
                             Billing & Subscription
                           </SelectItem>
-                          <SelectItem value="Partnership">Partnership</SelectItem>
-                          <SelectItem value="General Inquiry">General Inquiry</SelectItem>
+                          <SelectItem value="Partnership">
+                            Partnership
+                          </SelectItem>
+                          <SelectItem value="General Inquiry">
+                            General Inquiry
+                          </SelectItem>
                         </SelectContent>
                       </Select>
 
@@ -305,7 +351,12 @@ function ContactPageContent() {
                   )}
                 />
 
-                <Button size="lg" type="submit" disabled={isSubmitting} className="w-full md:w-auto">
+                <Button
+                  size="lg"
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full md:w-auto"
+                >
                   {isSubmitting ? "Sending..." : "Send Message"}
                 </Button>
               </form>

@@ -31,7 +31,24 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 
-const API = process.env.NEXT_PUBLIC_API_URL
+/* =========================================================
+   🌐 API Helpers
+========================================================= */
+const ENV_API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? ""
+
+function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+
+  if (ENV_API_BASE) {
+    return `${ENV_API_BASE}${normalizedPath}`
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${normalizedPath}`
+  }
+
+  return normalizedPath
+}
 
 /* =========================================================
    🧩 Types
@@ -110,13 +127,6 @@ export default function LandingPricingPage() {
   const [error, setError] = useState("")
   const [billingMode, setBillingMode] = useState<BillingMode>("monthly")
 
-  /* -----------------------------------------------------
-     📡 Fetch Active Plans From Real System
-     ✅ Project standard:
-     NEXT_PUBLIC_API_URL=http://localhost:8000
-     Final endpoint:
-     /api/system/plans/
-  ----------------------------------------------------- */
   useEffect(() => {
     let isMounted = true
 
@@ -125,11 +135,7 @@ export default function LandingPricingPage() {
         setLoading(true)
         setError("")
 
-        if (!API) {
-          throw new Error("NEXT_PUBLIC_API_URL is not configured")
-        }
-
-        const res = await fetch(`${API}/api/system/plans/`, {
+        const res = await fetch(buildApiUrl("/api/system/plans/"), {
           method: "GET",
           headers: {
             Accept: "application/json",
@@ -183,9 +189,6 @@ export default function LandingPricingPage() {
     }
   }, [])
 
-  /* -----------------------------------------------------
-     ⭐ Sort Plans
-  ----------------------------------------------------- */
   const sortedPlans = useMemo(() => {
     return [...plans].sort((a, b) => {
       const aPrice =
@@ -213,7 +216,6 @@ export default function LandingPricingPage() {
 
   return (
     <main className="relative min-h-screen bg-background">
-      {/* خلفية ناعمة */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute left-1/2 top-0 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
         <div className="absolute bottom-0 left-0 h-[280px] w-[280px] rounded-full bg-emerald-500/10 blur-3xl" />
@@ -221,7 +223,6 @@ export default function LandingPricingPage() {
       </div>
 
       <section className="relative container mx-auto px-4 py-16 md:px-6 md:py-24">
-        {/* الهيدر */}
         <div className="mx-auto mb-12 max-w-3xl text-center">
           <Badge className="mb-4 rounded-full px-4 py-1.5 text-sm">
             Pricing Plans
@@ -237,7 +238,6 @@ export default function LandingPricingPage() {
           </p>
         </div>
 
-        {/* تبديل الفوترة */}
         <div className="mb-10 flex justify-center">
           <div className="inline-flex rounded-2xl border bg-background/80 p-1 shadow-sm backdrop-blur">
             <button
@@ -268,7 +268,6 @@ export default function LandingPricingPage() {
           </div>
         </div>
 
-        {/* Loading */}
         {loading && (
           <div className="flex min-h-[280px] items-center justify-center">
             <div className="flex items-center gap-3 rounded-2xl border bg-background/80 px-6 py-4 shadow-sm backdrop-blur">
@@ -278,7 +277,6 @@ export default function LandingPricingPage() {
           </div>
         )}
 
-        {/* Error */}
         {!loading && error && (
           <Card className="mx-auto max-w-2xl rounded-3xl border-destructive/20">
             <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
@@ -289,7 +287,6 @@ export default function LandingPricingPage() {
           </Card>
         )}
 
-        {/* Empty State */}
         {!loading && !error && sortedPlans.length === 0 && (
           <Card className="mx-auto max-w-2xl rounded-3xl">
             <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
@@ -302,7 +299,6 @@ export default function LandingPricingPage() {
           </Card>
         )}
 
-        {/* Plans Grid */}
         {!loading && !error && sortedPlans.length > 0 && (
           <div className="grid gap-6 lg:grid-cols-3">
             {sortedPlans.map((plan) => {
@@ -374,7 +370,6 @@ export default function LandingPricingPage() {
                   </CardHeader>
 
                   <CardContent className="space-y-6">
-                    {/* Stats */}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="rounded-2xl border bg-muted/40 p-4">
                         <div className="mb-2 flex items-center gap-2 text-muted-foreground">
@@ -401,7 +396,6 @@ export default function LandingPricingPage() {
                       </div>
                     </div>
 
-                    {/* Apps */}
                     <div>
                       <div className="mb-3 flex items-center gap-2">
                         <LayoutGrid className="h-4 w-4 text-primary" />
@@ -433,16 +427,13 @@ export default function LandingPricingPage() {
                       </div>
                     </div>
 
-                    {/* CTA */}
                     <div className="pt-2">
                       <Button
                         asChild
                         className="h-11 w-full rounded-2xl text-sm font-semibold"
                         variant={isPopular ? "default" : "outline"}
                       >
-                        <Link href="/register">
-                          Get Started
-                        </Link>
+                        <Link href="/register">Get Started</Link>
                       </Button>
                     </div>
                   </CardContent>

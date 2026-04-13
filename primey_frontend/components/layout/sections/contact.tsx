@@ -11,7 +11,7 @@ import {
   FormControl,
   FormField,
   FormItem,
-  FormLabel
+  FormLabel,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import SectionContainer from "@/components/layout/section-container";
@@ -28,7 +28,24 @@ import SectionHeader from "@/components/layout/section-header";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+/* =========================================================
+   🌐 API Helpers
+========================================================= */
+const ENV_API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "";
+
+function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (ENV_API_BASE) {
+    return `${ENV_API_BASE}${normalizedPath}`;
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${normalizedPath}`;
+  }
+
+  return normalizedPath;
+}
 
 const SUBJECT_OPTIONS = [
   "Sales Inquiry",
@@ -36,7 +53,7 @@ const SUBJECT_OPTIONS = [
   "Technical Support",
   "Billing & Subscription",
   "Partnership",
-  "General Inquiry"
+  "General Inquiry",
 ] as const;
 
 type AppLang = "ar" | "en";
@@ -104,17 +121,18 @@ const content: Record<AppLang, ContactContent> = {
       subTitle: "تواصل معنا",
       title: "ابقَ على اتصال معنا",
       description:
-        "ابقَ على تواصل معنا للحصول على التحديثات، الدعم، والرؤى المفيدة. نحن هنا لمساعدتك في كل خطوة."
+        "ابقَ على تواصل معنا للحصول على التحديثات، الدعم، والرؤى المفيدة. نحن هنا لمساعدتك في كل خطوة.",
     },
     contactInfo: {
       locationLabel: "الموقع:",
-      locationValue: "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz,  42316",
+      locationValue:
+        "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz, 42316",
       phoneLabel: "اتصل بنا:",
       phoneValue: "00966 (50) 526-3775",
       emailLabel: "راسلنا:",
       emailValue: "info@mhamcloud.sa",
       businessHoursLabel: "ساعات العمل:",
-      businessHoursValue: "من الثلاثاء إلى السبت، 9 صباحًا - 5 مساءً"
+      businessHoursValue: "من الثلاثاء إلى السبت، 9 صباحًا - 5 مساءً",
     },
     form: {
       cardTitle: "إرسال رسالة",
@@ -129,7 +147,7 @@ const content: Record<AppLang, ContactContent> = {
       subjectPlaceholder: "اختر الموضوع",
       messagePlaceholder: "اكتب رسالتك هنا...",
       submit: "إرسال الرسالة",
-      submitting: "جارٍ الإرسال..."
+      submitting: "جارٍ الإرسال...",
     },
     validation: {
       firstNameRequired: "الاسم الأول مطلوب",
@@ -138,12 +156,12 @@ const content: Record<AppLang, ContactContent> = {
       invalidEmail: "البريد الإلكتروني غير صالح",
       selectSubject: "يرجى اختيار الموضوع",
       messageTooShort: "الرسالة قصيرة جدًا",
-      messageTooLong: "الرسالة طويلة جدًا"
+      messageTooLong: "الرسالة طويلة جدًا",
     },
     toast: {
       success: "تم إرسال رسالتك بنجاح.",
       errorDefault: "حدث خطأ أثناء إرسال رسالتك.",
-      sendFailed: "تعذر إرسال الرسالة"
+      sendFailed: "تعذر إرسال الرسالة",
     },
     subjects: {
       "Sales Inquiry": "استفسار مبيعات",
@@ -151,25 +169,26 @@ const content: Record<AppLang, ContactContent> = {
       "Technical Support": "الدعم الفني",
       "Billing & Subscription": "الفوترة والاشتراك",
       Partnership: "شراكة",
-      "General Inquiry": "استفسار عام"
-    }
+      "General Inquiry": "استفسار عام",
+    },
   },
   en: {
     section: {
       subTitle: "Contact",
       title: "Get Connect With Us access",
       description:
-        "Stay in touch with us for updates, support, and valuable insights. We’re here to help you every step of the way!"
+        "Stay in touch with us for updates, support, and valuable insights. We’re here to help you every step of the way!",
     },
     contactInfo: {
       locationLabel: "Location:",
-      locationValue: "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz,  42316",
+      locationValue:
+        "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz, 42316",
       phoneLabel: "Call us:",
       phoneValue: "+9 (665) 526-3775",
       emailLabel: "Email us:",
       emailValue: "info@mhamcloud.sa",
       businessHoursLabel: "Business Hours:",
-      businessHoursValue: "Saturday to Thursday, 9 AM - 5 PM"
+      businessHoursValue: "Saturday to Thursday, 9 AM - 5 PM",
     },
     form: {
       cardTitle: "Send Message",
@@ -180,11 +199,11 @@ const content: Record<AppLang, ContactContent> = {
       message: "Message",
       firstNamePlaceholder: "Leopoldo",
       lastNamePlaceholder: "Miranda",
-      emailPlaceholder: "contact@bundui.com",
+      emailPlaceholder: "contact@mhamcloud.com",
       subjectPlaceholder: "Select a subject",
       messagePlaceholder: "Your message...",
       submit: "Send message",
-      submitting: "Sending..."
+      submitting: "Sending...",
     },
     validation: {
       firstNameRequired: "First name is required",
@@ -193,12 +212,12 @@ const content: Record<AppLang, ContactContent> = {
       invalidEmail: "Invalid email address",
       selectSubject: "Please select a subject",
       messageTooShort: "Message is too short",
-      messageTooLong: "Message is too long"
+      messageTooLong: "Message is too long",
     },
     toast: {
       success: "Message sent successfully.",
       errorDefault: "Something went wrong while sending your message.",
-      sendFailed: "Failed to send message"
+      sendFailed: "Failed to send message",
     },
     subjects: {
       "Sales Inquiry": "Sales Inquiry",
@@ -206,9 +225,9 @@ const content: Record<AppLang, ContactContent> = {
       "Technical Support": "Technical Support",
       "Billing & Subscription": "Billing & Subscription",
       Partnership: "Partnership",
-      "General Inquiry": "General Inquiry"
-    }
-  }
+      "General Inquiry": "General Inquiry",
+    },
+  },
 };
 
 function getCookie(name: string): string | null {
@@ -243,13 +262,13 @@ function createFormSchema(t: ContactContent) {
       .max(50, t.validation.tooLong),
     email: z.string().trim().email(t.validation.invalidEmail),
     subject: z.enum(SUBJECT_OPTIONS, {
-      errorMap: () => ({ message: t.validation.selectSubject })
+      errorMap: () => ({ message: t.validation.selectSubject }),
     }),
     message: z
       .string()
       .trim()
       .min(2, t.validation.messageTooShort)
-      .max(2000, t.validation.messageTooLong)
+      .max(2000, t.validation.messageTooLong),
   });
 }
 
@@ -271,7 +290,7 @@ export const ContactSection = () => {
 
       observer.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ["lang", "dir"]
+        attributeFilter: ["lang", "dir"],
       });
 
       return () => observer.disconnect();
@@ -291,8 +310,8 @@ export const ContactSection = () => {
       lastName: "",
       email: "",
       subject: undefined,
-      message: ""
-    }
+      message: "",
+    },
   });
 
   useEffect(() => {
@@ -304,19 +323,19 @@ export const ContactSection = () => {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${API}/api/public/contact/`, {
+      const response = await fetch(buildApiUrl("/api/public/contact/"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Accept: "application/json"
+          Accept: "application/json",
         },
         body: JSON.stringify({
           first_name: values.firstName,
           last_name: values.lastName,
           email: values.email,
           subject: values.subject,
-          message: values.message
-        })
+          message: values.message,
+        }),
       });
 
       const data = await response.json().catch(() => null);
@@ -332,10 +351,12 @@ export const ContactSection = () => {
         lastName: "",
         email: "",
         subject: undefined,
-        message: ""
+        message: "",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : t.toast.errorDefault;
+      const message =
+        error instanceof Error ? error.message : t.toast.errorDefault;
+
       toast.error(message);
     } finally {
       setIsSubmitting(false);
@@ -364,7 +385,12 @@ export const ContactSection = () => {
                   <Building2 className="size-4 shrink-0" />
                   <div className="font-bold">{t.contactInfo.locationLabel}</div>
                 </div>
-                <div className={cn("text-muted-foreground", isArabic && "text-right")}>
+                <div
+                  className={cn(
+                    "text-muted-foreground",
+                    isArabic && "text-right"
+                  )}
+                >
                   {t.contactInfo.locationValue}
                 </div>
               </div>
@@ -379,7 +405,12 @@ export const ContactSection = () => {
                   <Phone className="size-4 shrink-0" />
                   <div className="font-bold">{t.contactInfo.phoneLabel}</div>
                 </div>
-                <div className={cn("text-muted-foreground", isArabic && "text-right")}>
+                <div
+                  className={cn(
+                    "text-muted-foreground",
+                    isArabic && "text-right"
+                  )}
+                >
                   {t.contactInfo.phoneValue}
                 </div>
               </div>
@@ -394,7 +425,12 @@ export const ContactSection = () => {
                   <Mail className="size-4 shrink-0" />
                   <div className="font-bold">{t.contactInfo.emailLabel}</div>
                 </div>
-                <div className={cn("text-muted-foreground", isArabic && "text-right")}>
+                <div
+                  className={cn(
+                    "text-muted-foreground",
+                    isArabic && "text-right"
+                  )}
+                >
                   {t.contactInfo.emailValue}
                 </div>
               </div>
@@ -407,9 +443,16 @@ export const ContactSection = () => {
                   )}
                 >
                   <Clock className="size-4 shrink-0" />
-                  <div className="font-bold">{t.contactInfo.businessHoursLabel}</div>
+                  <div className="font-bold">
+                    {t.contactInfo.businessHoursLabel}
+                  </div>
                 </div>
-                <div className={cn("text-muted-foreground", isArabic && "text-right")}>
+                <div
+                  className={cn(
+                    "text-muted-foreground",
+                    isArabic && "text-right"
+                  )}
+                >
                   {t.contactInfo.businessHoursValue}
                 </div>
               </div>
@@ -425,14 +468,22 @@ export const ContactSection = () => {
 
             <CardContent>
               <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="grid w-full gap-6">
-                  <div className="flex flex-col gap-6 md:flex-row!">
+                <form
+                  onSubmit={form.handleSubmit(onSubmit)}
+                  className="grid w-full gap-6"
+                >
+                  <div className="flex flex-col gap-6 md:flex-row">
                     <FormField
                       control={form.control}
                       name="firstName"
                       render={({ field, fieldState }) => (
                         <FormItem className="w-full gap-4">
-                          <FormLabel className={cn("font-semibold", isArabic && "text-right")}>
+                          <FormLabel
+                            className={cn(
+                              "font-semibold",
+                              isArabic && "text-right"
+                            )}
+                          >
                             {t.form.firstName}
                           </FormLabel>
                           <FormControl>
@@ -444,7 +495,12 @@ export const ContactSection = () => {
                             />
                           </FormControl>
                           {fieldState.error && (
-                            <p className={cn("text-sm text-red-500", isArabic && "text-right")}>
+                            <p
+                              className={cn(
+                                "text-sm text-red-500",
+                                isArabic && "text-right"
+                              )}
+                            >
                               {fieldState.error.message}
                             </p>
                           )}
@@ -457,7 +513,12 @@ export const ContactSection = () => {
                       name="lastName"
                       render={({ field, fieldState }) => (
                         <FormItem className="w-full gap-4">
-                          <FormLabel className={cn("font-semibold", isArabic && "text-right")}>
+                          <FormLabel
+                            className={cn(
+                              "font-semibold",
+                              isArabic && "text-right"
+                            )}
+                          >
                             {t.form.lastName}
                           </FormLabel>
                           <FormControl>
@@ -469,7 +530,12 @@ export const ContactSection = () => {
                             />
                           </FormControl>
                           {fieldState.error && (
-                            <p className={cn("text-sm text-red-500", isArabic && "text-right")}>
+                            <p
+                              className={cn(
+                                "text-sm text-red-500",
+                                isArabic && "text-right"
+                              )}
+                            >
                               {fieldState.error.message}
                             </p>
                           )}
@@ -484,7 +550,12 @@ export const ContactSection = () => {
                       name="email"
                       render={({ field, fieldState }) => (
                         <FormItem className="gap-4">
-                          <FormLabel className={cn("font-semibold", isArabic && "text-right")}>
+                          <FormLabel
+                            className={cn(
+                              "font-semibold",
+                              isArabic && "text-right"
+                            )}
+                          >
                             {t.form.email}
                           </FormLabel>
                           <FormControl>
@@ -497,7 +568,12 @@ export const ContactSection = () => {
                             />
                           </FormControl>
                           {fieldState.error && (
-                            <p className={cn("text-sm text-red-500", isArabic && "text-right")}>
+                            <p
+                              className={cn(
+                                "text-sm text-red-500",
+                                isArabic && "text-right"
+                              )}
+                            >
                               {fieldState.error.message}
                             </p>
                           )}
@@ -512,7 +588,12 @@ export const ContactSection = () => {
                       name="subject"
                       render={({ field, fieldState }) => (
                         <FormItem className="gap-4">
-                          <FormLabel className={cn("font-semibold", isArabic && "text-right")}>
+                          <FormLabel
+                            className={cn(
+                              "font-semibold",
+                              isArabic && "text-right"
+                            )}
+                          >
                             {t.form.subject}
                           </FormLabel>
 
@@ -533,7 +614,12 @@ export const ContactSection = () => {
                           </Select>
 
                           {fieldState.error && (
-                            <p className={cn("text-sm text-red-500", isArabic && "text-right")}>
+                            <p
+                              className={cn(
+                                "text-sm text-red-500",
+                                isArabic && "text-right"
+                              )}
+                            >
                               {fieldState.error.message}
                             </p>
                           )}
@@ -548,20 +634,33 @@ export const ContactSection = () => {
                       name="message"
                       render={({ field, fieldState }) => (
                         <FormItem className="gap-4">
-                          <FormLabel className={cn("font-semibold", isArabic && "text-right")}>
+                          <FormLabel
+                            className={cn(
+                              "font-semibold",
+                              isArabic && "text-right"
+                            )}
+                          >
                             {t.form.message}
                           </FormLabel>
                           <FormControl>
                             <Textarea
                               rows={5}
                               placeholder={t.form.messagePlaceholder}
-                              className={cn("resize-none", isArabic && "text-right")}
+                              className={cn(
+                                "resize-none",
+                                isArabic && "text-right"
+                              )}
                               dir={isArabic ? "rtl" : "ltr"}
                               {...field}
                             />
                           </FormControl>
                           {fieldState.error && (
-                            <p className={cn("text-sm text-red-500", isArabic && "text-right")}>
+                            <p
+                              className={cn(
+                                "text-sm text-red-500",
+                                isArabic && "text-right"
+                              )}
+                            >
                               {fieldState.error.message}
                             </p>
                           )}
