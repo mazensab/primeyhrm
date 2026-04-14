@@ -9,9 +9,10 @@
 # - Builds reference.order as DRAFT-<id>
 # - Updates onboarding draft locally
 # - Creates local PaymentTransaction pending record
-# - Does NOT mark invoice as paid
-# - Does NOT activate subscription directly
+# - Does NOT mark invoice as paid directly here
+# - Does NOT activate subscription directly here
 # - Supports public onboarding draft flow safely
+# - Returns safer register success/cancel URLs for frontend
 # ============================================================
 
 from __future__ import annotations
@@ -67,19 +68,6 @@ def _normalize_payment_method(value: Any) -> str:
     if method in {"", "TAP", "CARD", "CARD_PAYMENT"}:
         return "CREDIT_CARD"
     return method
-
-
-def _is_system_user(request) -> bool:
-    user = getattr(request, "user", None)
-    if not user or not getattr(user, "is_authenticated", False):
-        return False
-
-    if getattr(user, "is_superuser", False):
-        return True
-    if getattr(user, "is_staff", False):
-        return True
-
-    return False
 
 
 def _to_decimal_str(value: Any, places: str = "0.00") -> str:
@@ -144,27 +132,51 @@ def _build_register_return_url(
     *,
     draft_id: int,
     payment: str,
+    payment_method: str = "CREDIT_CARD",
+    gateway_status: str | None = None,
+    tap_charge_id: str | None = None,
 ) -> str:
     """
     بناء رابط رجوع مناسب لصفحة /register
     حتى يفهم الفرونت حالة العملية بعد العودة من Tap.
+
+    ملاحظات:
+    - لا نعتمد فقط على payment=success
+    - نمرر gateway_status و tap_charge_id إن توفر
+    - هذا يجعل الفرونت قادرًا على استدعاء confirm-payment مباشرة
     """
     base = f"{_get_frontend_base_url()}/register"
-    query = urlencode(
-        {
-            "draft_id": draft_id,
-            "payment_method": "CREDIT_CARD",
-            "payment": payment,
-        }
-    )
+
+    query_data = {
+        "draft_id": str(draft_id),
+        "payment_method": _normalize_payment_method(payment_method),
+        "payment": _clean_str(payment),
+    }
+
+    if _clean_str(gateway_status):
+        query_data["gateway_status"] = _clean_str(gateway_status).upper()
+
+    if _clean_str(tap_charge_id):
+        query_data["tap_charge_id"] = _clean_str(tap_charge_id)
+
+    query = urlencode(query_data)
     return f"{base}?{query}"
 
 
-def _get_default_success_url(*, draft_id: Optional[int] = None) -> str:
+def _get_default_success_url(
+    *,
+    draft_id: Optional[int] = None,
+    payment_method: str = "CREDIT_CARD",
+    tap_charge_id: str | None = None,
+    gateway_status: str | None = None,
+) -> str:
     if draft_id:
         return _build_register_return_url(
             draft_id=draft_id,
             payment="success",
+            payment_method=payment_method,
+            gateway_status=gateway_status or "CAPTURED",
+            tap_charge_id=tap_charge_id,
         )
 
     return _clean_str(
@@ -173,11 +185,16 @@ def _get_default_success_url(*, draft_id: Optional[int] = None) -> str:
     )
 
 
-def _get_default_cancel_url(*, draft_id: Optional[int] = None) -> str:
+def _get_default_cancel_url(
+    *,
+    draft_id: Optional[int] = None,
+    payment_method: str = "CREDIT_CARD",
+) -> str:
     if draft_id:
         return _build_register_return_url(
             draft_id=draft_id,
             payment="cancelled",
+            payment_method=payment_method,
         )
 
     return _clean_str(
@@ -243,6 +260,16 @@ def _build_draft_charge_payload(
 
     first_name, last_name = _split_admin_name(admin_name, company_name)
 
+    # نمرر رابط success شامل البيانات المطلوبة للفرونت
+    success_url = _get_default_success_url(
+        draft_id=draft.id,
+        payment_method=payment_method,
+    )
+    cancel_url = _get_default_cancel_url(
+        draft_id=draft.id,
+        payment_method=payment_method,
+    )
+
     payload = {
         "amount": float(total_amount),
         "currency": "SAR",
@@ -255,7 +282,8 @@ def _build_draft_charge_payload(
             "platform": "Mham Cloud",
             "module": "system_onboarding",
             "payment_method": payment_method,
-            "cancel_url": _get_default_cancel_url(draft_id=draft.id),
+            "success_url": success_url,
+            "cancel_url": cancel_url,
         },
         "reference": {
             "transaction": transaction_reference,
@@ -278,7 +306,7 @@ def _build_draft_charge_payload(
             "id": _clean_str(getattr(settings, "TAP_SOURCE_ID", "src_all")),
         },
         "redirect": {
-            "url": _get_default_success_url(draft_id=draft.id),
+            "url": success_url,
         },
         "post": {
             "url": _get_default_webhook_url(),
@@ -420,6 +448,18 @@ def tap_create_checkout(request):
                 tap_status=tap_status,
             )
 
+        success_return_url = _get_default_success_url(
+            draft_id=draft.id,
+            payment_method=payment_method,
+            tap_charge_id=tap_charge_id,
+            gateway_status="CAPTURED",
+        )
+
+        cancel_return_url = _get_default_cancel_url(
+            draft_id=draft.id,
+            payment_method=payment_method,
+        )
+
         logger.info(
             "Tap checkout created from draft successfully. draft_id=%s charge_id=%s status=%s",
             draft.id,
@@ -440,6 +480,8 @@ def tap_create_checkout(request):
                 "checkout_url": checkout_url,
                 "tap_charge_id": tap_charge_id,
                 "tap_status": tap_status,
+                "success_return_url": success_return_url,
+                "cancel_return_url": cancel_return_url,
                 "raw_response": result,
             },
             status=200,

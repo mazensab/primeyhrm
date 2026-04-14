@@ -2,7 +2,7 @@
 # 📂 api/system/onboarding/draft_detail.py
 # Mham Cloud
 # Get Draft Details for Payment Page
-# V2.0 PUBLIC SAFE
+# V2.1 PUBLIC SAFE
 # ============================================================
 
 from decimal import Decimal
@@ -14,6 +14,48 @@ from billing_center.models import CompanyOnboardingTransaction
 
 
 VAT_RATE = Decimal("0.15")
+
+
+# ============================================================
+# 🔧 Helpers
+# ============================================================
+
+def _safe_text(value, default=""):
+    if value is None:
+        return default
+    value = str(value).strip()
+    return value if value else default
+
+
+def _get_first_existing_attr(instance, attr_names: list[str], default=""):
+    if not instance:
+        return default
+
+    for attr_name in attr_names:
+        try:
+            value = getattr(instance, attr_name, None)
+        except Exception:
+            value = None
+
+        value = _safe_text(value, "")
+        if value:
+            return value
+
+    return default
+
+
+def _get_draft_admin_phone(draft) -> str:
+    return _get_first_existing_attr(
+        draft,
+        [
+            "admin_phone",
+            "admin_mobile",
+            "admin_mobile_number",
+            "admin_whatsapp_number",
+            "admin_phone_number",
+        ],
+        "",
+    )
 
 
 # ============================================================
@@ -78,6 +120,7 @@ def draft_detail(request, draft_id):
                 "username": draft.admin_username,
                 "name": draft.admin_name,
                 "email": draft.admin_email,
+                "phone": _get_draft_admin_phone(draft),
             },
 
             "company": {

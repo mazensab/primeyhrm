@@ -1,6 +1,6 @@
 # ============================================================
 # 🚀 System/Public Onboarding — Confirm Payment & Activate Company
-# Mham Cloud | V3.6 PRODUCT-AWARE
+# Mham Cloud | V3.7 PRODUCT-AWARE
 # ============================================================
 # ✔ Public Flow Supported
 # ✔ No CASH
@@ -17,6 +17,8 @@
 # ✔ Safer Invoice Amount Calculation
 # ✔ Payment Methods Cleaned (BANK_TRANSFER / CREDIT_CARD / TAMARA)
 # ✔ PRODUCT-AWARE Subscription Creation
+# ✔ Payment record now keeps gateway reference when available
+# ✔ Better idempotent response for already-paid draft
 # ============================================================
 
 from __future__ import annotations
@@ -717,6 +719,73 @@ def _dispatch_payment_confirmation_notification(
         return
 
 
+def _build_already_paid_response(*, draft):
+    """
+    إرجاع استجابة idempotent واضحة بدل إرجاع خطأ مجرد،
+    حتى يتمكن الفرونت من إكمال تجربة المستخدم بسلاسة عند
+    إعادة تحميل صفحة النجاح أو وصول webhook ثم محاولة تأكيد ثانية.
+    """
+    company = (
+        Company.objects
+        .filter(commercial_number=draft.commercial_number)
+        .order_by("-id")
+        .first()
+    )
+
+    if company:
+        subscription = (
+            CompanySubscription.objects
+            .select_related("plan", "product")
+            .filter(company=company)
+            .order_by("-id")
+            .first()
+        )
+        invoice = (
+            Invoice.objects
+            .filter(company=company)
+            .order_by("-id")
+            .first()
+        )
+
+        return {
+            "message": "تم تأكيد هذه العملية سابقًا",
+            "status": "already_confirmed",
+            "company_id": company.id,
+            "company_name": company.name,
+            "admin_username": _normalize_username(getattr(draft, "admin_username", "")),
+            "payment_method": _normalize_payment_method(getattr(draft, "payment_method", "")),
+            "gateway_status": "PAID",
+            "gateway_transaction_id": None,
+            "subscription": {
+                "product": getattr(getattr(subscription, "product", None), "code", None) if subscription else None,
+                "plan": getattr(getattr(subscription, "plan", None), "name", None) if subscription else None,
+                "status": getattr(subscription, "status", None) if subscription else None,
+                "start_date": getattr(subscription, "start_date", None) if subscription else None,
+                "end_date": getattr(subscription, "end_date", None) if subscription else None,
+            },
+            "invoice_id": getattr(invoice, "id", None),
+        }
+
+    return {
+        "message": "تم تأكيد هذه العملية سابقًا",
+        "status": "already_confirmed",
+        "company_id": None,
+        "company_name": None,
+        "admin_username": _normalize_username(getattr(draft, "admin_username", "")),
+        "payment_method": _normalize_payment_method(getattr(draft, "payment_method", "")),
+        "gateway_status": "PAID",
+        "gateway_transaction_id": None,
+        "subscription": {
+            "product": None,
+            "plan": None,
+            "status": None,
+            "start_date": None,
+            "end_date": None,
+        },
+        "invoice_id": None,
+    }
+
+
 # ============================================================
 # ✅ API — Confirm Onboarding Payment
 # ============================================================
@@ -792,7 +861,10 @@ def confirm_onboarding_payment(request):
             return JsonResponse({"error": "المسودة غير موجودة"}, status=404)
 
         if draft.status == "PAID":
-            return JsonResponse({"error": "تم تأكيد هذه العملية سابقًا"}, status=409)
+            return JsonResponse(
+                _build_already_paid_response(draft=draft),
+                status=409,
+            )
 
         if draft.status not in {"DRAFT", "CONFIRMED", "PENDING_PAYMENT"}:
             return JsonResponse(
@@ -930,16 +1002,22 @@ def confirm_onboarding_payment(request):
             },
         )
 
-        Payment.objects.create(
-            invoice=invoice,
-            amount=draft.total_amount,
-            method=payment_method,
-            created_by=company_owner,
-        )
+        payment_kwargs = {
+            "invoice": invoice,
+            "amount": draft.total_amount,
+            "method": payment_method,
+            "created_by": company_owner,
+        }
+
+        if gateway_transaction_id:
+            payment_kwargs["reference_number"] = gateway_transaction_id
+
+        Payment.objects.create(**payment_kwargs)
 
         draft.status = "PAID"
+        draft.payment_method = payment_method
         draft.admin_password = ""
-        draft.save(update_fields=["status", "admin_password"])
+        draft.save(update_fields=["status", "payment_method", "admin_password"])
 
         transaction.on_commit(
             lambda: _dispatch_payment_confirmation_notification(

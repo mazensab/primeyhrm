@@ -8,9 +8,10 @@
 # - Supports onboarding draft flow directly
 # - Builds order_reference_id as DRAFT-<id>
 # - Returns checkout_url and tamara identifiers
-# - Does NOT mark invoice as paid
-# - Does NOT activate subscription directly
+# - Does NOT mark invoice as paid directly here
+# - Does NOT activate subscription directly here
 # - Supports public onboarding draft flow safely
+# - Returns safer register success/cancel/failure URLs for frontend
 # ============================================================
 
 from __future__ import annotations
@@ -121,27 +122,46 @@ def _build_register_return_url(
     *,
     draft_id: int,
     payment: str,
+    payment_method: str = "TAMARA",
+    gateway_status: str | None = None,
+    gateway_transaction_id: str | None = None,
 ) -> str:
     """
     بناء رابط رجوع مناسب لصفحة /register
     حتى يفهم الفرونت حالة العملية بعد العودة من تمارا.
     """
     base = f"{_get_frontend_base_url()}/register"
-    query = urlencode(
-        {
-            "draft_id": draft_id,
-            "payment_method": "TAMARA",
-            "payment": payment,
-        }
-    )
+
+    query_data = {
+        "draft_id": str(draft_id),
+        "payment_method": _normalize_payment_method(payment_method),
+        "payment": _clean_str(payment),
+    }
+
+    if _clean_str(gateway_status):
+        query_data["gateway_status"] = _clean_str(gateway_status).upper()
+
+    if _clean_str(gateway_transaction_id):
+        query_data["gateway_transaction_id"] = _clean_str(gateway_transaction_id)
+
+    query = urlencode(query_data)
     return f"{base}?{query}"
 
 
-def _get_default_success_url(*, draft_id: Optional[int] = None) -> str:
+def _get_default_success_url(
+    *,
+    draft_id: Optional[int] = None,
+    payment_method: str = "TAMARA",
+    gateway_transaction_id: str | None = None,
+    gateway_status: str | None = None,
+) -> str:
     if draft_id:
         return _build_register_return_url(
             draft_id=draft_id,
             payment="success",
+            payment_method=payment_method,
+            gateway_status=gateway_status or "APPROVED",
+            gateway_transaction_id=gateway_transaction_id,
         )
 
     return _clean_str(
@@ -150,11 +170,16 @@ def _get_default_success_url(*, draft_id: Optional[int] = None) -> str:
     )
 
 
-def _get_default_cancel_url(*, draft_id: Optional[int] = None) -> str:
+def _get_default_cancel_url(
+    *,
+    draft_id: Optional[int] = None,
+    payment_method: str = "TAMARA",
+) -> str:
     if draft_id:
         return _build_register_return_url(
             draft_id=draft_id,
             payment="cancelled",
+            payment_method=payment_method,
         )
 
     return _clean_str(
@@ -163,11 +188,16 @@ def _get_default_cancel_url(*, draft_id: Optional[int] = None) -> str:
     )
 
 
-def _get_default_failure_url(*, draft_id: Optional[int] = None) -> str:
+def _get_default_failure_url(
+    *,
+    draft_id: Optional[int] = None,
+    payment_method: str = "TAMARA",
+) -> str:
     if draft_id:
         return _build_register_return_url(
             draft_id=draft_id,
             payment="failed",
+            payment_method=payment_method,
         )
 
     return _clean_str(
@@ -245,9 +275,18 @@ def _build_draft_invoice_data(
         "company_email": _clean_str(getattr(draft, "email", None)),
         "company_phone": phone,
         "city": city,
-        "success_url": _get_default_success_url(draft_id=draft.id),
-        "cancel_url": _get_default_cancel_url(draft_id=draft.id),
-        "failure_url": _get_default_failure_url(draft_id=draft.id),
+        "success_url": _get_default_success_url(
+            draft_id=draft.id,
+            payment_method=payment_method,
+        ),
+        "cancel_url": _get_default_cancel_url(
+            draft_id=draft.id,
+            payment_method=payment_method,
+        ),
+        "failure_url": _get_default_failure_url(
+            draft_id=draft.id,
+            payment_method=payment_method,
+        ),
         "notification_url": _get_default_notification_url(),
         "platform": "Mham Cloud",
         "items": [
@@ -341,7 +380,7 @@ def _validate_draft_for_checkout(draft: CompanyOnboardingTransaction) -> tuple[b
     """
     التحقق من صلاحية draft قبل إنشاء checkout.
     """
-    if draft.status not in {"DRAFT", "CONFIRMED"}:
+    if draft.status not in {"DRAFT", "CONFIRMED", "PENDING_PAYMENT"}:
         return False, "Draft status does not allow Tamara checkout."
 
     if not _clean_str(getattr(draft, "admin_email", None)):
@@ -444,12 +483,16 @@ def tamara_create_checkout(request):
                     "message": "Tamara checkout created successfully.",
                     "source": "draft",
                     "draft_id": draft.id,
+                    "draft_status": draft.status,
                     "order_reference_id": invoice_data["order_reference_id"],
                     "payment_method": payment_method,
                     "checkout_url": result.checkout_url,
                     "tamara_order_id": result.tamara_order_id,
                     "tamara_checkout_id": result.tamara_checkout_id,
                     "tamara_status": result.status,
+                    "success_return_url": invoice_data["success_url"],
+                    "cancel_return_url": invoice_data["cancel_url"],
+                    "failure_return_url": invoice_data["failure_url"],
                     "raw_response": result.raw_response,
                 },
                 status=200,

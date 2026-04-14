@@ -328,6 +328,21 @@ def _dispatch_confirm_draft_notification(*, draft) -> None:
         return
 
 
+def _build_draft_response(*, draft, message: str, state: str) -> dict:
+    return {
+        "message": message,
+        "state": state,
+        "draft": {
+            "id": draft.id,
+            "company_name": draft.company_name,
+            "plan": draft.plan.name if draft.plan else None,
+            "duration": draft.duration,
+            "total_amount": float(draft.total_amount or 0),
+            "status": draft.status,
+        },
+    }
+
+
 # ============================================================
 # API — Confirm Draft
 # URL: /api/system/onboarding/confirm-draft/
@@ -335,9 +350,8 @@ def _dispatch_confirm_draft_notification(*, draft) -> None:
 
 @require_POST
 def confirm_draft(request):
-
     try:
-        data = json.loads(request.body)
+        data = json.loads(request.body.decode("utf-8"))
         draft_id = data.get("draft_id")
 
         if not draft_id:
@@ -346,10 +360,68 @@ def confirm_draft(request):
                 status=400
             )
 
-        draft = CompanyOnboardingTransaction.objects.select_related(
-            "plan",
-            "owner",
-        ).get(id=draft_id)
+        with transaction.atomic():
+            draft = (
+                CompanyOnboardingTransaction.objects
+                .select_for_update()
+                .select_related("plan", "owner")
+                .get(id=draft_id)
+            )
+
+            # ------------------------------------------------
+            # ✅ Idempotent حالات سبق تنفيذها
+            # ------------------------------------------------
+            if draft.status == "CONFIRMED":
+                return JsonResponse(
+                    _build_draft_response(
+                        draft=draft,
+                        message="Draft already confirmed",
+                        state="already_confirmed",
+                    ),
+                    status=200,
+                )
+
+            if draft.status == "PENDING_PAYMENT":
+                return JsonResponse(
+                    _build_draft_response(
+                        draft=draft,
+                        message="Draft already confirmed and waiting for payment",
+                        state="pending_payment",
+                    ),
+                    status=200,
+                )
+
+            if draft.status == "PAID":
+                return JsonResponse(
+                    _build_draft_response(
+                        draft=draft,
+                        message="Draft already paid",
+                        state="already_paid",
+                    ),
+                    status=200,
+                )
+
+            # ------------------------------------------------
+            # ❌ حالات غير مسموحة
+            # ------------------------------------------------
+            if draft.status != "DRAFT":
+                return JsonResponse(
+                    {
+                        "error": "Draft status does not allow confirmation",
+                        "draft_status": draft.status,
+                    },
+                    status=409
+                )
+
+            draft.status = "CONFIRMED"
+            draft.save(update_fields=["status"])
+
+            # ------------------------------------------------
+            # Notification Center الرسمي فقط بعد نجاح الـ commit
+            # ------------------------------------------------
+            transaction.on_commit(
+                lambda: _dispatch_confirm_draft_notification(draft=draft)
+            )
 
     except CompanyOnboardingTransaction.DoesNotExist:
         return JsonResponse(
@@ -362,44 +434,11 @@ def confirm_draft(request):
             status=400
         )
 
-    # ========================================================
-    # Confirm Draft Only
-    # ========================================================
-
-    with transaction.atomic():
-
-        # منع إعادة التأكيد
-        if draft.status != "DRAFT":
-            return JsonResponse(
-                {"error": "Draft already confirmed"},
-                status=409
-            )
-
-        draft.status = "CONFIRMED"
-        draft.save(update_fields=["status"])
-
-        # ----------------------------------------------------
-        # Notification Center الرسمي فقط بعد نجاح الـ commit
-        # ----------------------------------------------------
-        transaction.on_commit(
-            lambda: _dispatch_confirm_draft_notification(draft=draft)
-        )
-
-    # ========================================================
-    # Response
-    # ========================================================
-
-    return JsonResponse({
-
-        "message": "Draft confirmed successfully",
-
-        "draft": {
-            "id": draft.id,
-            "company_name": draft.company_name,
-            "plan": draft.plan.name,
-            "duration": draft.duration,
-            "total_amount": float(draft.total_amount),
-            "status": draft.status
-        }
-
-    })
+    return JsonResponse(
+        _build_draft_response(
+            draft=draft,
+            message="Draft confirmed successfully",
+            state="confirmed",
+        ),
+        status=200,
+    )

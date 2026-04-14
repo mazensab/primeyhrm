@@ -255,6 +255,65 @@ function buildRegisterUrl(params: Record<string, string | null | undefined>) {
   return qs ? `/register?${qs}` : "/register"
 }
 
+function normalizeReturnedPaymentMethod(value: string | null): PaymentMethod | null {
+  const normalized = (value || "").trim().toUpperCase()
+
+  if (normalized === "BANK_TRANSFER") return "BANK_TRANSFER"
+  if (normalized === "CREDIT_CARD" || normalized === "TAP") return "CREDIT_CARD"
+  if (normalized === "TAMARA") return "TAMARA"
+
+  return null
+}
+
+function buildGatewayConfirmationPayload(params: {
+  returnedDraftId: string | null
+  returnedPaymentMethod: string | null
+  returnedGatewayStatus: string | null
+  returnedGatewayTransactionId: string | null
+  paymentStatus: string | null
+}) {
+  const {
+    returnedDraftId,
+    returnedPaymentMethod,
+    returnedGatewayStatus,
+    returnedGatewayTransactionId,
+    paymentStatus,
+  } = params
+
+  if (!returnedDraftId) {
+    return null
+  }
+
+  const normalizedPaymentMethod =
+    normalizeReturnedPaymentMethod(returnedPaymentMethod) ||
+    (returnedGatewayTransactionId ? "CREDIT_CARD" : null)
+
+  if (!normalizedPaymentMethod) {
+    return null
+  }
+
+  let effectiveGatewayStatus = (returnedGatewayStatus || "").trim().toUpperCase()
+
+  if (!effectiveGatewayStatus && paymentStatus === "success") {
+    if (normalizedPaymentMethod === "CREDIT_CARD") {
+      effectiveGatewayStatus = "CAPTURED"
+    } else if (normalizedPaymentMethod === "TAMARA") {
+      effectiveGatewayStatus = "APPROVED"
+    }
+  }
+
+  if (!effectiveGatewayStatus) {
+    return null
+  }
+
+  return {
+    draft_id: returnedDraftId,
+    payment_method: normalizedPaymentMethod,
+    gateway_status: effectiveGatewayStatus,
+    gateway_transaction_id: returnedGatewayTransactionId || null,
+  }
+}
+
 function RegisterCompanyPageFallback() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6" dir="rtl">
@@ -555,6 +614,7 @@ function RegisterCompanyPageContent() {
       if (!API) return
       if (gatewayConfirmRunRef.current) return
 
+      const paymentStatus = searchParams.get("payment")
       const returnedDraftId = searchParams.get("draft_id")
       const returnedPaymentMethod = searchParams.get("payment_method")
       const returnedGatewayStatus = searchParams.get("gateway_status")
@@ -563,9 +623,18 @@ function RegisterCompanyPageContent() {
         searchParams.get("transaction_id") ||
         searchParams.get("checkout_id") ||
         searchParams.get("tap_charge_id") ||
+        searchParams.get("tap_id") ||
         ""
 
-      if (!returnedDraftId || !returnedPaymentMethod || !returnedGatewayStatus) {
+      const confirmationPayload = buildGatewayConfirmationPayload({
+        returnedDraftId,
+        returnedPaymentMethod,
+        returnedGatewayStatus,
+        returnedGatewayTransactionId,
+        paymentStatus,
+      })
+
+      if (!confirmationPayload) {
         return
       }
 
@@ -582,15 +651,35 @@ function RegisterCompanyPageContent() {
             "Content-Type": "application/json",
             "X-CSRFToken": csrfToken || "",
           },
-          body: JSON.stringify({
-            draft_id: returnedDraftId,
-            payment_method: returnedPaymentMethod,
-            gateway_status: returnedGatewayStatus,
-            gateway_transaction_id: returnedGatewayTransactionId || null,
-          }),
+          body: JSON.stringify(confirmationPayload),
         })
 
         const data: ConfirmPaymentResponse | null = await res.json().catch(() => null)
+
+        if (res.status === 409) {
+          setDraftId(confirmationPayload.draft_id)
+          setDraftConfirmed(true)
+
+          toast.success(
+            isArabic ? "تم اعتماد الدفع مسبقًا" : "Payment already confirmed"
+          )
+
+          setLastActionMessage(
+            isArabic
+              ? "تم اعتماد هذه العملية مسبقًا. يمكنك الآن تسجيل الدخول إلى حساب الشركة."
+              : "This payment was already confirmed earlier. You can now log in to the company account."
+          )
+
+          router.replace(
+            buildRegisterUrl({
+              plan_id: planId || initialPlanId,
+              plan_name: selectedPlan?.name || initialPlanName,
+              draft_id: confirmationPayload.draft_id,
+              payment: "success",
+            })
+          )
+          return
+        }
 
         if (!res.ok || !data) {
           toast.error(
@@ -607,10 +696,11 @@ function RegisterCompanyPageContent() {
                 ? "فشل تأكيد الدفع بعد العودة من بوابة الدفع."
                 : "Failed to confirm payment after returning from the gateway.")
           )
+          gatewayConfirmRunRef.current = false
           return
         }
 
-        setDraftId(returnedDraftId)
+        setDraftId(confirmationPayload.draft_id)
         setDraftConfirmed(true)
 
         if (data.company_name) {
@@ -619,8 +709,8 @@ function RegisterCompanyPageContent() {
           )
           setLastActionMessage(
             isArabic
-              ? `تم تأكيد الدفع بنجاح وتم تفعيل الشركة "${data.company_name}".`
-              : `Payment confirmed successfully. Company "${data.company_name}" has been activated.`
+              ? `تم تأكيد الدفع بنجاح وتم تفعيل الشركة "${data.company_name}". يمكنك الآن تسجيل الدخول بالحساب الذي أنشأته.`
+              : `Payment confirmed successfully and company "${data.company_name}" has been activated. You can now sign in with the account you created.`
           )
         } else if (data.message) {
           toast.success(
@@ -642,7 +732,7 @@ function RegisterCompanyPageContent() {
           buildRegisterUrl({
             plan_id: planId || initialPlanId,
             plan_name: selectedPlan?.name || initialPlanName,
-            draft_id: returnedDraftId,
+            draft_id: confirmationPayload.draft_id,
             payment: "success",
           })
         )
@@ -658,6 +748,7 @@ function RegisterCompanyPageContent() {
             ? "حدث خطأ غير متوقع أثناء تأكيد الدفع."
             : "Unexpected error while confirming payment."
         )
+        gatewayConfirmRunRef.current = false
       } finally {
         setGatewayConfirming(false)
       }

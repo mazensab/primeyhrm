@@ -8,6 +8,7 @@
 # - Verifies Tap hashstring when enabled
 # - Resolves onboarding draft_id from metadata/reference
 # - Forwards final success to confirm_onboarding_payment
+# - Idempotent-safe with better action mapping
 # ============================================================
 
 from __future__ import annotations
@@ -195,13 +196,15 @@ def _build_internal_confirm_payload(payload: Dict[str, Any], *, draft_id: int) -
     مهم:
     confirm_onboarding_payment يعتمد رسميًا على CREDIT_CARD كتدفق Tap-backed.
     """
+    reference = _extract_reference(payload)
+
     return {
         "draft_id": draft_id,
         "payment_method": "CREDIT_CARD",
         "gateway_status": _map_gateway_status(payload.get("status")),
         "gateway_transaction_id": _clean_str(payload.get("id")),
-        "gateway_reference": _clean_str((_extract_reference(payload)).get("gateway")),
-        "payment_reference": _clean_str((_extract_reference(payload)).get("payment")),
+        "gateway_reference": _clean_str(reference.get("gateway")),
+        "payment_reference": _clean_str(reference.get("payment")),
         "raw_gateway_payload": payload,
     }
 
@@ -214,6 +217,18 @@ def _call_confirm_onboarding_payment(payload: Dict[str, Any]):
         content_type="application/json",
     )
     return confirm_onboarding_payment(request)
+
+
+def _decode_internal_response(internal_response) -> Dict[str, Any] | None:
+    try:
+        return json.loads(internal_response.content.decode("utf-8"))
+    except Exception:
+        try:
+            return {
+                "raw": internal_response.content.decode("utf-8", errors="ignore")
+            }
+        except Exception:
+            return None
 
 
 def _handle_webhook_event(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -238,13 +253,7 @@ def _handle_webhook_event(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             forwarded = True
             internal_status_code = getattr(internal_response, "status_code", None)
-
-            try:
-                internal_body = json.loads(internal_response.content.decode("utf-8"))
-            except Exception:
-                internal_body = {
-                    "raw": internal_response.content.decode("utf-8", errors="ignore")
-                }
+            internal_body = _decode_internal_response(internal_response)
 
             if internal_status_code == 200:
                 action = "payment_confirmed_and_activated"
@@ -252,6 +261,8 @@ def _handle_webhook_event(payload: Dict[str, Any]) -> Dict[str, Any]:
                 action = "already_confirmed"
             elif internal_status_code == 202:
                 action = "payment_pending_in_internal_flow"
+            elif internal_status_code == 400:
+                action = "internal_confirmation_rejected"
             else:
                 action = "internal_confirmation_failed"
 

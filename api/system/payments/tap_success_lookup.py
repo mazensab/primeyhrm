@@ -8,6 +8,7 @@
 # - محاولة ربط tap_id بفاتورة داخل النظام
 # - إرجاع invoice_number + redirect_url
 # - مناسب للتسجيل الخارجي بدون login
+# - يحاول أيضًا استنتاج حالة التفعيل من draft/payment records
 # ============================================================
 
 from __future__ import annotations
@@ -76,6 +77,57 @@ def _build_invoice_payload(
     }
 
 
+def _build_company_payload(
+    *,
+    company: Company | None,
+    draft: CompanyOnboardingTransaction | None,
+    source: str,
+    tap_id: str,
+    invoice: Invoice | None = None,
+):
+    return {
+        "success": True,
+        "status": "resolved",
+        "source": source,
+        "tap_id": tap_id,
+        "draft_id": getattr(draft, "id", None),
+        "draft_status": getattr(draft, "status", None),
+        "company_id": getattr(company, "id", None),
+        "company_name": getattr(company, "name", None),
+        "invoice_id": getattr(invoice, "id", None),
+        "invoice_number": getattr(invoice, "invoice_number", None),
+        "invoice_status": getattr(invoice, "status", None),
+        "redirect_url": f"/system/invoices/{invoice.invoice_number}" if invoice else None,
+    }
+
+
+def _find_company_from_draft(draft: CompanyOnboardingTransaction | None) -> Company | None:
+    if not draft:
+        return None
+
+    if _clean_str(getattr(draft, "commercial_number", None)):
+        company = (
+            Company.objects
+            .filter(commercial_number=draft.commercial_number)
+            .order_by("-id")
+            .first()
+        )
+        if company:
+            return company
+
+    if _clean_str(getattr(draft, "company_name", None)):
+        company = (
+            Company.objects
+            .filter(name=draft.company_name)
+            .order_by("-id")
+            .first()
+        )
+        if company:
+            return company
+
+    return None
+
+
 # ============================================================
 # 🔎 Main Resolver
 # ============================================================
@@ -85,7 +137,8 @@ def _resolve_invoice_from_tap_id(tap_id: str):
     ترتيب المحاولة:
     1) PaymentTransaction.transaction_id == tap_id ومعه invoice مباشر
     2) Payment.reference_number == tap_id
-    3) استخراج draft_id من وصف PaymentTransaction ثم محاولة إيجاد آخر فاتورة للشركة
+    3) استخراج draft_id من وصف PaymentTransaction ثم محاولة إيجاد الشركة/الفاتورة
+    4) إن كانت الشركة موجودة بدون فاتورة نعيد resolved تشغيليًا
     """
 
     # --------------------------------------------------------
@@ -158,12 +211,7 @@ def _resolve_invoice_from_tap_id(tap_id: str):
                         "retry_after_ms": 2500,
                     }
 
-                company = (
-                    Company.objects
-                    .filter(name=draft.company_name)
-                    .order_by("-id")
-                    .first()
-                )
+                company = _find_company_from_draft(draft)
 
                 if company:
                     invoice = (
@@ -188,6 +236,15 @@ def _resolve_invoice_from_tap_id(tap_id: str):
                             "company_name": invoice.company.name if invoice.company else None,
                             "redirect_url": f"/system/invoices/{invoice.invoice_number}",
                         }
+
+                    # الشركة موجودة لكن الفاتورة لم ترتبط أو لم تُنشأ بعد
+                    return _build_company_payload(
+                        company=company,
+                        draft=draft,
+                        source="draft_paid_company_found_invoice_missing",
+                        tap_id=tap_id,
+                        invoice=None,
+                    )
 
                 return {
                     "success": True,

@@ -1,6 +1,6 @@
 # ============================================================
 # 🚀 System/Public Onboarding — Create Draft Transaction
-# Mham Cloud | V2.5 NOTIFICATION-CENTER CLEAN
+# Mham Cloud | V2.6 NOTIFICATION-CENTER CLEAN
 # ============================================================
 # ✔ Public Draft Creation Supported
 # ✔ Internal Logged-In Flow Still Supported
@@ -16,6 +16,8 @@
 # ✔ Clear Guard For Non-Nullable owner Field
 # ✔ Admin Phone Supported
 # ✔ Payment Methods Cleaned (BANK_TRANSFER / CREDIT_CARD / TAMARA)
+# ✔ Better normalization for external payment aliases
+# ✔ Cleaner response payload
 # ============================================================
 
 from __future__ import annotations
@@ -75,6 +77,15 @@ def _normalize_email(value: str) -> str:
 
 def _normalize_phone(value: str) -> str:
     return _normalize_text(value)
+
+
+def _normalize_payment_method(value: str) -> str:
+    method = _normalize_text(value).upper()
+
+    if method in {"", "CARD", "CARD_PAYMENT", "TAP"}:
+        return "CREDIT_CARD"
+
+    return method
 
 
 def _normalize_national_address(value):
@@ -567,7 +578,7 @@ def create_onboarding_draft(request):
     plan_id = payload.get("plan_id")
     duration = _normalize_text(payload.get("duration")).lower()
     discount_code = _normalize_text(payload.get("discount_code"))
-    payment_method = _normalize_text(payload.get("payment_method")).upper()
+    payment_method = _normalize_payment_method(payload.get("payment_method"))
 
     # ✅ Company Snapshot
     commercial_number = _normalize_text(payload.get("commercial_number"))
