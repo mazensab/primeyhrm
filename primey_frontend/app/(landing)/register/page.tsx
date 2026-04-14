@@ -25,10 +25,12 @@ import {
   FileText,
   Landmark,
   Loader2,
+  LogIn,
   MapPin,
   QrCode,
   ReceiptText,
   ShieldCheck,
+  Sparkles,
   User2,
   Wallet,
   Languages,
@@ -36,6 +38,8 @@ import {
 } from "lucide-react"
 
 const API = process.env.NEXT_PUBLIC_API_URL
+const LOGIN_PATH = "/login"
+const SUCCESS_REDIRECT_SECONDS = 8
 
 type AppLocale = "ar" | "en"
 type BillingCycle = "monthly" | "yearly"
@@ -93,6 +97,18 @@ type ConfirmPaymentResponse = {
   details?: string
   message?: string
   status?: string
+}
+
+type RegistrationSuccessState = {
+  draftId: string
+  companyId?: number
+  companyName?: string
+  adminUsername?: string
+  invoiceId?: number
+  paymentMethod?: string
+  gatewayStatus?: string
+  gatewayTransactionId?: string | null
+  message?: string
 }
 
 const countries = [
@@ -314,6 +330,34 @@ function buildGatewayConfirmationPayload(params: {
   }
 }
 
+function getSuccessStorageKey(draftId: string) {
+  return `primey-register-success:${draftId}`
+}
+
+function persistSuccessState(data: RegistrationSuccessState) {
+  if (typeof window === "undefined" || !data.draftId) return
+
+  try {
+    window.sessionStorage.setItem(getSuccessStorageKey(data.draftId), JSON.stringify(data))
+  } catch (error) {
+    console.error("Persist success state error:", error)
+  }
+}
+
+function restoreSuccessState(draftId: string | null) {
+  if (typeof window === "undefined" || !draftId) return null
+
+  try {
+    const raw = window.sessionStorage.getItem(getSuccessStorageKey(draftId))
+    if (!raw) return null
+
+    return JSON.parse(raw) as RegistrationSuccessState
+  } catch (error) {
+    console.error("Restore success state error:", error)
+    return null
+  }
+}
+
 function RegisterCompanyPageFallback() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6" dir="rtl">
@@ -395,10 +439,24 @@ function RegisterCompanyPageContent() {
   const [draftConfirmed, setDraftConfirmed] = useState(false)
   const [lastActionMessage, setLastActionMessage] = useState("")
   const [gatewayConfirming, setGatewayConfirming] = useState(false)
+  const [registrationCompleted, setRegistrationCompleted] = useState(false)
+  const [successData, setSuccessData] = useState<RegistrationSuccessState | null>(null)
+  const [redirectCountdown, setRedirectCountdown] = useState(SUCCESS_REDIRECT_SECONDS)
 
   const isArabic = locale === "ar"
   const strength = passwordStrength(ownerPassword, locale)
   const BackIcon = isArabic ? ArrowRight : ArrowLeft
+
+  const goToLogin = () => {
+    router.push(LOGIN_PATH)
+  }
+
+  const markRegistrationCompleted = (data: RegistrationSuccessState) => {
+    persistSuccessState(data)
+    setSuccessData(data)
+    setRegistrationCompleted(true)
+    setRedirectCountdown(SUCCESS_REDIRECT_SECONDS)
+  }
 
   useEffect(() => {
     try {
@@ -438,6 +496,49 @@ function RegisterCompanyPageContent() {
       console.error("Register language toggle error:", error)
     }
   }
+
+  /* =========================================================
+     RESTORE SUCCESS STATE AFTER REFRESH
+  ========================================================= */
+  useEffect(() => {
+    const paymentStatus = searchParams.get("payment")
+    const returnedDraftId = searchParams.get("draft_id")
+
+    if (paymentStatus !== "success" || !returnedDraftId) return
+
+    const restored = restoreSuccessState(returnedDraftId)
+    if (!restored) return
+
+    setDraftId(restored.draftId)
+    setDraftConfirmed(true)
+    setLastActionMessage(
+      restored.message ||
+        (isArabic
+          ? "تم تفعيل شركتك بنجاح. يمكنك الآن تسجيل الدخول."
+          : "Your company has been activated successfully. You can now sign in.")
+    )
+    setSuccessData(restored)
+    setRegistrationCompleted(true)
+    setRedirectCountdown(SUCCESS_REDIRECT_SECONDS)
+  }, [searchParams, isArabic])
+
+  /* =========================================================
+     AUTO REDIRECT AFTER SUCCESS
+  ========================================================= */
+  useEffect(() => {
+    if (!registrationCompleted) return
+
+    if (redirectCountdown <= 0) {
+      goToLogin()
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setRedirectCountdown((current) => current - 1)
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [registrationCompleted, redirectCountdown])
 
   /* =========================================================
      LOAD PLANS
@@ -516,7 +617,7 @@ function RegisterCompanyPageContent() {
      PREVIEW
   ========================================================= */
   useEffect(() => {
-    if (!planId || !API) return
+    if (!planId || !API || registrationCompleted) return
 
     async function loadPreview() {
       setPreviewLoading(true)
@@ -552,7 +653,7 @@ function RegisterCompanyPageContent() {
     }
 
     loadPreview()
-  }, [planId, billingCycle, discountCode])
+  }, [planId, billingCycle, discountCode, registrationCompleted])
 
   const localBasePrice =
     billingCycle === "monthly"
@@ -657,6 +758,16 @@ function RegisterCompanyPageContent() {
         const data: ConfirmPaymentResponse | null = await res.json().catch(() => null)
 
         if (res.status === 409) {
+          const completedState: RegistrationSuccessState = {
+            draftId: confirmationPayload.draft_id,
+            paymentMethod: confirmationPayload.payment_method,
+            gatewayStatus: confirmationPayload.gateway_status,
+            gatewayTransactionId: confirmationPayload.gateway_transaction_id,
+            message: isArabic
+              ? "تم اعتماد هذه العملية مسبقًا. يمكنك الآن تسجيل الدخول إلى حساب الشركة."
+              : "This payment was already confirmed earlier. You can now log in to the company account.",
+          }
+
           setDraftId(confirmationPayload.draft_id)
           setDraftConfirmed(true)
 
@@ -664,11 +775,8 @@ function RegisterCompanyPageContent() {
             isArabic ? "تم اعتماد الدفع مسبقًا" : "Payment already confirmed"
           )
 
-          setLastActionMessage(
-            isArabic
-              ? "تم اعتماد هذه العملية مسبقًا. يمكنك الآن تسجيل الدخول إلى حساب الشركة."
-              : "This payment was already confirmed earlier. You can now log in to the company account."
-          )
+          setLastActionMessage(completedState.message || "")
+          markRegistrationCompleted(completedState)
 
           router.replace(
             buildRegisterUrl({
@@ -703,30 +811,41 @@ function RegisterCompanyPageContent() {
         setDraftId(confirmationPayload.draft_id)
         setDraftConfirmed(true)
 
+        const successMessage = data.company_name
+          ? isArabic
+            ? `تم تأكيد الدفع بنجاح وتم تفعيل الشركة "${data.company_name}". يمكنك الآن تسجيل الدخول بالحساب الذي أنشأته.`
+            : `Payment confirmed successfully and company "${data.company_name}" has been activated. You can now sign in with the account you created.`
+          : data.message
+          ? data.message
+          : isArabic
+          ? "تم تأكيد الدفع بنجاح واكتمل إعداد التسجيل."
+          : "Payment confirmed successfully and onboarding has been completed."
+
+        const completedState: RegistrationSuccessState = {
+          draftId: confirmationPayload.draft_id,
+          companyId: data.company_id,
+          companyName: data.company_name,
+          adminUsername: data.admin_username,
+          invoiceId: data.invoice_id,
+          paymentMethod: data.payment_method || confirmationPayload.payment_method,
+          gatewayStatus: data.gateway_status || confirmationPayload.gateway_status,
+          gatewayTransactionId:
+            data.gateway_transaction_id ?? confirmationPayload.gateway_transaction_id,
+          message: successMessage,
+        }
+
         if (data.company_name) {
           toast.success(
             isArabic ? "تم تفعيل الشركة بنجاح" : "Company activated successfully"
           )
-          setLastActionMessage(
-            isArabic
-              ? `تم تأكيد الدفع بنجاح وتم تفعيل الشركة "${data.company_name}". يمكنك الآن تسجيل الدخول بالحساب الذي أنشأته.`
-              : `Payment confirmed successfully and company "${data.company_name}" has been activated. You can now sign in with the account you created.`
-          )
-        } else if (data.message) {
-          toast.success(
-            isArabic ? "تم تأكيد الدفع بنجاح" : "Payment confirmed successfully"
-          )
-          setLastActionMessage(data.message)
         } else {
           toast.success(
             isArabic ? "تم تأكيد الدفع بنجاح" : "Payment confirmed successfully"
           )
-          setLastActionMessage(
-            isArabic
-              ? "تم تأكيد الدفع بنجاح واكتمل إعداد التسجيل."
-              : "Payment confirmed successfully and onboarding has been completed."
-          )
         }
+
+        setLastActionMessage(successMessage)
+        markRegistrationCompleted(completedState)
 
         router.replace(
           buildRegisterUrl({
@@ -1198,10 +1317,7 @@ function RegisterCompanyPageContent() {
       })
 
       if (!paymentStarted) {
-        if (
-          paymentMethod === "TAMARA" ||
-          paymentMethod === "CREDIT_CARD"
-        ) {
+        if (paymentMethod === "TAMARA" || paymentMethod === "CREDIT_CARD") {
           toast.info(
             isArabic
               ? "تم إنشاء المسودة بنجاح، لكن لم يتم إرجاع رابط الدفع من الخادم بعد."
@@ -1226,6 +1342,213 @@ function RegisterCompanyPageContent() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (registrationCompleted) {
+    return (
+      <div
+        className="mx-auto max-w-6xl space-y-6 p-6"
+        dir={isArabic ? "rtl" : "ltr"}
+      >
+        <div className="flex flex-col gap-4 rounded-3xl border bg-background p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+          <div className={`space-y-2 ${isArabic ? "text-right" : "text-left"}`}>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Sparkles className="h-4 w-4" />
+              {isArabic ? "اكتمل التسجيل بنجاح" : "Registration Completed"}
+            </div>
+
+            <h1 className="text-3xl font-bold tracking-tight">
+              {isArabic ? "تم تفعيل شركتك بنجاح" : "Your Company Has Been Activated"}
+            </h1>
+
+            <p className="text-sm text-muted-foreground">
+              {isArabic
+                ? "تم تأكيد الدفع وإنشاء الاشتراك والفاتورة وربط حساب الشركة بنجاح."
+                : "Payment was confirmed successfully, and the company, subscription, and invoice were created successfully."}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={toggleLanguage}
+              className="h-9 rounded-xl"
+            >
+              <Languages className="h-4 w-4" />
+              <span>{isArabic ? "EN" : "عربي"}</span>
+            </Button>
+
+            {selectedPlan?.name || initialPlanName ? (
+              <Badge className="rounded-full px-4 py-1.5 text-sm">
+                {isArabic ? "الباقة:" : "Plan:"} {selectedPlan?.name || initialPlanName}
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+
+        <Card className="overflow-hidden border-emerald-200 bg-gradient-to-br from-emerald-50 via-background to-background shadow-sm">
+          <CardContent className="p-0">
+            <div className="grid gap-0 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="space-y-6 p-6 md:p-8">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl bg-emerald-100">
+                    <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+                  </div>
+
+                  <div className={`space-y-2 ${isArabic ? "text-right" : "text-left"}`}>
+                    <h2 className="text-2xl font-bold text-emerald-700">
+                      {isArabic ? "تم كل شيء بنجاح" : "Everything Is Ready"}
+                    </h2>
+
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {successData?.message ||
+                        (isArabic
+                          ? "تم تفعيل الحساب بنجاح ويمكنك الآن الانتقال إلى صفحة تسجيل الدخول للدخول إلى لوحة شركتك."
+                          : "Your account has been activated successfully. You can now go to the login page and access your company account.")}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="text-xs text-muted-foreground">
+                      {isArabic ? "اسم الشركة" : "Company Name"}
+                    </div>
+                    <div className="mt-2 text-base font-semibold">
+                      {successData?.companyName || "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="text-xs text-muted-foreground">
+                      {isArabic ? "اسم المستخدم" : "Username"}
+                    </div>
+                    <div className="mt-2 text-base font-semibold">
+                      {successData?.adminUsername || ownerUsername || "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="text-xs text-muted-foreground">
+                      {isArabic ? "رقم الفاتورة" : "Invoice ID"}
+                    </div>
+                    <div className="mt-2 text-base font-semibold">
+                      {successData?.invoiceId ?? "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="text-xs text-muted-foreground">
+                      {isArabic ? "رقم المسودة" : "Draft ID"}
+                    </div>
+                    <div className="mt-2 text-base font-semibold">
+                      {successData?.draftId || draftId || "—"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <ShieldCheck className="h-4 w-4" />
+                    {isArabic
+                      ? "الخطوة التالية: تسجيل الدخول"
+                      : "Next Step: Sign In"}
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {isArabic
+                      ? `سيتم تحويلك تلقائيًا إلى صفحة تسجيل الدخول خلال ${redirectCountdown} ثانية.`
+                      : `You will be redirected automatically to the sign-in page in ${redirectCountdown} seconds.`}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button onClick={goToLogin} className="gap-2">
+                    <LogIn className="h-4 w-4" />
+                    {isArabic ? "الانتقال إلى تسجيل الدخول الآن" : "Go to Login Now"}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => router.push("/#pricing")}
+                  >
+                    {isArabic ? "العودة إلى الأسعار" : "Back to Pricing"}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="border-t bg-muted/20 p-6 md:p-8 lg:border-t-0 lg:border-s">
+                <div className="space-y-4">
+                  <div className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}>
+                    <div className="text-sm font-semibold">
+                      {isArabic ? "ملخص العملية" : "Activation Summary"}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {isArabic
+                        ? "تم إنهاء رحلة التسجيل والدفع والتفعيل بنجاح."
+                        : "The registration, payment, and activation flow has completed successfully."}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {[
+                      isArabic ? "إنشاء الشركة" : "Company created",
+                      isArabic ? "إنشاء الاشتراك" : "Subscription created",
+                      isArabic ? "إنشاء الفاتورة" : "Invoice created",
+                      isArabic ? "تسجيل عملية الدفع" : "Payment recorded",
+                    ].map((item) => (
+                      <div
+                        key={item}
+                        className="flex items-center gap-3 rounded-2xl border bg-background px-4 py-3"
+                      >
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <span className="text-sm font-medium">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="text-xs text-muted-foreground">
+                      {isArabic ? "طريقة الدفع" : "Payment Method"}
+                    </div>
+                    <div className="mt-2 font-semibold">
+                      {successData?.paymentMethod
+                        ? getMethodLabel(
+                            normalizeReturnedPaymentMethod(successData.paymentMethod) || "CREDIT_CARD",
+                            locale
+                          )
+                        : getMethodLabel(paymentMethod, locale)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="text-xs text-muted-foreground">
+                      {isArabic ? "حالة البوابة" : "Gateway Status"}
+                    </div>
+                    <div className="mt-2 font-semibold">
+                      {successData?.gatewayStatus || "SUCCESS"}
+                    </div>
+                  </div>
+
+                  {successData?.gatewayTransactionId ? (
+                    <div className="rounded-2xl border bg-background p-4">
+                      <div className="text-xs text-muted-foreground">
+                        {isArabic ? "مرجع العملية" : "Transaction Reference"}
+                      </div>
+                      <div className="mt-2 break-all text-sm font-semibold">
+                        {successData.gatewayTransactionId}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
@@ -1459,7 +1782,11 @@ function RegisterCompanyPageContent() {
                     <label className="text-sm text-muted-foreground">
                       {isArabic ? "العملة" : "Currency"}
                     </label>
-                    <Input value={currency} readOnly className={isArabic ? "text-right" : "text-left"} />
+                    <Input
+                      value={currency}
+                      readOnly
+                      className={isArabic ? "text-right" : "text-left"}
+                    />
                   </div>
                 </div>
               </div>
