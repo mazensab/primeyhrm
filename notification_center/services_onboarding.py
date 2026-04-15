@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 notification_center/services_onboarding.py
-# 🧠 Onboarding Notification Services — Mham Cloud V1.3
+# 🧠 Onboarding Notification Services — Mham Cloud V1.4
 # ------------------------------------------------------------
 # ✅ طبقة رسمية موحدة لإشعارات التسجيل الخارجي / onboarding
 # ✅ مبنية فوق Notification Center 2.0
@@ -16,6 +16,8 @@
 # ✅ الرسائل الآن أغنى بالبيانات التشغيلية
 # ✅ تدعم إرفاق فاتورة PDF عند تأكيد الدفع إذا وُجدت
 # ✅ تمنع تمرير bytes داخل NotificationEvent.context
+# ✅ FIX: richer target fallback from context for admin / owner / company
+# ✅ FIX: processed target count reflects actual dispatch attempts
 # ------------------------------------------------------------
 
 from __future__ import annotations
@@ -236,38 +238,92 @@ def _json_safe_context(context: dict | None = None) -> dict:
     return ctx
 
 
+def _context_first(ctx: dict | None, keys: list[str], default: str = "") -> str:
+    context = ctx or {}
+    for key in keys:
+        value = _clean_text(context.get(key), "")
+        if value:
+            return value
+    return default
+
+
 def _collect_targets_from_context(context: dict | None = None) -> list[dict]:
+    """
+    استخراج المستهدفين من:
+    1) targets الجاهزة إن وُجدت
+    2) fallback fields المفردة للأدمن / المالك / الشركة
+    """
     ctx = context or {}
-    raw_targets = ctx.get("targets")
-
-    if not isinstance(raw_targets, list):
-        return []
-
     cleaned_targets: list[dict] = []
     seen_keys: set[str] = set()
 
-    for item in raw_targets:
-        if not isinstance(item, dict):
-            continue
+    def _append_target(*, phone="", email="", name="", role="user", user=None):
+        normalized_phone = _normalize_phone(phone)
+        normalized_email = _normalize_email(email)
+        safe_name = _clean_text(name, "User")
+        safe_role = _clean_text(role, "user")
 
-        phone = _normalize_phone(item.get("phone"))
-        email = _normalize_email(item.get("email"))
-        name = _clean_text(item.get("name"), "User")
-        role = _clean_text(item.get("role"), "user")
-
-        key = phone or email
+        key = normalized_phone or normalized_email or f"user:{getattr(user, 'id', None)}"
         if not key or key in seen_keys:
-            continue
+            return
 
         seen_keys.add(key)
         cleaned_targets.append(
             {
-                "phone": phone,
-                "email": email,
-                "name": name,
-                "role": role,
+                "phone": normalized_phone,
+                "email": normalized_email,
+                "name": safe_name,
+                "role": safe_role,
+                "user": user,
             }
         )
+
+    # --------------------------------------------------------
+    # 1) targets الجاهزة
+    # --------------------------------------------------------
+    raw_targets = ctx.get("targets")
+    if isinstance(raw_targets, list):
+        for item in raw_targets:
+            if not isinstance(item, dict):
+                continue
+
+            _append_target(
+                phone=item.get("phone"),
+                email=item.get("email"),
+                name=item.get("name"),
+                role=item.get("role", "user"),
+                user=item.get("user"),
+            )
+
+    # --------------------------------------------------------
+    # 2) fallback للأدمن
+    # --------------------------------------------------------
+    _append_target(
+        phone=_context_first(ctx, ["admin_phone", "admin_draft_phone"]),
+        email=_context_first(ctx, ["admin_email"]),
+        name=_context_first(ctx, ["admin_name", "admin_username"], "Admin"),
+        role="admin",
+    )
+
+    # --------------------------------------------------------
+    # 3) fallback لمالك الشركة
+    # --------------------------------------------------------
+    _append_target(
+        phone=_context_first(ctx, ["company_owner_phone"]),
+        email=_context_first(ctx, ["company_owner_email", "owner_email"]),
+        name=_context_first(ctx, ["company_owner_name", "owner_name"], "Owner"),
+        role="owner",
+    )
+
+    # --------------------------------------------------------
+    # 4) fallback للشركة نفسها
+    # --------------------------------------------------------
+    _append_target(
+        phone=_context_first(ctx, ["company_phone", "company_draft_phone"]),
+        email=_context_first(ctx, ["company_email"]),
+        name=_context_first(ctx, ["company_name"], "Company"),
+        role="company",
+    )
 
     return cleaned_targets
 
@@ -596,8 +652,13 @@ def _dispatch_to_targets(
     email_html_message: str | None = None,
     email_attachments: list[dict] | None = None,
     create_in_app_for_user: bool = True,
-) -> list:
-    created_notifications = []
+) -> list[dict]:
+    """
+    نعيد قائمة summaries بدل الاعتماد على note فقط،
+    لأن create_notification قد يرسل email/whatsapp بنجاح
+    حتى لو لم ينشئ In-App note.
+    """
+    processed_results: list[dict] = []
 
     safe_base_context = _json_safe_context(base_context)
 
@@ -610,6 +671,7 @@ def _dispatch_to_targets(
 
         send_email = bool(email)
         send_whatsapp = bool(phone)
+        create_in_app = bool(create_in_app_for_user and user)
 
         if not user and not send_email and not send_whatsapp:
             continue
@@ -651,13 +713,24 @@ def _dispatch_to_targets(
             email_text_message=email_text_message,
             email_html_message=email_html_message,
             email_attachments=email_attachments if send_email else None,
-            create_in_app=bool(create_in_app_for_user and user),
+            create_in_app=create_in_app,
         )
 
-        if note:
-            created_notifications.append(note)
+        processed_results.append(
+            {
+                "user_id": getattr(user, "id", None) if user else None,
+                "email": email,
+                "phone": phone,
+                "name": name,
+                "role": role,
+                "send_email": send_email,
+                "send_whatsapp": send_whatsapp,
+                "create_in_app": create_in_app,
+                "notification_created": bool(note),
+            }
+        )
 
-    return created_notifications
+    return processed_results
 
 
 # ============================================================
@@ -690,7 +763,10 @@ def notify_onboarding_draft_created(
     admin_name = _clean_text(getattr(draft, "admin_name", "") or final_context.get("admin_name"), "-")
     admin_username = _clean_text(getattr(draft, "admin_username", "") or final_context.get("admin_username"), "-")
     admin_email = _clean_text(getattr(draft, "admin_email", "") or final_context.get("admin_email"), "-")
-    admin_phone = _clean_text(final_context.get("admin_phone"), "-")
+    admin_phone = _clean_text(
+        final_context.get("admin_phone") or final_context.get("admin_draft_phone"),
+        "-",
+    )
 
     title = "تم إنشاء طلب تسجيل الشركة بنجاح"
     message = (
@@ -897,7 +973,11 @@ def notify_onboarding_payment_confirmed(
         "-",
     )
 
-    admin_name = _safe_user_display_name(admin_user or target_user, default="-")
+    admin_name = _clean_text(
+        _safe_user_display_name(admin_user or target_user, default="")
+        or final_context.get("admin_name"),
+        "-",
+    )
     admin_username = _clean_text(
         getattr(admin_user or target_user, "username", "") or final_context.get("admin_username"),
         "-",

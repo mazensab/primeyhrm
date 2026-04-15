@@ -1,6 +1,6 @@
 # ============================================================
 # 🚀 System/Public Onboarding — Confirm Payment & Activate Company
-# Mham Cloud | V3.7 PRODUCT-AWARE
+# Mham Cloud | V3.8 PRODUCT-AWARE
 # ============================================================
 # ✔ Public Flow Supported
 # ✔ No CASH
@@ -19,6 +19,8 @@
 # ✔ PRODUCT-AWARE Subscription Creation
 # ✔ Payment record now keeps gateway reference when available
 # ✔ Better idempotent response for already-paid draft
+# ✔ FIX: prefer draft.admin_phone for admin onboarding notifications
+# ✔ FIX: richer targets/context for onboarding payment confirmation
 # ============================================================
 
 from __future__ import annotations
@@ -189,9 +191,45 @@ def _get_best_phone_for_entity(instance) -> str:
     return ""
 
 
+def _get_draft_admin_phone(draft) -> str:
+    return _get_first_existing_attr(
+        draft,
+        [
+            "admin_phone",
+            "admin_mobile",
+            "admin_mobile_number",
+            "admin_whatsapp_number",
+            "admin_phone_number",
+        ],
+        "",
+    )
+
+
+def _get_draft_company_phone(draft) -> str:
+    return _get_first_existing_attr(
+        draft,
+        [
+            "phone",
+            "mobile",
+            "mobile_number",
+            "whatsapp_number",
+            "phone_number",
+        ],
+        "",
+    )
+
+
 def _populate_admin_user_phone_from_draft(*, admin_user, draft) -> None:
-    draft_phone = _safe_text(getattr(draft, "phone", None), "")
-    if not draft_phone or not admin_user:
+    """
+    ✅ الإصلاح الأساسي:
+    نأخذ رقم الأدمن من admin_phone داخل draft أولًا،
+    ثم fallback فقط إلى رقم الشركة لو لم يوجد رقم أدمن.
+    """
+    draft_admin_phone = _safe_text(_get_draft_admin_phone(draft), "")
+    fallback_company_phone = _safe_text(_get_draft_company_phone(draft), "")
+    selected_phone = draft_admin_phone or fallback_company_phone
+
+    if not selected_phone or not admin_user:
         return
 
     updated_fields: list[str] = []
@@ -210,7 +248,7 @@ def _populate_admin_user_phone_from_draft(*, admin_user, draft) -> None:
             continue
 
         try:
-            setattr(admin_user, attr_name, draft_phone)
+            setattr(admin_user, attr_name, selected_phone)
             updated_fields.append(attr_name)
         except Exception:
             logger.exception(
@@ -223,9 +261,10 @@ def _populate_admin_user_phone_from_draft(*, admin_user, draft) -> None:
         try:
             admin_user.save(update_fields=updated_fields)
             logger.info(
-                "Admin user phone populated from draft successfully. user_id=%s updated_fields=%s",
+                "Admin user phone populated from draft successfully. user_id=%s updated_fields=%s source=%s",
                 getattr(admin_user, "id", None),
                 updated_fields,
+                "draft_admin_phone" if draft_admin_phone else "draft_company_phone",
             )
         except Exception:
             logger.exception(
@@ -235,7 +274,15 @@ def _populate_admin_user_phone_from_draft(*, admin_user, draft) -> None:
             )
 
 
-def _collect_notification_targets(*, company, admin_user, company_owner) -> list[dict]:
+def _collect_notification_targets(*, company, admin_user, company_owner, draft=None) -> list[dict]:
+    """
+    تجميع المستهدفين بشكل غني وآمن:
+    - الشركة
+    - المالك
+    - الأدمن الجديد
+    - أدمن الـ draft حتى لو لم ينعكس بعد على user/profile
+    - بريد/هاتف الشركة من الـ draft
+    """
     targets: list[dict] = []
     seen_phones: set[str] = set()
     seen_emails: set[str] = set()
@@ -269,6 +316,7 @@ def _collect_notification_targets(*, company, admin_user, company_owner) -> list
             "role": safe_role,
         })
 
+    # 1) الشركة من السجل الفعلي
     _append_target(
         phone=_get_best_phone_for_entity(company),
         email=getattr(company, "email", None),
@@ -276,6 +324,7 @@ def _collect_notification_targets(*, company, admin_user, company_owner) -> list
         role="company",
     )
 
+    # 2) المالك
     _append_target(
         phone=_get_best_phone_for_entity(company_owner),
         email=getattr(company_owner, "email", None),
@@ -283,12 +332,30 @@ def _collect_notification_targets(*, company, admin_user, company_owner) -> list
         role="owner",
     )
 
+    # 3) الأدمن الجديد من user الفعلي
     _append_target(
         phone=_get_best_phone_for_entity(admin_user),
         email=getattr(admin_user, "email", None),
         name=getattr(admin_user, "first_name", None) or getattr(admin_user, "username", None),
         role="admin",
     )
+
+    # 4) أدمن الـ draft مباشرة لضمان عدم ضياع الإرسال
+    if draft is not None:
+        _append_target(
+            phone=_get_draft_admin_phone(draft),
+            email=getattr(draft, "admin_email", None),
+            name=getattr(draft, "admin_name", None) or getattr(draft, "admin_username", None),
+            role="admin",
+        )
+
+        # 5) جهة الشركة من الـ draft
+        _append_target(
+            phone=_get_draft_company_phone(draft),
+            email=getattr(draft, "email", None),
+            name=getattr(draft, "company_name", None),
+            role="company",
+        )
 
     return targets
 
@@ -563,9 +630,12 @@ def _build_payment_confirmation_context(
         company=company,
         admin_user=admin_user,
         company_owner=company_owner,
+        draft=draft,
     )
 
     resolved_product = getattr(subscription, "resolved_product", None)
+    draft_admin_phone = _safe_text(_get_draft_admin_phone(draft), "")
+    draft_company_phone = _safe_text(_get_draft_company_phone(draft), "")
 
     return {
         "draft_id": getattr(draft, "id", None),
@@ -573,14 +643,18 @@ def _build_payment_confirmation_context(
         "company_name": _safe_text(company.name),
         "company_email": _safe_text(company.email),
         "company_phone": _safe_text(company.phone),
+        "company_draft_phone": draft_company_phone,
         "commercial_number": _safe_text(company.commercial_number),
         "city": _safe_text(company.city),
         "company_owner_id": getattr(company_owner, "id", None),
         "company_owner_email": _safe_text(getattr(company_owner, "email", None)),
+        "company_owner_phone": _safe_text(_get_best_phone_for_entity(company_owner), ""),
         "admin_user_id": getattr(admin_user, "id", None),
         "admin_name": _safe_text(admin_user.first_name or admin_user.username),
         "admin_username": _safe_text(admin_user.username),
         "admin_email": _safe_text(admin_user.email),
+        "admin_phone": _safe_text(_get_best_phone_for_entity(admin_user), "") or draft_admin_phone,
+        "admin_draft_phone": draft_admin_phone,
         "product_id": getattr(resolved_product, "id", None),
         "product_code": _safe_text(getattr(resolved_product, "code", None)),
         "product_name": _safe_text(getattr(resolved_product, "name", None)),

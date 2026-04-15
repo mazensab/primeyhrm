@@ -111,6 +111,17 @@ type RegistrationSuccessState = {
   message?: string
 }
 
+type RegistrationDraftSnapshot = {
+  draftId: string
+  companyName?: string
+  adminUsername?: string
+  adminEmail?: string
+  adminPhone?: string
+  planName?: string
+  paymentMethod?: PaymentMethod
+  billingCycle?: BillingCycle
+}
+
 const countries = [
   {
     name: "Saudi Arabia",
@@ -334,6 +345,10 @@ function getSuccessStorageKey(draftId: string) {
   return `primey-register-success:${draftId}`
 }
 
+function getDraftSnapshotStorageKey(draftId: string) {
+  return `primey-register-draft:${draftId}`
+}
+
 function persistSuccessState(data: RegistrationSuccessState) {
   if (typeof window === "undefined" || !data.draftId) return
 
@@ -355,6 +370,55 @@ function restoreSuccessState(draftId: string | null) {
   } catch (error) {
     console.error("Restore success state error:", error)
     return null
+  }
+}
+
+function persistDraftSnapshot(data: RegistrationDraftSnapshot) {
+  if (typeof window === "undefined" || !data.draftId) return
+
+  try {
+    window.sessionStorage.setItem(
+      getDraftSnapshotStorageKey(data.draftId),
+      JSON.stringify(data)
+    )
+  } catch (error) {
+    console.error("Persist draft snapshot error:", error)
+  }
+}
+
+function restoreDraftSnapshot(draftId: string | null) {
+  if (typeof window === "undefined" || !draftId) return null
+
+  try {
+    const raw = window.sessionStorage.getItem(getDraftSnapshotStorageKey(draftId))
+    if (!raw) return null
+
+    return JSON.parse(raw) as RegistrationDraftSnapshot
+  } catch (error) {
+    console.error("Restore draft snapshot error:", error)
+    return null
+  }
+}
+
+function buildDraftSnapshot(params: {
+  draftId: string
+  companyName: string
+  adminUsername: string
+  adminEmail: string
+  adminPhone: string
+  planName: string
+  paymentMethod: PaymentMethod
+  billingCycle: BillingCycle
+}): RegistrationDraftSnapshot {
+  return {
+    draftId: params.draftId,
+    companyName: params.companyName,
+    adminUsername: params.adminUsername,
+    adminEmail: params.adminEmail,
+    adminPhone: params.adminPhone,
+    planName: params.planName,
+    paymentMethod: params.paymentMethod,
+    billingCycle: params.billingCycle,
   }
 }
 
@@ -442,6 +506,7 @@ function RegisterCompanyPageContent() {
   const [registrationCompleted, setRegistrationCompleted] = useState(false)
   const [successData, setSuccessData] = useState<RegistrationSuccessState | null>(null)
   const [redirectCountdown, setRedirectCountdown] = useState(SUCCESS_REDIRECT_SECONDS)
+  const [draftSnapshot, setDraftSnapshot] = useState<RegistrationDraftSnapshot | null>(null)
 
   const isArabic = locale === "ar"
   const strength = passwordStrength(ownerPassword, locale)
@@ -456,6 +521,22 @@ function RegisterCompanyPageContent() {
     setSuccessData(data)
     setRegistrationCompleted(true)
     setRedirectCountdown(SUCCESS_REDIRECT_SECONDS)
+  }
+
+  const saveDraftSnapshot = (nextDraftId: string) => {
+    const snapshot = buildDraftSnapshot({
+      draftId: nextDraftId,
+      companyName: name.trim(),
+      adminUsername: ownerUsername.trim(),
+      adminEmail: ownerEmail.trim(),
+      adminPhone: ownerPhone.trim(),
+      planName: selectedPlan?.name || initialPlanName || "",
+      paymentMethod,
+      billingCycle,
+    })
+
+    persistDraftSnapshot(snapshot)
+    setDraftSnapshot(snapshot)
   }
 
   useEffect(() => {
@@ -498,6 +579,46 @@ function RegisterCompanyPageContent() {
   }
 
   /* =========================================================
+     RESTORE DRAFT SNAPSHOT
+  ========================================================= */
+  useEffect(() => {
+    if (!initialDraftId) return
+
+    const restored = restoreDraftSnapshot(initialDraftId)
+    if (!restored) return
+
+    setDraftSnapshot(restored)
+
+    if (!name.trim() && restored.companyName) {
+      setName(restored.companyName)
+    }
+
+    if (!ownerUsername.trim() && restored.adminUsername) {
+      setOwnerUsername(restored.adminUsername)
+    }
+
+    if (!ownerEmail.trim() && restored.adminEmail) {
+      setOwnerEmail(restored.adminEmail)
+    }
+
+    if (!ownerPhone.trim() && restored.adminPhone) {
+      setOwnerPhone(restored.adminPhone)
+    }
+
+    if (!initialPlanName && restored.planName) {
+      // لا حاجة لتخزين مستقل لأن العرض يستخدم draftSnapshot كـ fallback
+    }
+
+    if (restored.paymentMethod) {
+      setPaymentMethod(restored.paymentMethod)
+    }
+
+    if (restored.billingCycle) {
+      setBillingCycle(restored.billingCycle)
+    }
+  }, [initialDraftId])
+
+  /* =========================================================
      RESTORE SUCCESS STATE AFTER REFRESH
   ========================================================= */
   useEffect(() => {
@@ -509,15 +630,28 @@ function RegisterCompanyPageContent() {
     const restored = restoreSuccessState(returnedDraftId)
     if (!restored) return
 
-    setDraftId(restored.draftId)
+    const restoredDraft = restoreDraftSnapshot(returnedDraftId)
+
+    const mergedState: RegistrationSuccessState = {
+      ...restored,
+      companyName: restored.companyName || restoredDraft?.companyName,
+      adminUsername: restored.adminUsername || restoredDraft?.adminUsername,
+      paymentMethod: restored.paymentMethod || restoredDraft?.paymentMethod,
+    }
+
+    if (restoredDraft) {
+      setDraftSnapshot(restoredDraft)
+    }
+
+    setDraftId(mergedState.draftId)
     setDraftConfirmed(true)
     setLastActionMessage(
-      restored.message ||
+      mergedState.message ||
         (isArabic
           ? "تم تفعيل شركتك بنجاح. يمكنك الآن تسجيل الدخول."
           : "Your company has been activated successfully. You can now sign in.")
     )
-    setSuccessData(restored)
+    setSuccessData(mergedState)
     setRegistrationCompleted(true)
     setRedirectCountdown(SUCCESS_REDIRECT_SECONDS)
   }, [searchParams, isArabic])
@@ -744,6 +878,11 @@ function RegisterCompanyPageContent() {
 
       try {
         const csrfToken = await ensureCsrf()
+        const restoredDraft = restoreDraftSnapshot(confirmationPayload.draft_id)
+
+        if (restoredDraft) {
+          setDraftSnapshot(restoredDraft)
+        }
 
         const res = await fetch(`${API}/api/system/onboarding/confirm-payment/`, {
           method: "POST",
@@ -760,7 +899,10 @@ function RegisterCompanyPageContent() {
         if (res.status === 409) {
           const completedState: RegistrationSuccessState = {
             draftId: confirmationPayload.draft_id,
-            paymentMethod: confirmationPayload.payment_method,
+            companyName: restoredDraft?.companyName,
+            adminUsername: restoredDraft?.adminUsername,
+            paymentMethod:
+              restoredDraft?.paymentMethod || confirmationPayload.payment_method,
             gatewayStatus: confirmationPayload.gateway_status,
             gatewayTransactionId: confirmationPayload.gateway_transaction_id,
             message: isArabic
@@ -781,7 +923,11 @@ function RegisterCompanyPageContent() {
           router.replace(
             buildRegisterUrl({
               plan_id: planId || initialPlanId,
-              plan_name: selectedPlan?.name || initialPlanName,
+              plan_name:
+                selectedPlan?.name ||
+                initialPlanName ||
+                restoredDraft?.planName ||
+                "",
               draft_id: confirmationPayload.draft_id,
               payment: "success",
             })
@@ -824,10 +970,13 @@ function RegisterCompanyPageContent() {
         const completedState: RegistrationSuccessState = {
           draftId: confirmationPayload.draft_id,
           companyId: data.company_id,
-          companyName: data.company_name,
-          adminUsername: data.admin_username,
+          companyName: data.company_name || restoredDraft?.companyName,
+          adminUsername: data.admin_username || restoredDraft?.adminUsername,
           invoiceId: data.invoice_id,
-          paymentMethod: data.payment_method || confirmationPayload.payment_method,
+          paymentMethod:
+            data.payment_method ||
+            restoredDraft?.paymentMethod ||
+            confirmationPayload.payment_method,
           gatewayStatus: data.gateway_status || confirmationPayload.gateway_status,
           gatewayTransactionId:
             data.gateway_transaction_id ?? confirmationPayload.gateway_transaction_id,
@@ -850,7 +999,11 @@ function RegisterCompanyPageContent() {
         router.replace(
           buildRegisterUrl({
             plan_id: planId || initialPlanId,
-            plan_name: selectedPlan?.name || initialPlanName,
+            plan_name:
+              selectedPlan?.name ||
+              initialPlanName ||
+              restoredDraft?.planName ||
+              "",
             draft_id: confirmationPayload.draft_id,
             payment: "success",
           })
@@ -1005,6 +1158,8 @@ function RegisterCompanyPageContent() {
 
     const { currentDraftId, selectedPaymentMethod, csrfToken } = args
 
+    saveDraftSnapshot(currentDraftId)
+
     if (selectedPaymentMethod === "BANK_TRANSFER") {
       setLastActionMessage(
         isArabic
@@ -1059,6 +1214,7 @@ function RegisterCompanyPageContent() {
 
         if (returnedDraftId) {
           setDraftId(returnedDraftId)
+          saveDraftSnapshot(returnedDraftId)
         }
 
         if (typeof data.message === "string" && data.message.trim()) {
@@ -1132,6 +1288,7 @@ function RegisterCompanyPageContent() {
 
         if (returnedDraftId) {
           setDraftId(returnedDraftId)
+          saveDraftSnapshot(returnedDraftId)
         }
 
         if (typeof data.message === "string" && data.message.trim()) {
@@ -1234,6 +1391,7 @@ function RegisterCompanyPageContent() {
 
       const newDraftId = String(createData.draft_id)
       setDraftId(newDraftId)
+      saveDraftSnapshot(newDraftId)
 
       const confirmRes = await fetch(`${API}/api/system/onboarding/confirm-draft/`, {
         method: "POST",
@@ -1344,6 +1502,20 @@ function RegisterCompanyPageContent() {
     }
   }
 
+  const resolvedCompanyName =
+    successData?.companyName || draftSnapshot?.companyName || name || "—"
+
+  const resolvedAdminUsername =
+    successData?.adminUsername || draftSnapshot?.adminUsername || ownerUsername || "—"
+
+  const resolvedPaymentMethod =
+    normalizeReturnedPaymentMethod(successData?.paymentMethod || null) ||
+    draftSnapshot?.paymentMethod ||
+    paymentMethod
+
+  const resolvedPlanName =
+    selectedPlan?.name || initialPlanName || draftSnapshot?.planName || ""
+
   if (registrationCompleted) {
     return (
       <div
@@ -1380,9 +1552,9 @@ function RegisterCompanyPageContent() {
               <span>{isArabic ? "EN" : "عربي"}</span>
             </Button>
 
-            {selectedPlan?.name || initialPlanName ? (
+            {resolvedPlanName ? (
               <Badge className="rounded-full px-4 py-1.5 text-sm">
-                {isArabic ? "الباقة:" : "Plan:"} {selectedPlan?.name || initialPlanName}
+                {isArabic ? "الباقة:" : "Plan:"} {resolvedPlanName}
               </Badge>
             ) : null}
           </div>
@@ -1417,7 +1589,7 @@ function RegisterCompanyPageContent() {
                       {isArabic ? "اسم الشركة" : "Company Name"}
                     </div>
                     <div className="mt-2 text-base font-semibold">
-                      {successData?.companyName || "—"}
+                      {resolvedCompanyName}
                     </div>
                   </div>
 
@@ -1426,7 +1598,7 @@ function RegisterCompanyPageContent() {
                       {isArabic ? "اسم المستخدم" : "Username"}
                     </div>
                     <div className="mt-2 text-base font-semibold">
-                      {successData?.adminUsername || ownerUsername || "—"}
+                      {resolvedAdminUsername}
                     </div>
                   </div>
 
@@ -1514,12 +1686,7 @@ function RegisterCompanyPageContent() {
                       {isArabic ? "طريقة الدفع" : "Payment Method"}
                     </div>
                     <div className="mt-2 font-semibold">
-                      {successData?.paymentMethod
-                        ? getMethodLabel(
-                            normalizeReturnedPaymentMethod(successData.paymentMethod) || "CREDIT_CARD",
-                            locale
-                          )
-                        : getMethodLabel(paymentMethod, locale)}
+                      {getMethodLabel(resolvedPaymentMethod, locale)}
                     </div>
                   </div>
 
@@ -1586,9 +1753,9 @@ function RegisterCompanyPageContent() {
             <span>{isArabic ? "EN" : "عربي"}</span>
           </Button>
 
-          {selectedPlan?.name || initialPlanName ? (
+          {resolvedPlanName ? (
             <Badge className="rounded-full px-4 py-1.5 text-sm">
-              {isArabic ? "الباقة:" : "Plan:"} {selectedPlan?.name || initialPlanName}
+              {isArabic ? "الباقة:" : "Plan:"} {resolvedPlanName}
             </Badge>
           ) : null}
 
@@ -1662,7 +1829,7 @@ function RegisterCompanyPageContent() {
                       {isArabic ? "الباقة المختارة" : "Selected Plan"}
                     </span>
                     <span className="font-semibold">
-                      {selectedPlan?.name || initialPlanName || "-"}
+                      {resolvedPlanName || "-"}
                     </span>
                   </div>
 
@@ -2301,7 +2468,7 @@ function RegisterCompanyPageContent() {
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">{isArabic ? "الباقة" : "Plan"}</span>
                   <span className="font-medium">
-                    {selectedPlan?.name || initialPlanName || "-"}
+                    {resolvedPlanName || "-"}
                   </span>
                 </div>
 
